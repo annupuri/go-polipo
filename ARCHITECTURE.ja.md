@@ -35,7 +35,7 @@ Go言語版は、並行処理 (Goroutines) や標準ライブラリの利点を�
 
 ```mermaid
 graph TD
-    subgraph C言語版 Polipo (シングルスレッド)
+    subgraph c_polipo["C言語版 Polipo (シングルスレッド)"]
         A1[起動] --> A2[設定読み込み]
         A2 --> A3[ノンブロッキングソケット作成]
         A3 --> A4[メイン select/poll イベントループ]
@@ -44,7 +44,7 @@ graph TD
         A6 --> A4
     end
 
-    subgraph Go言語版 go-polipo (マルチスレッド / Goroutine)
+    subgraph go_polipo["Go言語版 go-polipo (マルチスレッド / Goroutine)"]
         B1[起動] --> B2[設定読み込み]
         B2 --> B3[http.ListenAndServe]
         B3 --> B4[リクエストごとに自動で Goroutine 生成]

@@ -38,7 +38,7 @@ record of the migration and the design decisions behind it.
 
 ```mermaid
 graph TD
-    subgraph C Polipo (single-threaded)
+    subgraph c_polipo["C Polipo (single-threaded)"]
         A1[Startup] --> A2[Load configuration]
         A2 --> A3[Create non-blocking sockets]
         A3 --> A4[Main select/poll event loop]
@@ -47,7 +47,7 @@ graph TD
         A6 --> A4
     end
 
-    subgraph Go go-polipo (multi-threaded / goroutines)
+    subgraph go_polipo["Go go-polipo (multi-threaded / goroutines)"]
         B1[Startup] --> B2[Load configuration]
         B2 --> B3[http.ListenAndServe]
         B3 --> B4[Goroutine spawned automatically per request]
