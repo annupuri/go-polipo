@@ -72,6 +72,11 @@ or, without `make`:
 
 Cross-compiling for Windows from Unix/Linux/macOS/WSL:
 
+    $ make build-windows                  # -> polipo.exe (amd64)
+    $ make build-windows WINARCH=arm64    # -> polipo.exe (arm64)
+
+or without `make`:
+
     $ GOOS=windows GOARCH=amd64 go build -o polipo.exe .
 
 Paths: unlike the C version, go-polipo follows the host's path conventions
