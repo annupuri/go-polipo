@@ -1,0 +1,157 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+)
+
+func usage(w io.Writer) {
+	fmt.Fprintf(w, "Usage of go-polipo:\n")
+	fmt.Fprintf(w, "  polipo [ -h ] [ -v ] [ -x ] [ -c filename ] [ -- ] [ var=val... ]\n")
+	fmt.Fprintf(w, "Options:\n")
+	fmt.Fprintf(w, "  -h            Display this message.\n")
+	fmt.Fprintf(w, "  -v            Display the list of configuration variables and version.\n")
+	fmt.Fprintf(w, "  -x            Perform expiry on the disk cache.\n")
+	fmt.Fprintf(w, "  -c filename   Specify the configuration file to use.\n")
+}
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run parses arguments, builds the configuration and either performs a
+// one-shot action (-h, -v, -x) or starts the proxy server. It returns the
+// process exit code. Splitting this out of main keeps the startup logic
+// testable without spawning a process.
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("go-polipo", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { usage(stderr) }
+
+	var (
+		help                 bool
+		showVersionAndConfig bool
+		expireCache          bool
+		configFile           string
+	)
+	fs.BoolVar(&help, "h", false, "display help")
+	fs.BoolVar(&showVersionAndConfig, "v", false, "show version and config variables")
+	fs.BoolVar(&expireCache, "x", false, "expire disk cache")
+	fs.StringVar(&configFile, "c", "", "config file path")
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if help {
+		usage(stdout)
+		return 0
+	}
+
+	config := NewDefaultConfig()
+
+	// Locate default config files if not specified.
+	if configFile == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			if p := filepath.Join(home, ".polipo"); fileExists(p) {
+				configFile = p
+			}
+		}
+		if configFile == "" && fileExists("/etc/polipo/config") {
+			configFile = "/etc/polipo/config"
+		}
+	}
+
+	if configFile != "" {
+		log.Printf("Loading config file: %s", configFile)
+		if err := config.LoadConfig(configFile); err != nil {
+			fmt.Fprintf(stderr, "Error loading config: %v\n", err)
+			return 1
+		}
+	}
+
+	// Parse remaining command line arguments like var=val.
+	for _, arg := range fs.Args() {
+		if strings.Contains(arg, "=") {
+			if err := config.ParseLine(arg); err != nil {
+				fmt.Fprintf(stderr, "Error parsing command line variable '%s': %v\n", arg, err)
+				return 1
+			}
+		}
+	}
+
+	if showVersionAndConfig {
+		printVersionAndConfig(stdout, config)
+		return 0
+	}
+
+	if expireCache {
+		cm := NewCacheManager(config)
+		stats, err := cm.Expire()
+		if err != nil {
+			fmt.Fprintf(stderr, "Disk cache expiry failed: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "Disk cache expiry complete: scanned %d, removed %d, freed %d bytes\n",
+			stats.Scanned, stats.Removed, stats.Freed)
+		return 0
+	}
+
+	return serve(config, stdout)
+}
+
+// serve builds the proxy handler and blocks serving requests until the
+// process receives SIGINT or SIGTERM.
+func serve(config *Config, stdout io.Writer) int {
+	forbidden := NewForbiddenList()
+	if err := forbidden.Load(config.ForbiddenFile); err != nil {
+		log.Printf("Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
+	}
+	uncachable := NewForbiddenList()
+	if err := uncachable.Load(config.UncachableFile); err != nil {
+		log.Printf("Warning: failed to load uncachable file %s: %v", config.UncachableFile, err)
+	}
+
+	cacheMgr := NewCacheManager(config)
+	handler := NewProxyHandler(config, cacheMgr, forbidden, uncachable)
+
+	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))
+	server := &http.Server{Addr: addr, Handler: handler}
+
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		<-sigChan
+		log.Println("Shutting down go-polipo...")
+		server.Close()
+	}()
+
+	fmt.Fprintf(stdout, "go-polipo version %s starting on http://%s\n", Version, addr)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("Server error: %v", err)
+		return 1
+	}
+	return 0
+}
+
+func printVersionAndConfig(w io.Writer, config *Config) {
+	fmt.Fprintf(w, "go-polipo version %s\n", Version)
+	fmt.Fprintln(w, "Configuration variables:")
+	for _, e := range config.Entries() {
+		fmt.Fprintf(w, "  %s = %s\n", e.Name, e.Value)
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}

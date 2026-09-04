@@ -1,3 +1,38 @@
+4 September 2026: go-polipo 2.0.0:
+
+  * Complete rewrite in Go (requires Go 1.26.8 or later), forked from
+    Polipo 1.1.1.  The single-threaded select/poll event loop is replaced
+    by goroutines and the net/http server; DNS, socket I/O, memory
+    management and the atom table are delegated to the Go runtime and
+    standard library.  See ARCHITECTURE.md for the C-to-Go file mapping.
+  * The on-disk cache format is unchanged: the directory layout and the
+    MD5 + custom-base64 file names are compatible with Polipo 1.x, so an
+    existing cache can be reused.
+  * "polipo -x" now performs disk cache expiry: it removes corrupt files,
+    entries that are stale by HTTP freshness rules, and entries not
+    accessed within diskCacheUnlinkTime (new configuration variable,
+    default 32 days), then prunes emptied directories.
+  * HTTP forwarding is built on net/http/httputil.ReverseProxy; hop-by-hop
+    headers are handled per RFC 7230.  CONNECT tunnelling and the
+    tunnelAllowedPorts filter are retained.
+  * Parent proxies: HTTP via parentProxy, SOCKS5 via socksParentProxy
+    (golang.org/x/net/proxy).
+  * Client access control (allowedClients) accepts bare IPs, CIDR ranges
+    and "all"; the check uses the real TCP peer address and ignores
+    forwarding headers.
+  * Incompatible changes from Polipo 1.x:
+      - Build system is "go build" / the provided Makefile; the autoconf
+        style options and PLATFORM_DEFINES are gone.
+      - Documentation is Markdown (README.md, README.ja.md, INSTALL.md);
+        the texinfo manual and generated HTML docs are removed.
+      - The Squid-style redirector, syslog logging, and the asynchronous
+        DNS resolver with its dnsNameServer* / dnsUseGethostbyname
+        tuning variables are removed.
+      - The local web interface is reduced to /polipo/ and /polipo/config.
+      - Many low-level tuning variables from Polipo 1.x (chunk/object
+        high marks, server slot counts, and similar) are no longer
+        recognised; unknown variables are ignored.
+
 Polipo 1.1.2 (unreleased):
 
   * Implemented support for SOCKS5 authenticatin (thanks to Amir Hossein
