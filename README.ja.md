@@ -63,3 +63,17 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
   ビルド」節を含みます)。
 - アーキテクチャの詳細と C から Go へのファイル対応表は `ARCHITECTURE.md` を
   参照してください。
+
+謝辞とライセンス
+----------------
+
+go-polipo は、Juliusz Chroboczek 氏らによるキャッシュ Web プロキシ
+**Polipo**(<https://github.com/jech/polipo>)の独立した Go 再実装です。
+オリジナルは開発を終了しています。go-polipo は Polipo のディスクキャッシュ
+形式と設定ファイル構文を引き継ぎ、Polipo 1.1.1 の Git 履歴を出発点として
+います。そのため、オリジナルの作者陣が本リポジトリの履歴および
+Contributors 一覧に含まれています。
+
+両プロジェクトとも MIT ライセンスで配布されています。`LICENSE`(履歴上の
+継続性のため残している `COPYING` と同一内容)を参照してください。Polipo の
+著作権表示はそのまま保持しています。

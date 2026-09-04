@@ -39,3 +39,17 @@ Documentation
 See `INSTALL.md` for building and installation instructions, including a
 "Building on Windows" section.
 For architecture details and C-to-Go file mapping, refer to `ARCHITECTURE.md`.
+
+Acknowledgements and license
+---------------------------
+
+go-polipo is an independent Go re-implementation of **Polipo**, the caching
+web proxy written by Juliusz Chroboczek and contributors
+(<https://github.com/jech/polipo>). The original is no longer maintained.
+go-polipo reuses Polipo's on-disk cache format and configuration-file syntax,
+and started from Polipo 1.1.1's Git history, so the original authors appear in
+this repository's history and contributor list.
+
+Both projects are distributed under the MIT license; see `LICENSE` (identical
+to `COPYING`, kept for historical continuity). Polipo's copyright notice is
+retained in full.
