@@ -90,4 +90,93 @@ configuration file are valid Windows paths, e.g. `C:\var\cache\polipo\`.
 Running at startup: build with `WINGUI=1` so no console window appears, set
 `logFile` in the configuration (a `-H windowsgui` build has no console for
 its log output), then register a Task Scheduler task with an "At log on"
-trigger pointing at `polipo.exe -c <config>`.
+trigger pointing at `polipo.exe -c <config>`. See section 6 below for the
+full, tested procedure.
+
+6. Running go-polipo at Windows startup
+----------------------------------------
+
+Recommended layout (per-user; no admin rights needed for the files
+themselves):
+
+    %LOCALAPPDATA%\Programs\go-polipo\polipo.exe    binary
+    %USERPROFILE%\.polipo                           config (auto-discovered)
+    %LOCALAPPDATA%\go-polipo\cache\                 diskCacheRoot
+    %LOCALAPPDATA%\go-polipo\polipo.log             logFile
+
+go-polipo creates `diskCacheRoot` itself on first use, but it does **not**
+create `logFile`'s parent directory, so create it once:
+
+    > mkdir "%LOCALAPPDATA%\go-polipo"
+
+Example `%USERPROFILE%\.polipo`:
+
+    proxyAddress = 127.0.0.1
+    proxyPort = 8123
+    diskCacheRoot = C:/Users/<you>/AppData/Local/go-polipo/cache
+    logFile = C:/Users/<you>/AppData/Local/go-polipo/polipo.log
+
+Build a console-free binary (see section 5) and copy it to
+`%LOCALAPPDATA%\Programs\go-polipo\polipo.exe`:
+
+    $ make build-windows WINGUI=1
+
+### Register a scheduled task (recommended)
+
+Run this in an **elevated** PowerShell — registering the task needs admin
+rights, but the task itself still runs under your normal, unprivileged
+account (`-RunLevel Limited`):
+
+    $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
+    $cfg = "$env:USERPROFILE\.polipo"
+
+    $action    = New-ScheduledTaskAction -Execute $exe -Argument "-c `"$cfg`"" -WorkingDirectory (Split-Path $exe)
+    $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $settings  = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -MultipleInstances IgnoreNew
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+
+    Register-ScheduledTask -TaskName "go-polipo" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
+
+If `Register-ScheduledTask` still fails with "Access is denied" after
+elevating, some managed/corporate machines block Task Scheduler entirely via
+policy; use the Startup-folder fallback below instead.
+
+### Verify it started
+
+    Start-ScheduledTask -TaskName "go-polipo"
+    Get-ScheduledTask -TaskName "go-polipo" | Get-ScheduledTaskInfo
+    Test-NetConnection 127.0.0.1 -Port 8123
+    Get-Content "$env:LOCALAPPDATA\go-polipo\polipo.log" -Tail 5
+
+`LastTaskResult` is a **Task Scheduler** status code, not go-polipo's exit
+code: `267009` (`0x41301`, "task is currently running") means it is up and
+healthy; `0` means it ran and exited cleanly (e.g. after `-h`/`-v`/`-x`). Any
+other small integer (`1`, `2`, ...) is go-polipo's own exit code — check the
+log file for the reason. `TcpTestSucceeded : True` confirms the proxy is
+listening, and the log should show a "starting on http://..." line.
+
+### Fallback: Startup-folder shortcut (no special permissions needed)
+
+    $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
+    $cfg = "$env:USERPROFILE\.polipo"
+    $startup = [Environment]::GetFolderPath('Startup')
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut("$startup\go-polipo.lnk")
+    $sc.TargetPath       = $exe
+    $sc.Arguments        = "-c `"$cfg`""
+    $sc.WorkingDirectory = Split-Path $exe
+    $sc.Save()
+
+This starts go-polipo at logon with no elevation and (with a `WINGUI=1`
+build) no console window, but without Task Scheduler's automatic restart on
+crash. Remove it with `Remove-Item "$startup\go-polipo.lnk"`.
+
+### Updating the binary
+
+Windows keeps a running executable locked, so stop go-polipo before
+overwriting it:
+
+    Stop-ScheduledTask -TaskName "go-polipo"
+    Get-Process polipo -ErrorAction SilentlyContinue | Stop-Process -Force
+    # copy the newly built polipo.exe into place, then:
+    Start-ScheduledTask -TaskName "go-polipo"
