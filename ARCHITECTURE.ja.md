@@ -33,23 +33,26 @@ Go言語版は、並行処理 (Goroutines) や標準ライブラリの利点を�
 
 ## ライフサイクルとスレッドモデルの比較
 
+### C言語版 Polipo (シングルスレッド)
+
 ```mermaid
 graph TD
-    subgraph c_polipo["C言語版 Polipo (シングルスレッド)"]
-        A1[起動] --> A2[設定読み込み]
-        A2 --> A3[ノンブロッキングソケット作成]
-        A3 --> A4[メイン select/poll イベントループ]
-        A4 --> A5[I/Oイベント検知]
-        A5 --> A6[コールバック処理 / 状態マシンの遷移]
-        A6 --> A4
-    end
+    A1[起動] --> A2[設定読み込み]
+    A2 --> A3[ノンブロッキングソケット作成]
+    A3 --> A4[メイン select/poll イベントループ]
+    A4 --> A5[I/Oイベント検知]
+    A5 --> A6[コールバック処理 / 状態マシンの遷移]
+    A6 --> A4
+```
 
-    subgraph go_polipo["Go言語版 go-polipo (マルチスレッド / Goroutine)"]
-        B1[起動] --> B2[設定読み込み]
-        B2 --> B3[http.ListenAndServe]
-        B3 --> B4[リクエストごとに自動で Goroutine 生成]
-        B4 --> B5[ProxyHandler.ServeHTTP]
-        B5 --> B6[キャッシュ / フィルタ / 転送]
-        B6 --> B7[クライアントへ応答]
-    end
+### Go言語版 go-polipo (マルチスレッド / Goroutine)
+
+```mermaid
+graph TD
+    B1[起動] --> B2[設定読み込み]
+    B2 --> B3[http.ListenAndServe]
+    B3 --> B4[リクエストごとに自動で Goroutine 生成]
+    B4 --> B5[ProxyHandler.ServeHTTP]
+    B5 --> B6[キャッシュ / フィルタ / 転送]
+    B6 --> B7[クライアントへ応答]
 ```

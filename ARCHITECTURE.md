@@ -36,23 +36,26 @@ record of the migration and the design decisions behind it.
 
 ## Lifecycle and threading model comparison
 
+### C Polipo (single-threaded)
+
 ```mermaid
 graph TD
-    subgraph c_polipo["C Polipo (single-threaded)"]
-        A1[Startup] --> A2[Load configuration]
-        A2 --> A3[Create non-blocking sockets]
-        A3 --> A4[Main select/poll event loop]
-        A4 --> A5[Detect I/O events]
-        A5 --> A6[Callback handling / state machine transitions]
-        A6 --> A4
-    end
+    A1[Startup] --> A2[Load configuration]
+    A2 --> A3[Create non-blocking sockets]
+    A3 --> A4[Main select/poll event loop]
+    A4 --> A5[Detect I/O events]
+    A5 --> A6[Callback handling / state machine transitions]
+    A6 --> A4
+```
 
-    subgraph go_polipo["Go go-polipo (multi-threaded / goroutines)"]
-        B1[Startup] --> B2[Load configuration]
-        B2 --> B3[http.ListenAndServe]
-        B3 --> B4[Goroutine spawned automatically per request]
-        B4 --> B5[ProxyHandler.ServeHTTP]
-        B5 --> B6[Cache / filter / forward]
-        B6 --> B7[Respond to client]
-    end
+### Go go-polipo (multi-threaded / goroutines)
+
+```mermaid
+graph TD
+    B1[Startup] --> B2[Load configuration]
+    B2 --> B3[http.ListenAndServe]
+    B3 --> B4[Goroutine spawned automatically per request]
+    B4 --> B5[ProxyHandler.ServeHTTP]
+    B5 --> B6[Cache / filter / forward]
+    B6 --> B7[Respond to client]
 ```
