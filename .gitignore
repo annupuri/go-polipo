@@ -1,8 +1,6 @@
+# build output: `make build` produces polipo/polipo.exe; a bare `go build`
+# produces one named after the module directory (go-polipo).
 polipo
-polipo\.exe
-core
-*.o
-polipo.html
-polipo.info
-html/
+polipo.exe
+go-polipo
 coverage.out

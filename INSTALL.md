@@ -51,7 +51,10 @@ You can also specify a custom configuration file path using the `-c` flag:
 
     $ ./polipo -c /path/to/config
 
-See the sampling of config variables inside `config.go` or access the local configuration page at `http://127.0.0.1:8123/polipo/config` while the proxy is running.
+`config.sample` lists the supported variables with their defaults. You can
+also see the effective configuration with `./polipo -v`, or open the local
+configuration page at `http://127.0.0.1:8123/polipo/config` while the proxy
+is running.
 
 5. Building on Windows
 ---------------------
@@ -65,15 +68,11 @@ Native build (PowerShell or Command Prompt, with Go installed):
 
 or, without `make`:
 
-    > go build -o polipo.exe main.go version.go config.go proxy.go cache.go forbidden.go
-
-(Use the file list rather than `go build .` while the original C sources are
-still present next to the Go files. The list matches `GOFILES` in the Makefile;
-once the C sources are removed, `go build .` works too.)
+    > go build -o polipo.exe .
 
 Cross-compiling for Windows from Unix/Linux/macOS/WSL:
 
-    $ GOOS=windows GOARCH=amd64 go build -o polipo.exe main.go version.go config.go proxy.go cache.go forbidden.go
+    $ GOOS=windows GOARCH=amd64 go build -o polipo.exe .
 
 Paths: unlike the C version, go-polipo follows the host's path conventions
 automatically. Make sure `diskCacheRoot` and any other paths in your
