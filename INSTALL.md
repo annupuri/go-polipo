@@ -1,6 +1,8 @@
 go-polipo (v2.0.0) Installation Instructions
 =============================================
 
+(日本語版は INSTALL.ja.md を参照してください / A Japanese version is available in INSTALL.ja.md)
+
 This is a Go-based implementation of the Polipo caching web proxy.
 
 1. Requirements
