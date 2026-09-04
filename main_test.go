@@ -125,6 +125,43 @@ func TestRunExpireMissingRoot(t *testing.T) {
 	}
 }
 
+func TestRunLogFileError(t *testing.T) {
+	// The parent directory does not exist, so opening the log file fails.
+	bad := filepath.Join(t.TempDir(), "no-such-dir", "polipo.log")
+	var out, errBuf bytes.Buffer
+	code := run([]string{"-c", emptyConfig(t), "logFile=" + bad}, &out, &errBuf)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(errBuf.String(), "Cannot open logFile") {
+		t.Errorf("stderr missing logFile error: %q", errBuf.String())
+	}
+}
+
+func TestRunLogFileWritten(t *testing.T) {
+	defer log.SetOutput(io.Discard) // run() restores os.Stderr; keep tests quiet
+
+	logPath := filepath.Join(t.TempDir(), "polipo.log")
+	var out, errBuf bytes.Buffer
+	// A bind address the host does not own makes serve() fail immediately, so
+	// run() returns right after wiring up the log file.
+	code := run([]string{
+		"-c", emptyConfig(t),
+		"logFile=" + logPath,
+		"proxyAddress=203.0.113.255", "proxyPort=19999",
+	}, &out, &errBuf)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (serve should fail to bind)", code)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("log file was not created: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("expected serve() to write its error line to the log file")
+	}
+}
+
 func TestFileExists(t *testing.T) {
 	if fileExists(filepath.Join(t.TempDir(), "nope")) {
 		t.Error("fileExists reported a missing file as present")

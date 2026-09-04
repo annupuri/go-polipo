@@ -55,3 +55,7 @@
 # maxConcurrentRequests = 100   # 0 = unlimited
 # disableLocalInterface = false # disables /polipo/ and /polipo/config
 # logLevel = 0x07
+
+# Redirect logs to a file instead of standard error.  Required for silent
+# background use on Windows (a "-H windowsgui" build has no console).
+# logFile = "C:/Users/you/AppData/Local/go-polipo/polipo.log"

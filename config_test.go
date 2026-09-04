@@ -147,6 +147,7 @@ func TestSetAllKeys(t *testing.T) {
 	ok("tunnelAllowedPorts", "443,563")
 	ok("allowedPorts", "80,443")
 	ok("logLevel", "0x0f")
+	ok("logFile", "/var/log/go-polipo.log")
 	ok("disableLocalInterface", "true")
 	ok("maxConcurrentRequests", "50")
 	ok("diskCacheUnlinkTime", "16d")
@@ -160,6 +161,9 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.SocksProxyType != "socks5" {
 		t.Errorf("socksProxyType not lowercased: %q", c.SocksProxyType)
+	}
+	if c.LogFile != "/var/log/go-polipo.log" {
+		t.Errorf("logFile not applied: %q", c.LogFile)
 	}
 	if !c.DisableLocalInterface {
 		t.Error(`disableLocalInterface "true" should be truthy`)

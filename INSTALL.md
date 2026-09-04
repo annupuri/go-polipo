@@ -74,11 +74,20 @@ Cross-compiling for Windows from Unix/Linux/macOS/WSL:
 
     $ make build-windows                  # -> polipo.exe (amd64)
     $ make build-windows WINARCH=arm64    # -> polipo.exe (arm64)
+    $ make build-windows WINGUI=1         # no console window on launch
 
 or without `make`:
 
     $ GOOS=windows GOARCH=amd64 go build -o polipo.exe .
 
+`make build` on WSL produces the native Linux `polipo`; use `build-windows`
+(or set `GOOS=windows`) to get `polipo.exe`.
+
 Paths: unlike the C version, go-polipo follows the host's path conventions
 automatically. Make sure `diskCacheRoot` and any other paths in your
 configuration file are valid Windows paths, e.g. `C:\var\cache\polipo\`.
+
+Running at startup: build with `WINGUI=1` so no console window appears, set
+`logFile` in the configuration (a `-H windowsgui` build has no console for
+its log output), then register a Task Scheduler task with an "At log on"
+trigger pointing at `polipo.exe -c <config>`.

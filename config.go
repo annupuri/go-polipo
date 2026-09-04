@@ -26,6 +26,10 @@ type Config struct {
 	DisableLocalInterface bool
 	MaxConcurrentRequests int
 
+	// LogFile, when non-empty, redirects log output to this file (created if
+	// missing, appended otherwise). Empty keeps logging on standard error.
+	LogFile string
+
 	// DiskCacheUnlinkTime is the maximum age (since last access) a cached
 	// file may reach before `-x` removes it, regardless of HTTP freshness.
 	DiskCacheUnlinkTime time.Duration
@@ -48,6 +52,7 @@ func NewDefaultConfig() *Config {
 		LogLevel:              0x07, // Default log level
 		DisableLocalInterface: false,
 		MaxConcurrentRequests: 100,
+		LogFile:               "",
 		DiskCacheUnlinkTime:   32 * 24 * time.Hour,
 	}
 }
@@ -77,6 +82,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{"tunnelAllowedPorts", joinInts(c.TunnelAllowedPorts)},
 		{"allowedPorts", joinInts(c.AllowedPorts)},
 		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
+		{"logFile", c.LogFile},
 		{"disableLocalInterface", strconv.FormatBool(c.DisableLocalInterface)},
 		{"maxConcurrentRequests", strconv.Itoa(c.MaxConcurrentRequests)},
 	}
@@ -190,6 +196,8 @@ func (c *Config) Set(key, val string) error {
 			return fmt.Errorf("invalid logLevel '%s': %w", val, err)
 		}
 		c.LogLevel = level
+	case "logFile":
+		c.LogFile = val
 	case "disableLocalInterface":
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
 	case "maxConcurrentRequests":

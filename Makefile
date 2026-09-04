@@ -7,8 +7,15 @@ ifeq ($(OS),Windows_NT)
     BINARY = polipo.exe
 endif
 
-# Target architecture for the `build-windows` cross-compile (amd64 or arm64).
+# `build-windows` options:
+#   WINARCH=amd64|arm64   target architecture (default amd64)
+#   WINGUI=1              GUI subsystem: no console window on launch. Pair it
+#                        with `logFile` in the config so output is not lost.
 WINARCH ?= amd64
+WINLDFLAGS =
+ifeq ($(WINGUI),1)
+    WINLDFLAGS = -ldflags "-H windowsgui"
+endif
 
 # Use the go in PATH; fall back to the asdf-managed toolchain under WSL.
 GO := $(shell which go 2>/dev/null)
@@ -25,7 +32,7 @@ build:
 
 # Cross-compile a Windows executable from any host (e.g. WSL or Linux CI).
 build-windows:
-	GOOS=windows GOARCH=$(WINARCH) $(GO) build -o polipo.exe .
+	GOOS=windows GOARCH=$(WINARCH) $(GO) build $(WINLDFLAGS) -o polipo.exe .
 
 test:
 	$(GO) test ./...

@@ -55,6 +55,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `allowedClients` | `127.0.0.1, ::1` | 接続を許可するクライアント (IP / CIDR / `all`) |
 | `tunnelAllowedPorts` | `443, 563` | CONNECT を許可するポート |
 | `maxConcurrentRequests` | `100` | 同時処理リクエスト数の上限 (0 で無制限) |
+| `logFile` | (なし) | ログの出力先ファイル。未指定なら標準エラー出力 |
 
 ドキュメント
 ------------

@@ -106,6 +106,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	// Redirect the logger to a file when asked. This matters for background
+	// use on Windows, where a -H windowsgui build has no console for stderr.
+	if config.LogFile != "" {
+		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			fmt.Fprintf(stderr, "Cannot open logFile %q: %v\n", config.LogFile, err)
+			return 1
+		}
+		defer func() {
+			log.SetOutput(os.Stderr)
+			f.Close()
+		}()
+		log.SetOutput(f)
+	}
+
 	return serve(config, stdout)
 }
 
