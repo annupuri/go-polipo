@@ -121,12 +121,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		log.SetOutput(f)
 	}
 
-	return serve(config, stdout)
+	return serve(config)
 }
 
 // serve builds the proxy handler and blocks serving requests until the
-// process receives SIGINT or SIGTERM.
-func serve(config *Config, stdout io.Writer) int {
+// process receives SIGINT or SIGTERM. All of its messages go through the log
+// package (respecting logFile), so headless deployments (e.g. a Windows Task
+// Scheduler entry with no console) still leave a record of whether the
+// server actually started.
+func serve(config *Config) int {
 	forbidden := NewForbiddenList()
 	if err := forbidden.Load(config.ForbiddenFile); err != nil {
 		log.Printf("Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
@@ -150,7 +153,7 @@ func serve(config *Config, stdout io.Writer) int {
 		server.Close()
 	}()
 
-	fmt.Fprintf(stdout, "go-polipo version %s starting on http://%s\n", Version, addr)
+	log.Printf("go-polipo version %s starting on http://%s", Version, addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Printf("Server error: %v", err)
 		return 1
