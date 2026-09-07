@@ -189,3 +189,37 @@ executable, not the console-less one. Closing that window sends it a close
 signal that terminates go-polipo along with it, which looks like "the proxy
 randomly stops working" with no error in the log. Rebuild with `WINGUI=1`
 (section 5) and repeat the steps above.
+
+7. Windows installer (optional)
+--------------------------------
+
+Sections 6 and "Updating the binary" above can be done by hand every time, or
+packaged into a one-time installer/uninstaller built with
+[Inno Setup](https://jrsoftware.org/isinfo.php). This is not distributed as a
+release asset - you build it yourself, locally, from `windows/polipo.iss`.
+
+Install Inno Setup once, then from the repo root:
+
+    $ make build-windows WINGUI=1
+    $ iscc windows/polipo.iss
+
+(`make installer` runs both steps.) This produces
+`windows/dist/go-polipo-setup.exe`. Running it (admin privileges are required,
+since registering the scheduled task needs them) does everything sections 4
+and 6 describe by hand:
+
+- deploys `polipo.exe` to `%LOCALAPPDATA%\Programs\go-polipo\`
+- creates `%USERPROFILE%\.polipo` from `config.sample` if one doesn't already
+  exist (an existing config is never overwritten)
+- registers and starts the `go-polipo` scheduled task from section 6
+
+Running the installer again (e.g. after rebuilding with a code change) stops
+the running task/process first, then overwrites the binary - the same
+`Stop-ScheduledTask` / `Stop-Process` sequence as manual updates, just
+automated. Uninstalling (via "Apps & features", or `unins000.exe` in the
+install directory) stops and removes the scheduled task and the binary; your
+config, disk cache, and log file are left in place.
+
+This installer path is optional and untested by the maintainers beyond a
+source review of `windows/polipo.iss` - the fully manual steps in sections 4
+and 6 remain the documented fallback if it misbehaves on your machine.

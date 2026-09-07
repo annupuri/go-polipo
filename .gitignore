@@ -4,3 +4,6 @@ polipo
 polipo.exe
 go-polipo
 coverage.out
+
+# Inno Setup output (built locally, see windows/polipo.iss).
+windows/dist/

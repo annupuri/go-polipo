@@ -23,7 +23,7 @@ ifeq ($(GO),)
     GO = $(shell echo ~/.asdf/installs/golang/1.26.8/go/bin/go)
 endif
 
-.PHONY: all build build-windows test cover vet fmt vulncheck clean install
+.PHONY: all build build-windows installer test cover vet fmt vulncheck clean install
 
 all: build
 
@@ -33,6 +33,13 @@ build:
 # Cross-compile a Windows executable from any host (e.g. WSL or Linux CI).
 build-windows:
 	GOOS=windows GOARCH=$(WINARCH) $(GO) build $(WINLDFLAGS) -o polipo.exe .
+
+# Build the Windows installer (windows/dist/go-polipo-setup.exe). Requires
+# Inno Setup's `iscc` on PATH; see windows/polipo.iss. Windows-only (or WSL
+# with Windows interop enabled), since Inno Setup itself does not run on Linux.
+installer:
+	$(MAKE) build-windows WINGUI=1
+	iscc windows/polipo.iss
 
 test:
 	$(GO) test ./...
