@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -69,6 +70,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		},
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("Proxy error: %s %s: %v", r.Method, r.URL, err)
 			http.Error(w, err.Error(), http.StatusBadGateway)
 		},
 	}
@@ -151,14 +153,9 @@ func normalizeProxyURL(raw string) (*url.URL, error) {
 
 // ServeHTTP handles HTTP proxy requests.
 func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// Limit concurrent requests
-	if ph.semaphore != nil {
-		ph.semaphore <- struct{}{}
-		defer func() { <-ph.semaphore }()
-	}
-
 	// 1. Allowed Clients verification
 	if !ph.isClientAllowed(req.RemoteAddr) {
+		log.Printf("Denied: client %s not allowed", req.RemoteAddr)
 		http.Error(w, "Access Denied: Client IP not allowed", http.StatusForbidden)
 		return
 	}
@@ -170,14 +167,25 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 2. Forbidden URL verification
-	if ph.forbidden.Match(targetURL(req), req.Host) {
+	if url := targetURL(req); ph.forbidden.Match(url, req.Host) {
+		log.Printf("Denied: %s is blacklisted", url)
 		http.Error(w, "Forbidden: URL is blacklisted", http.StatusForbidden)
 		return
 	}
 
 	if req.Method == http.MethodConnect {
+		// CONNECT tunnels can stay open for as long as the underlying HTTPS
+		// connection is in use (streaming, websockets, keep-alive), so they must
+		// not hold a MaxConcurrentRequests slot for their whole lifetime - that
+		// would starve unrelated requests once enough tunnels are open at once.
 		ph.handleConnect(w, req)
 		return
+	}
+
+	// Limit concurrent requests (CONNECT tunnels are excluded, see above).
+	if ph.semaphore != nil {
+		ph.semaphore <- struct{}{}
+		defer func() { <-ph.semaphore }()
 	}
 
 	ph.handleForward(w, req)
@@ -274,17 +282,20 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// CONNECT port verification
 	_, portStr, err := net.SplitHostPort(req.RequestURI)
 	if err != nil {
+		log.Printf("CONNECT rejected: invalid host %q: %v", req.RequestURI, err)
 		http.Error(w, "Invalid CONNECT host", http.StatusBadRequest)
 		return
 	}
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
+		log.Printf("CONNECT rejected: invalid port %q: %v", portStr, err)
 		http.Error(w, "Invalid CONNECT port", http.StatusBadRequest)
 		return
 	}
 
 	if !portAllowed(ph.config.TunnelAllowedPorts, port) {
+		log.Printf("CONNECT rejected: port %d not allowed (target=%s)", port, req.RequestURI)
 		http.Error(w, "CONNECT port not allowed", http.StatusForbidden)
 		return
 	}
@@ -292,12 +303,14 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// Hijack client connection
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
+		log.Printf("CONNECT failed: hijacking not supported (target=%s)", req.RequestURI)
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
+		log.Printf("CONNECT failed: hijack error (target=%s): %v", req.RequestURI, err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -306,6 +319,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// Dial target server (via SOCKS if configured)
 	destConn, err := ph.dialContext(req.Context(), "tcp", req.RequestURI)
 	if err != nil {
+		log.Printf("CONNECT failed: dial %s: %v", req.RequestURI, err)
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
@@ -315,12 +329,36 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	tunnel(clientConn, destConn)
 }
 
-// tunnel copies bytes in both directions until either side closes.
+// halfCloser is implemented by net.Conn types (notably *net.TCPConn) that can
+// close just the write half, signalling EOF to the peer while still letting
+// the other direction finish delivering data already in flight.
+type halfCloser interface {
+	CloseWrite() error
+}
+
+// tunnel copies bytes in both directions until both sides are done. A single
+// tunnel often multiplexes many logical requests (HTTP/2 over one CONNECT),
+// so it must not close either connection until BOTH directions have finished;
+// closing after just the first direction's EOF would cut off any other
+// in-flight exchange sharing the connection.
 func tunnel(a, b net.Conn) {
-	done := make(chan struct{}, 2)
-	go func() { io.Copy(a, b); done <- struct{}{} }()
-	go func() { io.Copy(b, a); done <- struct{}{} }()
-	<-done
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		io.Copy(a, b)
+		if hc, ok := a.(halfCloser); ok {
+			hc.CloseWrite()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		io.Copy(b, a)
+		if hc, ok := b.(halfCloser); ok {
+			hc.CloseWrite()
+		}
+	}()
+	wg.Wait()
 }
 
 func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) {

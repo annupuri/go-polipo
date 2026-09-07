@@ -156,3 +156,5 @@ Windows は実行中の実行ファイルをロックするため、上書きす
     Get-Process polipo -ErrorAction SilentlyContinue | Stop-Process -Force
     # 新しくビルドした polipo.exe を配置場所に上書きコピーしてから:
     Start-ScheduledTask -TaskName "go-polipo"
+
+タスク開始時にコンソール窓が表示される場合、配置した polipo.exe に `WINGUI=1` を付け忘れてビルドした、通常のコンソール版になっています。その窓を閉じると、閉じた通知を受けて go-polipo 自体も道連れで終了してしまい、ログにエラーは残らないまま「プロキシが突然使えなくなる」症状として現れます。セクション 5 の `WINGUI=1` でビルドし直し、上記の手順で入れ替えてください。

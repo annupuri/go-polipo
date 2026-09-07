@@ -182,3 +182,10 @@ overwriting it:
     Get-Process polipo -ErrorAction SilentlyContinue | Stop-Process -Force
     # copy the newly built polipo.exe into place, then:
     Start-ScheduledTask -TaskName "go-polipo"
+
+If a console window pops up when the task starts, the binary you just built
+and copied in is missing `WINGUI=1` - it's a regular console-subsystem
+executable, not the console-less one. Closing that window sends it a close
+signal that terminates go-polipo along with it, which looks like "the proxy
+randomly stops working" with no error in the log. Rebuild with `WINGUI=1`
+(section 5) and repeat the steps above.
