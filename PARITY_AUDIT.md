@@ -219,6 +219,14 @@ at the end groups findings by how much they matter before a public release.
 - `forbiddenTunnelsFile` (§4) — per-host CONNECT blocklist.
 - On-disk size cap `maxDiskCacheEntrySize` / truncation (§11) — unbounded growth
   between `-x` runs.
+- `Vary` matching, Polipo-style (§9) — A.3 made `Vary` responses safe by not
+  caching them at all; the follow-up is to store the request's Vary-named header
+  values with the entry (one added `X-Polipo-Vary` metadata header, cache stays
+  one file per URL) and compare on lookup, so `Vary: Accept-Encoding` responses
+  become cacheable again. ~80–140 LoC in `cache.go`; the risk is in normalising
+  header values (token-set compare for `Accept-Encoding`, the "no header" case
+  that Go's transport rewrites). A per-URL multi-variant store is explicitly out
+  of scope — more bookkeeping and an on-disk format break.
 - `/polipo/status?` with a cache-flush action (§13) — cheap observability +
   operability win for a long-running proxy.
 
