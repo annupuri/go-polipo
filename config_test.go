@@ -103,19 +103,25 @@ func TestSet(t *testing.T) {
 		t.Errorf("allowedClients mismatch (-want +got):\n%s", diff)
 	}
 
-	// Test int list
+	// Test port list (single ports and ranges)
 	err = c.Set("tunnelAllowedPorts", "443, 80, 8080")
 	if err != nil {
 		t.Fatalf("Set tunnelAllowedPorts failed: %v", err)
 	}
-	if diff := cmp.Diff([]int{443, 80, 8080}, c.TunnelAllowedPorts); diff != "" {
-		t.Errorf("tunnelAllowedPorts mismatch (-want +got):\n%s", diff)
+	if got := c.TunnelAllowedPorts.String(); got != "443, 80, 8080" {
+		t.Errorf("tunnelAllowedPorts = %q, want %q", got, "443, 80, 8080")
+	}
+	if err := c.Set("allowedPorts", "80-100, 1024-65535"); err != nil {
+		t.Fatalf("Set allowedPorts range failed: %v", err)
+	}
+	if got := c.AllowedPorts.String(); got != "80-100, 1024-65535" {
+		t.Errorf("allowedPorts = %q, want %q", got, "80-100, 1024-65535")
 	}
 
-	// Test invalid int list
+	// Test invalid port list
 	err = c.Set("tunnelAllowedPorts", "443, abc")
 	if err == nil {
-		t.Error("expected error for invalid int list")
+		t.Error("expected error for invalid port list")
 	}
 
 	// Test log level parsing (hex/octal/decimal)
@@ -290,6 +296,52 @@ func TestParseDuration(t *testing.T) {
 		}
 		if err == nil && got != tt.expected {
 			t.Errorf("parseDuration(%q) = %v, expected %v", tt.val, got, tt.expected)
+		}
+	}
+}
+
+func TestParsePortSet(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    string // PortSet.String()
+		wantErr bool
+	}{
+		{"", "", false},
+		{"80", "80", false},
+		{"80, 443, 8080", "80, 443, 8080", false},
+		{"80-100", "80-100", false},
+		{"80-100, 1024-65535", "80-100, 1024-65535", false},
+		{"-100", "1-100", false},       // open low end
+		{"1024-", "1024-65535", false}, // open high end
+		{" 80 , 90 ", "80, 90", false}, // whitespace tolerated
+		{"abc", "", true},
+		{"70000", "", true},  // above 65535
+		{"0", "", true},      // below 1
+		{"100-80", "", true}, // reversed
+		{"80-90-100", "", true},
+	}
+	for _, tt := range tests {
+		got, err := parsePortSet(tt.in)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("parsePortSet(%q) err = %v, wantErr %v", tt.in, err, tt.wantErr)
+			continue
+		}
+		if err == nil && got.String() != tt.want {
+			t.Errorf("parsePortSet(%q) = %q, want %q", tt.in, got.String(), tt.want)
+		}
+	}
+}
+
+func TestDefaultAllowedPorts(t *testing.T) {
+	c := NewDefaultConfig()
+	for _, p := range []int{80, 100, 1024, 8080, 65535} {
+		if !c.AllowedPorts.Contains(p) {
+			t.Errorf("default allowedPorts should contain %d", p)
+		}
+	}
+	for _, p := range []int{25, 110, 119, 143, 443, 563, 1023} {
+		if c.AllowedPorts.Contains(p) {
+			t.Errorf("default allowedPorts should not contain %d", p)
 		}
 	}
 }

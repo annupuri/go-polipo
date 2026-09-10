@@ -24,6 +24,12 @@
   * HTTP forwarding is built on net/http/httputil.ReverseProxy; hop-by-hop
     headers are handled per RFC 7230.  CONNECT tunnelling and the
     tunnelAllowedPorts filter are retained.
+  * The allowedPorts filter is now enforced on plain-HTTP forwarding, not
+    merely parsed: a request whose target port is not in allowedPorts is
+    rejected with 403.  The default is Polipo's (80-100 and 1024-65535), so
+    privileged service ports such as 25, 110, 119 and 143 can no longer be
+    reached through the proxy.  Both allowedPorts and tunnelAllowedPorts now
+    accept Polipo's "lo-hi" range syntax.
   * Parent proxies: HTTP via parentProxy, SOCKS5 via socksParentProxy
     (golang.org/x/net/proxy).
   * Client access control (allowedClients) accepts bare IPs, CIDR ranges

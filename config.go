@@ -20,8 +20,8 @@ type Config struct {
 	SocksProxyType        string // "socks5" or "socks4a"
 	ParentProxy           string
 	AllowedClients        []string
-	TunnelAllowedPorts    []int
-	AllowedPorts          []int
+	TunnelAllowedPorts    PortSet
+	AllowedPorts          PortSet
 	LogLevel              int
 	DisableLocalInterface bool
 	MaxConcurrentRequests int
@@ -56,9 +56,9 @@ func NewDefaultConfig() *Config {
 		SocksProxyType:        "socks5",
 		ParentProxy:           "",
 		AllowedClients:        []string{"127.0.0.1", "::1"},
-		TunnelAllowedPorts:    []int{443, 563},
-		AllowedPorts:          []int{80, 443, 563, 8080},
-		LogLevel:              0x07, // Default log level
+		TunnelAllowedPorts:    PortSet{{443, 443}, {563, 563}},
+		AllowedPorts:          PortSet{{80, 100}, {1024, 65535}}, // Polipo's default: HTTP ports + all unprivileged ports
+		LogLevel:              0x07,                              // Default log level
 		DisableLocalInterface: false,
 		MaxConcurrentRequests: 100,
 		LogFile:               "",
@@ -92,8 +92,8 @@ func (c *Config) Entries() []ConfigEntry {
 		{"socksProxyType", c.SocksProxyType},
 		{"parentProxy", c.ParentProxy},
 		{"allowedClients", strings.Join(c.AllowedClients, ", ")},
-		{"tunnelAllowedPorts", joinInts(c.TunnelAllowedPorts)},
-		{"allowedPorts", joinInts(c.AllowedPorts)},
+		{"tunnelAllowedPorts", c.TunnelAllowedPorts.String()},
+		{"allowedPorts", c.AllowedPorts.String()},
 		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
 		{"logFile", c.LogFile},
 		{"disableLocalInterface", strconv.FormatBool(c.DisableLocalInterface)},
@@ -101,12 +101,79 @@ func (c *Config) Entries() []ConfigEntry {
 	}
 }
 
-func joinInts(nums []int) string {
-	parts := make([]string, len(nums))
-	for i, n := range nums {
-		parts[i] = strconv.Itoa(n)
+// PortSet is a set of allowed TCP ports expressed as inclusive ranges, so
+// Polipo's "1024-65535" syntax need not expand into tens of thousands of
+// integers. A nil PortSet allows nothing.
+type PortSet []portRange
+
+type portRange struct{ lo, hi int }
+
+// Contains reports whether port falls in any range of the set.
+func (ps PortSet) Contains(port int) bool {
+	for _, r := range ps {
+		if port >= r.lo && port <= r.hi {
+			return true
+		}
+	}
+	return false
+}
+
+// String renders the set the way it would appear in a config file: single
+// ports as "n", ranges as "lo-hi", joined by ", ".
+func (ps PortSet) String() string {
+	parts := make([]string, len(ps))
+	for i, r := range ps {
+		if r.lo == r.hi {
+			parts[i] = strconv.Itoa(r.lo)
+		} else {
+			parts[i] = strconv.Itoa(r.lo) + "-" + strconv.Itoa(r.hi)
+		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// parsePortSet parses Polipo's port-list syntax: a comma-separated list of
+// single ports ("80") and inclusive ranges ("1024-65535"). An open low end
+// ("-100") starts at 1; an open high end ("1024-") ends at 65535. Empty input
+// yields a nil set (allows nothing).
+func parsePortSet(val string) (PortSet, error) {
+	var set PortSet
+	for _, field := range strings.Split(val, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+
+		loStr, hiStr, isRange := strings.Cut(field, "-")
+		loStr, hiStr = strings.TrimSpace(loStr), strings.TrimSpace(hiStr)
+
+		lo := 1
+		if loStr != "" {
+			n, err := strconv.Atoi(loStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid port %q: %w", loStr, err)
+			}
+			lo = n
+		}
+
+		hi := lo
+		if isRange {
+			hi = 65535
+			if hiStr != "" {
+				n, err := strconv.Atoi(hiStr)
+				if err != nil {
+					return nil, fmt.Errorf("invalid port %q: %w", hiStr, err)
+				}
+				hi = n
+			}
+		}
+
+		if lo < 1 || hi > 65535 || lo > hi {
+			return nil, fmt.Errorf("port range %q outside 1-65535 or reversed", field)
+		}
+		set = append(set, portRange{lo, hi})
+	}
+	return set, nil
 }
 
 // LoadConfig parses the given configuration file path and applies settings.
@@ -192,13 +259,13 @@ func (c *Config) Set(key, val string) error {
 	case "allowedClients":
 		c.AllowedClients = parseStringList(val)
 	case "tunnelAllowedPorts":
-		ports, err := parseIntList(val)
+		ports, err := parsePortSet(val)
 		if err != nil {
 			return fmt.Errorf("invalid tunnelAllowedPorts '%s': %w", val, err)
 		}
 		c.TunnelAllowedPorts = ports
 	case "allowedPorts":
-		ports, err := parseIntList(val)
+		ports, err := parsePortSet(val)
 		if err != nil {
 			return fmt.Errorf("invalid allowedPorts '%s': %w", val, err)
 		}
@@ -246,23 +313,6 @@ func parseStringList(val string) []string {
 		}
 	}
 	return res
-}
-
-func parseIntList(val string) ([]int, error) {
-	parts := strings.Split(val, ",")
-	var res []int
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed == "" {
-			continue
-		}
-		num, err := strconv.Atoi(trimmed)
-		if err != nil {
-			return nil, err
-		}
-		res = append(res, num)
-	}
-	return res, nil
 }
 
 func parseLevel(val string) (int, error) {

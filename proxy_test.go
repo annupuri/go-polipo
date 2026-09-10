@@ -164,7 +164,7 @@ func TestProxyHandleForward(t *testing.T) {
 
 func TestProxyHandleConnectInvalidPort(t *testing.T) {
 	cfg := NewDefaultConfig()
-	cfg.TunnelAllowedPorts = []int{443} // only allow 443
+	cfg.TunnelAllowedPorts = PortSet{{443, 443}} // only allow 443
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
@@ -214,7 +214,7 @@ func TestProxyAllowedClientsCIDR(t *testing.T) {
 
 func TestProxyConnectFailureCases(t *testing.T) {
 	cfg := NewDefaultConfig()
-	cfg.TunnelAllowedPorts = []int{443}
+	cfg.TunnelAllowedPorts = PortSet{{443, 443}}
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
@@ -256,7 +256,7 @@ func TestProxyConnectFailureCases(t *testing.T) {
 
 func TestProxyForbiddenConnect(t *testing.T) {
 	cfg := NewDefaultConfig()
-	cfg.TunnelAllowedPorts = []int{443}
+	cfg.TunnelAllowedPorts = PortSet{{443, 443}}
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	forbidden.Domains = []string{"badsite.com"}
@@ -274,16 +274,16 @@ func TestProxyForbiddenConnect(t *testing.T) {
 	}
 }
 
-func TestPortAllowed(t *testing.T) {
-	ports := []int{80, 443, 8080}
-	for _, p := range []int{80, 443, 8080} {
-		if !portAllowed(ports, p) {
-			t.Errorf("portAllowed(%d) = false, want true", p)
+func TestPortSetContains(t *testing.T) {
+	set := PortSet{{80, 100}, {8080, 8080}}
+	for _, p := range []int{80, 90, 100, 8080} {
+		if !set.Contains(p) {
+			t.Errorf("Contains(%d) = false, want true", p)
 		}
 	}
-	for _, p := range []int{0, 22, 8443} {
-		if portAllowed(ports, p) {
-			t.Errorf("portAllowed(%d) = true, want false", p)
+	for _, p := range []int{0, 22, 79, 101, 8443} {
+		if set.Contains(p) {
+			t.Errorf("Contains(%d) = true, want false", p)
 		}
 	}
 }
@@ -482,12 +482,26 @@ func TestProxyForwardUncachable(t *testing.T) {
 
 func TestProxyForwardRoundTripError(t *testing.T) {
 	ph := newTestHandler(NewDefaultConfig())
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil) // nothing listening
+	// Port 9999 is in the default allowedPorts range but nothing listens there.
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9999/", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 	ph.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", rr.Code)
+	}
+}
+
+func TestProxyForwardPortNotAllowed(t *testing.T) {
+	ph := newTestHandler(NewDefaultConfig())
+	// Port 25 (SMTP) is outside the default allowedPorts: the proxy must not
+	// open the connection, so this never reaches a backend.
+	req := httptest.NewRequest(http.MethodGet, "http://example.com:25/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
 	}
 }
 
@@ -511,7 +525,7 @@ func TestProxyConnectTunnel(t *testing.T) {
 	port, _ := strconv.Atoi(portStr)
 
 	cfg := NewDefaultConfig()
-	cfg.TunnelAllowedPorts = []int{port}
+	cfg.TunnelAllowedPorts = PortSet{{port, port}}
 	proxySrv := httptest.NewServer(newTestHandler(cfg))
 	defer proxySrv.Close()
 
@@ -553,7 +567,7 @@ func TestProxyConnectTunnel(t *testing.T) {
 
 func TestProxyConnectDialFailure(t *testing.T) {
 	cfg := NewDefaultConfig()
-	cfg.TunnelAllowedPorts = []int{1}
+	cfg.TunnelAllowedPorts = PortSet{{1, 1}}
 	proxySrv := httptest.NewServer(newTestHandler(cfg))
 	defer proxySrv.Close()
 

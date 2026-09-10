@@ -268,14 +268,29 @@ func (ph *ProxyHandler) isClientAllowed(remoteAddr string) bool {
 	return false
 }
 
-// portAllowed reports whether port is present in the list.
-func portAllowed(ports []int, port int) bool {
-	for _, p := range ports {
-		if p == port {
-			return true
+// requestPort returns the TCP port a forwarded (non-CONNECT) request targets.
+// It prefers the explicit port in the request authority and otherwise uses the
+// default for the URL scheme. It returns -1 when a port is present but not a
+// number, so an unparseable target fails the allowedPorts check.
+func requestPort(req *http.Request) int {
+	portStr := req.URL.Port()
+	if portStr == "" && req.URL.Host == "" {
+		// Origin-form target (relative URL + Host header).
+		if _, p, err := net.SplitHostPort(req.Host); err == nil {
+			portStr = p
 		}
 	}
-	return false
+	if portStr != "" {
+		n, err := strconv.Atoi(portStr)
+		if err != nil {
+			return -1
+		}
+		return n
+	}
+	if strings.EqualFold(req.URL.Scheme, "https") {
+		return 443
+	}
+	return 80
 }
 
 func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) {
@@ -294,7 +309,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	if !portAllowed(ph.config.TunnelAllowedPorts, port) {
+	if !ph.config.TunnelAllowedPorts.Contains(port) {
 		log.Printf("CONNECT rejected: port %d not allowed (target=%s)", port, req.RequestURI)
 		http.Error(w, "CONNECT port not allowed", http.StatusForbidden)
 		return
@@ -362,6 +377,15 @@ func tunnel(a, b net.Conn) {
 }
 
 func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) {
+	// Refuse to forward to a port outside allowedPorts. Without this the proxy
+	// can be driven to arbitrary TCP services (SMTP relay, SSRF to internal
+	// ports). CONNECT is filtered separately by tunnelAllowedPorts.
+	if port := requestPort(req); !ph.config.AllowedPorts.Contains(port) {
+		log.Printf("Denied: port %d not in allowedPorts (target=%s)", port, req.URL)
+		http.Error(w, "Forbidden: target port not allowed", http.StatusForbidden)
+		return
+	}
+
 	// A fresh cache hit is served straight from disk.
 	if cachedResp := ph.cacheManager.Lookup(req); cachedResp != nil {
 		defer cachedResp.Body.Close()

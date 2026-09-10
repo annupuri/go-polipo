@@ -49,7 +49,7 @@ at the end groups findings by how much they matter before a public release.
 | :--- | :--- | :--: | :--- |
 | `proxyOutgoingAddress` | OS default | ❌ | Cannot bind the upstream socket to a chosen source address (multi-homed hosts). |
 | `useTemporarySourceAddress` | `maybe` | 🔷 | RFC 3041 temp IPv6 source selection — left to the OS. |
-| `allowedPorts` | `80-100, 1024-65535` | ⚠️ | **Parsed, stored, shown in `-v`, but never enforced.** `portAllowed()` is only consulted for CONNECT (`tunnelAllowedPorts`). Plain `http://host:25/` style requests are forwarded unchecked — the proxy can be driven to arbitrary TCP ports (SMTP relay / SSRF to internal services). Polipo's default range deliberately excludes 25, 111, 119, … Also: `parseIntList` only accepts comma lists, not Polipo's `1024-65535` range syntax, and the go-polipo default (`80,443,563,8080`) is much narrower than Polipo's. |
+| `allowedPorts` | `80-100, 1024-65535` | ✅ | **Enforced (resolved 2026-09-11).** `handleForward` derives the target port (`requestPort`) and rejects any not in `AllowedPorts` (`PortSet.Contains`) with a `403`, before the cache lookup or any upstream dial. The default now matches Polipo (`80-100, 1024-65535`), so privileged ports other than 80–100 (25, 110, 119, 143, …) are refused. `parsePortSet` accepts Polipo's `lo-hi` range syntax (open ends too: `-100`, `1024-`). CONNECT is still filtered by `tunnelAllowedPorts` only, as in Polipo — the two lists are not combined. |
 
 ## 4. URL filtering & redirection
 
@@ -186,11 +186,11 @@ at the end groups findings by how much they matter before a public release.
 
 ### A. Correctness / safety — look at before going public
 
-1. **`allowedPorts` is a dead knob (§3).** Either enforce it on the forward
-   path (and CONNECT), or remove it from `Config`/`-v` so nobody believes the
-   proxy is port-restricted when it is not. Also decide whether to support
-   Polipo's `lo-hi` range syntax. *Abuse surface: open relay to arbitrary TCP
-   ports.*
+1. ~~**`allowedPorts` is a dead knob (§3).**~~ **Done (2026-09-11):** enforced
+   on the forward path with a `403`; default restored to Polipo's
+   `80-100, 1024-65535`; `lo-hi` range syntax supported. CONNECT stays on
+   `tunnelAllowedPorts` alone, matching Polipo. *Abuse surface closed: no more
+   open relay to arbitrary TCP ports.*
 2. **`socksProxyType` is a dead knob (§5).** Implement `socks4a` or drop the
    variable; today `socks4a` in a config is silently SOCKS5.
 3. **No `Vary` handling (§9).** Minimum viable fix: refuse to cache a response
