@@ -18,9 +18,12 @@
     Responses to requests carrying Authorization or Proxy-Authorization
     are not cached unless the response is explicitly shareable
     (Cache-Control: public, s-maxage, or must-revalidate), per RFC 9111
-    section 3.5.  The disk cache can be disabled entirely with the new
-    noDiskCache variable, or by setting diskCacheRoot to the empty string
-    (which previously misbehaved).
+    section 3.5.  Responses that carry a Vary header are not cached at all
+    (and any such entry in an inherited cache tree is ignored): the cache
+    is keyed on the URL alone and cannot select between variants, so this
+    avoids serving the wrong one.  The disk cache can be disabled entirely
+    with the new noDiskCache variable, or by setting diskCacheRoot to the
+    empty string (which previously misbehaved).
   * HTTP forwarding is built on net/http/httputil.ReverseProxy; hop-by-hop
     headers are handled per RFC 7230.  CONNECT tunnelling and the
     tunnelAllowedPorts filter are retained.

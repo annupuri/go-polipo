@@ -46,6 +46,15 @@ func requestIsAuthenticated(req *http.Request) bool {
 		req.Header.Get("Proxy-Authorization") != ""
 }
 
+// responseVaries reports whether resp's body depends on request headers (a
+// non-empty Vary). go-polipo keys the cache on the URL alone, so it cannot tell
+// which stored variant matches a later request; such responses are neither
+// written to the cache nor served from it. (RFC 9111 section 4.1 requires a
+// cache to match the nominated request headers before reusing a Vary response.)
+func responseVaries(resp *http.Response) bool {
+	return strings.TrimSpace(resp.Header.Get("Vary")) != ""
+}
+
 // cacheControlAllowsAuthenticated reports whether a response Cache-Control value
 // carries a directive that, per RFC 9111 section 3.5 (RFC 2616 section 14.8),
 // lets a shared cache store the response to an authenticated request.
@@ -150,6 +159,16 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 		return nil
 	}
 
+	// A stored response carrying Vary cannot be matched against this request's
+	// headers (the cache key is the URL alone), so serving it risks handing back
+	// the wrong variant. Store skips these, but a cache tree written by Polipo or
+	// an older go-polipo may still contain them.
+	if responseVaries(resp) {
+		resp.Body.Close()
+		file.Close()
+		return nil
+	}
+
 	// Check expiration
 	if cm.isExpired(resp) {
 		resp.Body.Close()
@@ -223,6 +242,15 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	// Cache-Control checks
 	cc := resp.Header.Get("Cache-Control")
 	if strings.Contains(cc, "no-store") || strings.Contains(cc, "private") {
+		return nil
+	}
+
+	// go-polipo's cache key is the URL alone, so it cannot store more than one
+	// variant per URL or pick between them. Caching a Vary response would let a
+	// later client be served a variant selected for someone else (a gzipped body
+	// to a client that did not offer gzip, a French page to an English one). Skip
+	// them; they are still forwarded, just not cached.
+	if responseVaries(resp) {
 		return nil
 	}
 

@@ -323,6 +323,39 @@ func TestStoreSkipsSetCookie(t *testing.T) {
 	}
 }
 
+func TestStoreSkipsVary(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+
+	// Every non-empty Vary is skipped: the URL-only cache key cannot pick the
+	// right variant for a later request.
+	for _, vary := range []string{"Accept-Encoding", "Accept-Language", "*", "  User-Agent  "} {
+		url := "http://example.com/vary/" + strings.ReplaceAll(strings.TrimSpace(vary), " ", "_")
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		resp := mkResp("variant", "Cache-Control", "max-age=3600", "Vary", vary)
+		if err := cm.Store(req, resp); err != nil {
+			t.Fatalf("Store(Vary: %q): %v", vary, err)
+		}
+		if got, _ := io.ReadAll(resp.Body); string(got) != "variant" {
+			t.Errorf("Vary: %q: body not preserved, got %q", vary, got)
+		}
+		if fileExistsForURL(t, cm, url) {
+			t.Errorf("Vary: %q response should not be cached", vary)
+		}
+	}
+
+	// An empty Vary value is treated as absent: still cacheable.
+	url := "http://example.com/vary/empty"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600", "Vary", "")); err != nil {
+		t.Fatalf("Store(empty Vary): %v", err)
+	}
+	if !fileExistsForURL(t, cm, url) {
+		t.Error("a response with an empty Vary should still be cached")
+	}
+}
+
 func TestStoreSkipsAuthenticated(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = t.TempDir()
@@ -522,6 +555,31 @@ func TestCacheLookupRejections(t *testing.T) {
 	if got := cm.Lookup(httptest.NewRequest(http.MethodGet, "http://absent.example.com/", nil)); got != nil {
 		got.Body.Close()
 		t.Error("Lookup should return nil on a cache miss")
+	}
+
+	// 5. Entry carrying Vary (e.g. written by Polipo or an older go-polipo):
+	// cannot be matched to the request, so it must not be served.
+	urlV := "http://vary.example.com/v"
+	pV, _ := cm.GetCachePath(urlV)
+	os.MkdirAll(filepath.Dir(pV), 0700)
+	varied := &http.Response{
+		StatusCode: 200, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+		Header: http.Header{}, Body: io.NopCloser(strings.NewReader("v")),
+		ContentLength: 1,
+	}
+	varied.Header.Set("X-Polipo-Location", urlV)
+	varied.Header.Set("Cache-Control", "max-age=3600")
+	varied.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
+	varied.Header.Set("Vary", "Accept-Encoding")
+	fV, err := os.Create(pV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	varied.Write(fV)
+	fV.Close()
+	if got := cm.Lookup(httptest.NewRequest(http.MethodGet, urlV, nil)); got != nil {
+		got.Body.Close()
+		t.Error("Lookup should reject a cached entry that carries Vary")
 	}
 }
 

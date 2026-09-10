@@ -112,8 +112,8 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable / feature | Polipo default | Status | Note |
 | :--- | :--- | :--: | :--- |
-| `Vary` handling | — | ❌ | **Not implemented.** Cache key is the URL alone (`md5(url)`). A `Vary: Accept-Encoding` / `Vary: Accept-Language` response is cached and replayed to clients whose request headers differ → wrong variant served (e.g. gzipped body to a client that did not offer gzip). |
-| `mindlesslyCacheVary` | `false` | ❌ | Moot without Vary support. |
+| `Vary` handling | — | ⚠️ | **Safe, not full (resolved 2026-09-11).** Cache key is still the URL alone (`md5(url)`), so no variant *matching*. Instead, a response with a non-empty `Vary` is never written to the cache (`Store`) and any such entry found in an inherited cache tree is never served (`Lookup`) — so the wrong-variant bug cannot occur. Cost: `Vary` responses (very common: `Vary: Accept-Encoding`) are always fetched upstream. Full per-variant caching (Polipo parity) would be a later item. |
+| `mindlesslyCacheVary` | `false` | ❌ | Moot: no `Vary` response is cached. |
 | `dontTrustVaryETag` | `maybe` | ❌ | Same. |
 | `dontCacheCookies` | (off) | ✅ | Present (disk-cache hardening); **default on** in go-polipo, unlike Polipo. |
 | `dontCacheRedirects` | (varies) | ⚠️ | Not configurable; `Store` only caches `200`, so `301`/`302` are never cached anyway (stricter than Polipo, but no knob). |
@@ -195,9 +195,11 @@ at the end groups findings by how much they matter before a public release.
    variable but made any value other than `socks5` a configuration error, so
    `socks4a` no longer downgrades silently. SOCKS4/4a is not implemented by
    design (not an RFC; no auth/IPv6; no modern proxy requires it).
-3. **No `Vary` handling (§9).** Minimum viable fix: refuse to cache a response
-   that carries `Vary` (other than a carefully handled `Accept-Encoding`), so a
-   wrong variant is never served. Otherwise document loudly.
+3. ~~**No `Vary` handling (§9).**~~ **Done (2026-09-11):** took the minimum viable
+   fix — a response with any non-empty `Vary` is neither stored nor served from
+   cache (no `Accept-Encoding` carve-out; keeps the logic and the on-disk format
+   untouched). The wrong-variant bug is closed; full per-variant caching stays a
+   possible later item.
 4. **No heuristic freshness (§8).** Header-less `200`s are treated as fresh for
    32 days. Consider a small `Last-Modified`-based heuristic or a low default
    cap; at least document the divergence.

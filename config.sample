@@ -42,6 +42,10 @@
 # Responses to requests that carry an Authorization header are never written to
 # the disk cache unless the response is explicitly shareable
 # (Cache-Control: public, s-maxage, or must-revalidate), per RFC 9111.
+#
+# Responses carrying a Vary header are not cached at all: the cache is keyed on
+# the URL alone and cannot choose between variants (gzip vs. plain, per-language,
+# ...).  They are forwarded normally, just not stored.
 
 
 ### Access filters (see forbidden.sample for the file format)
