@@ -70,7 +70,7 @@ at the end groups findings by how much they matter before a public release.
 | `parentProxy` | (unset) | ✅ | HTTP parent via `http.Transport.Proxy`. |
 | `parentAuthCredentials` | (unset) | ❌ | Cannot authenticate to an HTTP parent proxy. |
 | `socksParentProxy` | (unset) | ✅ | Via `golang.org/x/net/proxy`. |
-| `socksProxyType` | `socks5` | ⚠️ | **Parsed and shown, but only SOCKS5 is wired up** (`proxy.SOCKS5(...)` unconditionally). `socks4a` is silently ignored. |
+| `socksProxyType` | `socks5` | ✅ | **Only `socks5` accepted (resolved 2026-09-11).** `golang.org/x/net/proxy` speaks SOCKS5 only; `Config.Set` now rejects any other value (`socks4a`, typos) with a startup error instead of storing it and dialing SOCKS5 regardless. SOCKS4/4a is deliberately not implemented — no RFC, no IPv6/auth, and no modern SOCKS proxy needs it. |
 | `socksAuthCredentials` | (unset) | ❌ | No SOCKS user/password auth. |
 
 ## 6. Tunnelling (CONNECT)
@@ -191,8 +191,10 @@ at the end groups findings by how much they matter before a public release.
    `80-100, 1024-65535`; `lo-hi` range syntax supported. CONNECT stays on
    `tunnelAllowedPorts` alone, matching Polipo. *Abuse surface closed: no more
    open relay to arbitrary TCP ports.*
-2. **`socksProxyType` is a dead knob (§5).** Implement `socks4a` or drop the
-   variable; today `socks4a` in a config is silently SOCKS5.
+2. ~~**`socksProxyType` is a dead knob (§5).**~~ **Done (2026-09-11):** kept the
+   variable but made any value other than `socks5` a configuration error, so
+   `socks4a` no longer downgrades silently. SOCKS4/4a is not implemented by
+   design (not an RFC; no auth/IPv6; no modern proxy requires it).
 3. **No `Vary` handling (§9).** Minimum viable fix: refuse to cache a response
    that carries `Vary` (other than a carefully handled `Accept-Encoding`), so a
    wrong variant is never served. Otherwise document loudly.

@@ -70,7 +70,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `parentProxy` | (未設定) | ✅ | `http.Transport.Proxy` 経由の HTTP 親プロキシ。 |
 | `parentAuthCredentials` | (未設定) | ❌ | HTTP 親プロキシへの認証不可。 |
 | `socksParentProxy` | (未設定) | ✅ | `golang.org/x/net/proxy` 経由。 |
-| `socksProxyType` | `socks5` | ⚠️ | **パースして表示するが、実装は SOCKS5 のみ**（`proxy.SOCKS5(...)` 固定）。`socks4a` は黙って無視。 |
+| `socksProxyType` | `socks5` | ✅ | **`socks5` のみ受理（2026-09-11 解決）。** `golang.org/x/net/proxy` は SOCKS5 専用。`Config.Set` が `socks4a` やタイプミスを起動時エラーで弾くようにした（従来は保持だけして結局 SOCKS5 で接続）。SOCKS4/4a は意図的に非実装 — RFC が無く、認証も IPv6 も無く、現代の SOCKS プロキシで必要とされない。 |
 | `socksAuthCredentials` | (未設定) | ❌ | SOCKS のユーザー / パスワード認証なし。 |
 
 ## 6. トンネリング（CONNECT）
@@ -190,8 +190,9 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
    `403` により強制。既定を Polipo の `80-100, 1024-65535` に戻し、`lo-hi` レンジ
    構文もサポート。CONNECT は Polipo 同様 `tunnelAllowedPorts` のみで判定する。
    *悪用面を封鎖: 任意 TCP ポートへのオープンリレーは不可に。*
-2. **`socksProxyType` が死んだ設定（§5）。** `socks4a` を実装するか変数を削除する。
-   現状 `socks4a` と書いても黙って SOCKS5 になる。
+2. ~~**`socksProxyType` が死んだ設定（§5）。**~~ **完了（2026-09-11）:** 変数は残し、
+   `socks5` 以外を設定エラーにした。`socks4a` の暗黙ダウングレードは廃止。SOCKS4/4a
+   は設計上非実装（RFC 無し・認証/IPv6 無し・現代のプロキシで不要）。
 3. **`Vary` 未対応（§9）。** 最小限の対応: `Vary` を含む応答は（慎重に扱う
    `Accept-Encoding` を除き）キャッシュしない。少なくとも明記する。
 4. **ヒューリスティック鮮度なし（§8）。** ヘッダの無い `200` が 32 日間新鮮扱い。

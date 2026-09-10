@@ -50,6 +50,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	ph.parseAllowedClients()
 
 	if config.SocksParentProxy != "" {
+		// Only SOCKS5 is supported; Config.Set rejects any other socksProxyType.
 		dialer, err := proxy.SOCKS5("tcp", config.SocksParentProxy, nil, proxy.Direct)
 		if err != nil {
 			log.Printf("Warning: invalid socksParentProxy %q: %v", config.SocksParentProxy, err)

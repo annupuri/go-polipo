@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,6 +243,9 @@ func TestSetAllKeys(t *testing.T) {
 	fails("logLevel", "not-hex")
 	fails("maxConcurrentRequests", "lots")
 	fails("diskCacheUnlinkTime", "5w")
+	fails("socksProxyType", "socks4a") // Polipo accepted it; go-polipo only does SOCKS5
+	fails("socksProxyType", "socks4")
+	fails("socksProxyType", "http")
 }
 
 func TestParseLevelFormats(t *testing.T) {
@@ -329,6 +333,33 @@ func TestParsePortSet(t *testing.T) {
 		if err == nil && got.String() != tt.want {
 			t.Errorf("parsePortSet(%q) = %q, want %q", tt.in, got.String(), tt.want)
 		}
+	}
+}
+
+func TestSocksProxyType(t *testing.T) {
+	c := NewDefaultConfig()
+
+	// socks5 in any case is accepted and stored lowercased.
+	for _, v := range []string{"socks5", "SOCKS5", "Socks5"} {
+		if err := c.Set("socksProxyType", v); err != nil {
+			t.Errorf("Set(socksProxyType, %q) unexpected error: %v", v, err)
+		}
+		if c.SocksProxyType != "socks5" {
+			t.Errorf("socksProxyType = %q, want %q", c.SocksProxyType, "socks5")
+		}
+	}
+
+	// socks4a was valid in Polipo but is not implemented here: it must be a
+	// hard error, not a silent downgrade.
+	err := c.Set("socksProxyType", "socks4a")
+	if err == nil {
+		t.Fatal("Set(socksProxyType, \"socks4a\") should fail")
+	}
+	if !strings.Contains(err.Error(), "socks5") {
+		t.Errorf("error should point at socks5, got: %v", err)
+	}
+	if c.SocksProxyType != "socks5" {
+		t.Errorf("a rejected value must not change SocksProxyType, got %q", c.SocksProxyType)
 	}
 }
 

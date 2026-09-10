@@ -17,7 +17,7 @@ type Config struct {
 	ForbiddenFile         string
 	UncachableFile        string
 	SocksParentProxy      string
-	SocksProxyType        string // "socks5" or "socks4a"
+	SocksProxyType        string // always "socks5" (the only type implemented)
 	ParentProxy           string
 	AllowedClients        []string
 	TunnelAllowedPorts    PortSet
@@ -253,7 +253,15 @@ func (c *Config) Set(key, val string) error {
 	case "socksParentProxy":
 		c.SocksParentProxy = val
 	case "socksProxyType":
-		c.SocksProxyType = strings.ToLower(val)
+		t := strings.ToLower(val)
+		if t != "socks5" {
+			// golang.org/x/net/proxy only speaks SOCKS5. Polipo also accepted
+			// "socks4a"; go-polipo used to lowercase and store it, then dial
+			// SOCKS5 anyway. Reject it here so the mismatch surfaces at startup
+			// instead of silently.
+			return fmt.Errorf("unsupported socksProxyType %q: only \"socks5\" is implemented (SOCKS4/4a is not)", val)
+		}
+		c.SocksProxyType = t
 	case "parentProxy":
 		c.ParentProxy = val
 	case "allowedClients":

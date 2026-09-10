@@ -31,7 +31,10 @@
     reached through the proxy.  Both allowedPorts and tunnelAllowedPorts now
     accept Polipo's "lo-hi" range syntax.
   * Parent proxies: HTTP via parentProxy, SOCKS5 via socksParentProxy
-    (golang.org/x/net/proxy).
+    (golang.org/x/net/proxy).  socksProxyType accepts only "socks5"; a
+    "socks4a" value (which Polipo allowed, and which earlier go-polipo
+    stored but then ignored, dialing SOCKS5 anyway) is now a configuration
+    error.
   * Client access control (allowedClients) accepts bare IPs, CIDR ranges
     and "all"; the check uses the real TCP peer address and ignores
     forwarding headers.

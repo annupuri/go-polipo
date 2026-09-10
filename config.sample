@@ -64,7 +64,7 @@
 
 # parentProxy = "squid.example.org:3128"      # upstream HTTP proxy
 # socksParentProxy = "localhost:9050"         # upstream SOCKS5 proxy
-# socksProxyType = socks5
+# socksProxyType = socks5   # only "socks5" is supported (Polipo's "socks4a" is rejected)
 
 
 ### HTTPS tunnelling (CONNECT)
