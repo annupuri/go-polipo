@@ -102,7 +102,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | リクエストの `Cache-Control: no-cache`/`no-store` | — | ✅ | ルックアップをスキップ。 |
 | レスポンスの `no-store` / `private` | — | ✅ | ストアをスキップ。 |
 | **条件付き再検証** | — | ❌ | `If-None-Match` / `If-Modified-Since` なし。`cache.go` のコメント曰く *"we treat expired cache as a miss."*。期限切れエントリは毎回まるごと再取得し、`304` の経路が存在しない。Polipo の透過性モデルは再検証を前提にしている。 |
-| **ヒューリスティック鮮度**（`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`） | (可変) | ⚠️ | **実装済み・設定不可（2026-09-11 解決）。** `Expires` / `max-age` / `s-maxage` の無い `200` は `isExpired` でヒューリスティック寿命 `min(0.1 × (Date − Last-Modified), 24h)`（`Last-Modified` 無しなら 24h 固定）を得る。Polipo の `maxAgeFraction`（0.1）/ `maxAge`（1日）既定に倣うがハードコード（ノブなし）。`Lookup` と `-x` の両方に効く。`maxExpiresAge` / `maxNoModifiedAge` は非移植。 |
+| **ヒューリスティック鮮度**（`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`） | (可変) | ⚠️ | **実装済み・設定不可（2026-09-11 解決）。** `Expires` / `max-age` / `s-maxage` の無い `200` は `isExpired` でヒューリスティック寿命 `min(0.1 × (Date − Last-Modified), 24h)`（`Last-Modified` 無しなら 24h 固定）を得る。`Lookup` と `-x` の両方に効く。**`maxAge` / `maxAgeFraction`：** Polipo は設定変数だったが go-polipo は同じ既定値をハードコード — 運用ポリシーではなく実質 RFC 由来の定数で、緩い値にすると今回直した過剰配信が復活するため（`cache.go` のコメント参照）。**`maxExpiresAge`**（未来の `Expires`/`max-age` をどこまで信用するかの上限）：先送り — `diskCacheUnlinkTime`（32日）が失効を頭打ちにするが、継続アクセスされるエントリには不完全。**`maxNoModifiedAge`**：条件付き再検証 / `304` が無い限り無意味（そのギャップは B 章）。 |
 | `preciseExpiry` | `false` | 🔷 | 上記が無い以上、該当なし。 |
 | `cacheIsShared` | `true` | ⚠️ | トグルは無いが、共有キャッシュのルールは部分的に強制されている。`private` は常にスキップ。認証付き応答は明示的に共有可能でない限りスキップ（ディスクキャッシュのハードニング）。 |
 | `relaxTransparency` | `false` | ❌ | 「上流失敗時に stale を配信する」モードなし。 |

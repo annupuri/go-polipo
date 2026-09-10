@@ -188,8 +188,13 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 	return resp
 }
 
-// Heuristic freshness parameters (RFC 9111 section 4.2.2), modelled on Polipo's
-// maxAgeFraction (0.1) and maxAge (1 day) defaults.
+// Heuristic freshness parameters (RFC 9111 section 4.2.2). Polipo exposed the
+// equivalents as the maxAgeFraction (default 0.1) and maxAge (default 1 day)
+// config variables; go-polipo hard-codes them on purpose. The fraction and cap
+// are effectively RFC-blessed constants rather than operator policy, and a
+// permissive value here would re-open the same over-serving of header-less
+// responses that this heuristic exists to close. If a real need turns up, one
+// "cap, or 0 to disable" duration is the knob to add - not the full Polipo set.
 const (
 	heuristicFraction    = 0.1
 	heuristicMaxLifetime = 24 * time.Hour // cap, and the value used with no Last-Modified
