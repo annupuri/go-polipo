@@ -98,11 +98,11 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable / feature | Polipo default | Status | Note |
 | :--- | :--- | :--: | :--- |
-| `Expires` / `Cache-Control: max-age` | — | ✅ | Honoured in `isExpired`. |
+| `Expires` / `Cache-Control: max-age` | — | ✅ | Honoured in `isExpired`. `s-maxage` now honoured too and takes precedence for this (shared) cache; an invalid `Expires` (e.g. `0`) counts as already expired (RFC 9111 §5.3). |
 | Request `Cache-Control: no-cache`/`no-store` | — | ✅ | Skips lookup. |
 | Response `no-store` / `private` | — | ✅ | Skips store. |
 | **Conditional revalidation** | — | ❌ | No `If-None-Match` / `If-Modified-Since`. `cache.go` comment: *"we treat expired cache as a miss."* Every stale entry is refetched in full; a `304` path does not exist. Polipo's transparency model is built on revalidation. |
-| **Heuristic freshness** (`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`) | (varies) | ❌ | A `200` with neither `Expires` nor `max-age` is treated as **fresh until `diskCacheUnlinkTime` (32d) or `-x`**. Polipo derives a heuristic lifetime (≈10% of `Last-Modified` age, capped). go-polipo over-serves header-less responses. |
+| **Heuristic freshness** (`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`) | (varies) | ⚠️ | **Implemented, not configurable (resolved 2026-09-11).** A `200` with no `Expires`/`max-age`/`s-maxage` now gets a heuristic lifetime in `isExpired`: `min(0.1 × (Date − Last-Modified), 24h)`, or a flat 24h with no `Last-Modified` — modelled on Polipo's `maxAgeFraction` (0.1) / `maxAge` (1d) defaults, but hard-coded (no knobs). This governs both `Lookup` and `-x`. `maxExpiresAge` / `maxNoModifiedAge` are not ported. |
 | `preciseExpiry` | `false` | 🔷 | N/A without the above. |
 | `cacheIsShared` | `true` | ⚠️ | No toggle, but the shared-cache rules are now partly enforced: `private` always skipped; authenticated responses skipped unless explicitly shareable (disk-cache hardening). |
 | `relaxTransparency` | `false` | ❌ | No "serve stale on upstream failure" mode. |
@@ -200,9 +200,10 @@ at the end groups findings by how much they matter before a public release.
    cache (no `Accept-Encoding` carve-out; keeps the logic and the on-disk format
    untouched). The wrong-variant bug is closed; full per-variant caching stays a
    possible later item.
-4. **No heuristic freshness (§8).** Header-less `200`s are treated as fresh for
-   32 days. Consider a small `Last-Modified`-based heuristic or a low default
-   cap; at least document the divergence.
+4. ~~**No heuristic freshness (§8).**~~ **Done (2026-09-11):** header-less `200`s
+   get `min(0.1 × Last-Modified age, 24h)` (flat 24h without `Last-Modified`),
+   matching Polipo's default fraction/cap, hard-coded. `s-maxage` and invalid
+   `Expires` are now handled correctly in the same pass.
 
 ### B. Feature gaps — decide "port later" vs "won't port", then document
 

@@ -98,11 +98,11 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 | 変数 / 機能 | Polipo 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
-| `Expires` / `Cache-Control: max-age` | — | ✅ | `isExpired` で尊重。 |
+| `Expires` / `Cache-Control: max-age` | — | ✅ | `isExpired` で尊重。`s-maxage` も尊重し、共有キャッシュである本実装では優先。不正な `Expires`（例 `0`）は失効済み扱い（RFC 9111 §5.3）。 |
 | リクエストの `Cache-Control: no-cache`/`no-store` | — | ✅ | ルックアップをスキップ。 |
 | レスポンスの `no-store` / `private` | — | ✅ | ストアをスキップ。 |
 | **条件付き再検証** | — | ❌ | `If-None-Match` / `If-Modified-Since` なし。`cache.go` のコメント曰く *"we treat expired cache as a miss."*。期限切れエントリは毎回まるごと再取得し、`304` の経路が存在しない。Polipo の透過性モデルは再検証を前提にしている。 |
-| **ヒューリスティック鮮度**（`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`） | (可変) | ❌ | `Expires` も `max-age` も無い `200` は **`diskCacheUnlinkTime`（32日）または `-x` まで新鮮**扱い。Polipo はヒューリスティックな寿命（おおむね `Last-Modified` 経過時間の 10%、上限つき）を導く。go-polipo はヘッダの無い応答を過剰に配信する。 |
+| **ヒューリスティック鮮度**（`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`） | (可変) | ⚠️ | **実装済み・設定不可（2026-09-11 解決）。** `Expires` / `max-age` / `s-maxage` の無い `200` は `isExpired` でヒューリスティック寿命 `min(0.1 × (Date − Last-Modified), 24h)`（`Last-Modified` 無しなら 24h 固定）を得る。Polipo の `maxAgeFraction`（0.1）/ `maxAge`（1日）既定に倣うがハードコード（ノブなし）。`Lookup` と `-x` の両方に効く。`maxExpiresAge` / `maxNoModifiedAge` は非移植。 |
 | `preciseExpiry` | `false` | 🔷 | 上記が無い以上、該当なし。 |
 | `cacheIsShared` | `true` | ⚠️ | トグルは無いが、共有キャッシュのルールは部分的に強制されている。`private` は常にスキップ。認証付き応答は明示的に共有可能でない限りスキップ（ディスクキャッシュのハードニング）。 |
 | `relaxTransparency` | `false` | ❌ | 「上流失敗時に stale を配信する」モードなし。 |
@@ -196,9 +196,10 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 3. ~~**`Vary` 未対応（§9）。**~~ **完了（2026-09-11）:** 最小安全策を採用 — `Vary`
    が空でない応答は保存も配信もしない（`Accept-Encoding` の特例なし。ロジックと
    ディスク形式は不変）。誤変種バグを封鎖。変種ごとのキャッシュは将来項目。
-4. **ヒューリスティック鮮度なし（§8）。** ヘッダの無い `200` が 32 日間新鮮扱い。
-   `Last-Modified` ベースの簡易ヒューリスティックか低めの既定上限を検討。最低でも
-   この差異を文書化する。
+4. ~~**ヒューリスティック鮮度なし（§8）。**~~ **完了（2026-09-11）:** ヘッダの無い
+   `200` は `min(0.1 × Last-Modified 経過時間, 24h)`（`Last-Modified` 無しは 24h
+   固定）を得る。Polipo の既定の割合／上限に一致、ハードコード。同じ処理で
+   `s-maxage` と不正 `Expires` も正しく扱うようにした。
 
 ### B. 機能ギャップ — 「後で移植」か「移植しない」を決め、文書化する
 

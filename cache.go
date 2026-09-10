@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -187,44 +188,103 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 	return resp
 }
 
+// Heuristic freshness parameters (RFC 9111 section 4.2.2), modelled on Polipo's
+// maxAgeFraction (0.1) and maxAge (1 day) defaults.
+const (
+	heuristicFraction    = 0.1
+	heuristicMaxLifetime = 24 * time.Hour // cap, and the value used with no Last-Modified
+)
+
+// responseDate returns the response's Date, or the current time when the header
+// is missing or unparseable.
+func responseDate(resp *http.Response) time.Time {
+	if d, err := http.ParseTime(resp.Header.Get("Date")); err == nil {
+		return d
+	}
+	return time.Now()
+}
+
+// ccFreshnessLifetime reads an explicit freshness lifetime out of a
+// Cache-Control value. s-maxage (shared-cache specific) wins over max-age, per
+// RFC 9111 section 5.2.2.10. ok is false when neither directive is present and
+// parseable.
+func ccFreshnessLifetime(cc string) (life time.Duration, ok bool) {
+	var maxAge, sMaxAge time.Duration
+	var haveMaxAge, haveSMaxAge bool
+	for _, part := range strings.Split(cc, ",") {
+		part = strings.TrimSpace(part)
+		switch {
+		case strings.HasPrefix(part, "s-maxage="):
+			if n, err := strconv.Atoi(strings.TrimPrefix(part, "s-maxage=")); err == nil {
+				sMaxAge, haveSMaxAge = time.Duration(n)*time.Second, true
+			}
+		case strings.HasPrefix(part, "max-age="):
+			if n, err := strconv.Atoi(strings.TrimPrefix(part, "max-age=")); err == nil {
+				maxAge, haveMaxAge = time.Duration(n)*time.Second, true
+			}
+		}
+	}
+	if haveSMaxAge {
+		return sMaxAge, true
+	}
+	if haveMaxAge {
+		return maxAge, true
+	}
+	return 0, false
+}
+
+// heuristicLifetime derives a freshness lifetime for a response with no explicit
+// expiration. With a Last-Modified it is a fraction of the document's age at
+// fetch time, capped; without one it is a flat default. This keeps a header-less
+// 200 from being served as fresh until diskCacheUnlinkTime (32 days).
+func heuristicLifetime(resp *http.Response, date time.Time) time.Duration {
+	lm, err := http.ParseTime(resp.Header.Get("Last-Modified"))
+	if err != nil {
+		return heuristicMaxLifetime
+	}
+	age := date.Sub(lm)
+	if age <= 0 {
+		return 0 // changed at or after the response date: no basis to call it fresh
+	}
+	if life := time.Duration(float64(age) * heuristicFraction); life < heuristicMaxLifetime {
+		return life
+	}
+	return heuristicMaxLifetime
+}
+
 // isExpired determines if the cached response is expired.
 func (cm *CacheManager) isExpired(resp *http.Response) bool {
-	// Expires header
-	expiresStr := resp.Header.Get("Expires")
-	if expiresStr != "" {
+	now := time.Now()
+	hasExplicit := false
+
+	// Expires header.
+	if expiresStr := resp.Header.Get("Expires"); expiresStr != "" {
+		hasExplicit = true
 		t, err := http.ParseTime(expiresStr)
-		if err == nil && time.Now().After(t) {
+		if err != nil {
+			return true // an invalid Expires (e.g. "0") means "already expired" (RFC 9111 5.3)
+		}
+		if now.After(t) {
 			return true
 		}
 	}
 
-	// Cache-Control: max-age
-	cc := resp.Header.Get("Cache-Control")
-	if cc != "" {
-		for _, part := range strings.Split(cc, ",") {
-			part = strings.TrimSpace(part)
-			if strings.HasPrefix(part, "max-age=") {
-				secondsStr := strings.TrimPrefix(part, "max-age=")
-				var seconds int
-				_, err := fmt.Sscanf(secondsStr, "%d", &seconds)
-				if err == nil {
-					// We need the date the response was created
-					dateStr := resp.Header.Get("Date")
-					date := time.Now()
-					if dateStr != "" {
-						if d, err := http.ParseTime(dateStr); err == nil {
-							date = d
-						}
-					}
-					if time.Now().After(date.Add(time.Duration(seconds) * time.Second)) {
-						return true
-					}
-				}
-			}
+	// Cache-Control: max-age / s-maxage.
+	if life, ok := ccFreshnessLifetime(resp.Header.Get("Cache-Control")); ok {
+		hasExplicit = true
+		if now.After(responseDate(resp).Add(life)) {
+			return true
 		}
 	}
 
-	return false
+	if hasExplicit {
+		return false
+	}
+
+	// No explicit expiration: fall back to a heuristic lifetime rather than
+	// treating the entry as fresh indefinitely.
+	date := responseDate(resp)
+	return now.After(date.Add(heuristicLifetime(resp, date)))
 }
 
 // Store writes a cacheable response to the disk cache. It consumes resp.Body

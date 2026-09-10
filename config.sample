@@ -38,6 +38,11 @@
 # "polipo -x" removes entries not accessed within this period (plus corrupt
 # and HTTP-stale entries).  Units: s, m, h, d.  0 disables the age cap.
 # diskCacheUnlinkTime = 32d
+#
+# A response with no Expires / max-age / s-maxage gets a heuristic freshness
+# lifetime (10% of the time since Last-Modified, capped at 24h; a flat 24h with
+# no Last-Modified), rather than being served as fresh until diskCacheUnlinkTime.
+# This is not configurable.
 
 # Responses to requests that carry an Authorization header are never written to
 # the disk cache unless the response is explicitly shareable

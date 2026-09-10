@@ -206,6 +206,70 @@ func TestCacheIsExpired(t *testing.T) {
 	if cm.isExpired(respCCFreshWithOpts) {
 		t.Error("expected response within max-age (with public option) to be fresh")
 	}
+
+	mkR := func(hdr ...string) *http.Response {
+		h := make(http.Header)
+		for i := 0; i+1 < len(hdr); i += 2 {
+			h.Set(hdr[i], hdr[i+1])
+		}
+		return &http.Response{Header: h}
+	}
+	httpTime := func(d time.Duration) string {
+		return time.Now().UTC().Add(d).Format(http.TimeFormat)
+	}
+
+	// 6. s-maxage takes precedence over max-age for a shared cache.
+	if !cm.isExpired(mkR(
+		"Cache-Control", "max-age=100000, s-maxage=10",
+		"Date", httpTime(-time.Minute),
+	)) {
+		t.Error("s-maxage=10 with a 1-minute-old Date should be expired despite max-age=100000")
+	}
+
+	// 7. Invalid Expires ("0") is treated as already expired.
+	if !cm.isExpired(mkR("Expires", "0", "Date", httpTime(0))) {
+		t.Error(`Expires: "0" should be treated as expired`)
+	}
+
+	// 8. Heuristic: no Expires/max-age, Last-Modified far in the past.
+	// Lifetime = min(10% of age, 24h) = 24h; a 2-day-old Date is stale.
+	if !cm.isExpired(mkR(
+		"Last-Modified", httpTime(-100*24*time.Hour),
+		"Date", httpTime(-2*24*time.Hour),
+	)) {
+		t.Error("header-less response 2 days old (24h heuristic cap) should be expired")
+	}
+	// Same document fetched just now is still fresh.
+	if cm.isExpired(mkR(
+		"Last-Modified", httpTime(-100*24*time.Hour),
+		"Date", httpTime(-time.Minute),
+	)) {
+		t.Error("header-less response fetched a minute ago should be fresh under the heuristic")
+	}
+
+	// 9. Heuristic with a recent Last-Modified: age at fetch = 1h, lifetime = 6m.
+	// A Date 30 minutes ago is well past that.
+	if !cm.isExpired(mkR(
+		"Last-Modified", httpTime(-90*time.Minute),
+		"Date", httpTime(-30*time.Minute),
+	)) {
+		t.Error("header-less response older than 10% of its Last-Modified age should be expired")
+	}
+	// Fetched 2 minutes ago, still inside the 6m lifetime.
+	if cm.isExpired(mkR(
+		"Last-Modified", httpTime(-62*time.Minute),
+		"Date", httpTime(-2*time.Minute),
+	)) {
+		t.Error("header-less response inside 10% of its Last-Modified age should be fresh")
+	}
+
+	// 10. Heuristic with no Last-Modified: flat 24h default.
+	if cm.isExpired(mkR("Date", httpTime(-time.Hour))) {
+		t.Error("header-less response with no Last-Modified should be fresh for 24h")
+	}
+	if !cm.isExpired(mkR("Date", httpTime(-25*time.Hour))) {
+		t.Error("header-less response with no Last-Modified should be expired after 24h")
+	}
 }
 
 func TestCacheInvalidAndNonGetCases(t *testing.T) {
