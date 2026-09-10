@@ -26,9 +26,22 @@
 
 # diskCacheRoot = "/var/cache/polipo/"
 
+# Disable the on-disk cache entirely (memory-only proxying).  Setting
+# diskCacheRoot = "" has the same effect.
+# noDiskCache = false
+
+# Keep responses carrying a Set-Cookie header out of the disk cache.  On by
+# default: a cached Set-Cookie is replayed to every later requester of the same
+# URL.  Set false for Polipo's historical behaviour.
+# dontCacheCookies = true
+
 # "polipo -x" removes entries not accessed within this period (plus corrupt
 # and HTTP-stale entries).  Units: s, m, h, d.  0 disables the age cap.
 # diskCacheUnlinkTime = 32d
+
+# Responses to requests that carry an Authorization header are never written to
+# the disk cache unless the response is explicitly shareable
+# (Cache-Control: public, s-maxage, or must-revalidate), per RFC 9111.
 
 
 ### Access filters (see forbidden.sample for the file format)

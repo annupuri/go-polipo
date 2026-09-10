@@ -33,6 +33,29 @@ func NewCacheManager(config *Config) *CacheManager {
 	}
 }
 
+// diskCacheDisabled reports whether the on-disk cache is turned off, either
+// explicitly (noDiskCache) or by having no root to read from or write into.
+func (cm *CacheManager) diskCacheDisabled() bool {
+	return cm.config.NoDiskCache || cm.config.DiskCacheRoot == ""
+}
+
+// requestIsAuthenticated reports whether req carries HTTP credentials that make
+// its response unsafe for a shared cache to reuse for other clients.
+func requestIsAuthenticated(req *http.Request) bool {
+	return req.Header.Get("Authorization") != "" ||
+		req.Header.Get("Proxy-Authorization") != ""
+}
+
+// cacheControlAllowsAuthenticated reports whether a response Cache-Control value
+// carries a directive that, per RFC 9111 section 3.5 (RFC 2616 section 14.8),
+// lets a shared cache store the response to an authenticated request.
+func cacheControlAllowsAuthenticated(cacheControl string) bool {
+	cc := strings.ToLower(cacheControl)
+	return strings.Contains(cc, "public") ||
+		strings.Contains(cc, "must-revalidate") ||
+		strings.Contains(cc, "s-maxage")
+}
+
 // getDirname gets the directory path for the host.
 func (cm *CacheManager) getDirname(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
@@ -86,6 +109,9 @@ func (cm *CacheManager) GetCachePath(rawURL string) (string, error) {
 
 // Lookup retrieves a cached response for the request if it exists and is fresh.
 func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
+	if cm.diskCacheDisabled() {
+		return nil
+	}
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
 		return nil
 	}
@@ -187,6 +213,9 @@ func (cm *CacheManager) isExpired(resp *http.Response) bool {
 // stream the response afterwards. Non-cacheable responses are left untouched.
 // An error is returned only when the response body cannot be read.
 func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
+	if cm.diskCacheDisabled() {
+		return nil
+	}
 	if req.Method != http.MethodGet || resp.StatusCode != http.StatusOK {
 		return nil
 	}
@@ -194,6 +223,20 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	// Cache-Control checks
 	cc := resp.Header.Get("Cache-Control")
 	if strings.Contains(cc, "no-store") || strings.Contains(cc, "private") {
+		return nil
+	}
+
+	// A Set-Cookie response is meant for a single client; a cached copy would be
+	// replayed to everyone who later requests the same URL. Polipo cached these,
+	// so this is opt-out via dontCacheCookies.
+	if cm.config.DontCacheCookies && len(resp.Header["Set-Cookie"]) > 0 {
+		return nil
+	}
+
+	// RFC 9111 section 3.5 (RFC 2616 section 14.8): a shared cache must not
+	// reuse a response to a request carrying Authorization unless the response
+	// explicitly permits it.
+	if requestIsAuthenticated(req) && !cacheControlAllowsAuthenticated(cc) {
 		return nil
 	}
 

@@ -33,6 +33,15 @@ type Config struct {
 	// DiskCacheUnlinkTime is the maximum age (since last access) a cached
 	// file may reach before `-x` removes it, regardless of HTTP freshness.
 	DiskCacheUnlinkTime time.Duration
+
+	// NoDiskCache disables the on-disk cache entirely: no lookups, no writes.
+	// An empty DiskCacheRoot has the same effect.
+	NoDiskCache bool
+
+	// DontCacheCookies, true by default, keeps responses carrying a Set-Cookie
+	// header out of the disk cache. Polipo cached them; a cached Set-Cookie is
+	// replayed to every later requester of the same URL.
+	DontCacheCookies bool
 }
 
 // NewDefaultConfig creates a Config with Polipo's default values.
@@ -54,6 +63,8 @@ func NewDefaultConfig() *Config {
 		MaxConcurrentRequests: 100,
 		LogFile:               "",
 		DiskCacheUnlinkTime:   32 * 24 * time.Hour,
+		NoDiskCache:           false,
+		DontCacheCookies:      true,
 	}
 }
 
@@ -72,7 +83,9 @@ func (c *Config) Entries() []ConfigEntry {
 		{"proxyAddress", c.ProxyAddress},
 		{"proxyPort", strconv.Itoa(c.ProxyPort)},
 		{"diskCacheRoot", c.DiskCacheRoot},
+		{"noDiskCache", strconv.FormatBool(c.NoDiskCache)},
 		{"diskCacheUnlinkTime", c.DiskCacheUnlinkTime.String()},
+		{"dontCacheCookies", strconv.FormatBool(c.DontCacheCookies)},
 		{"forbiddenFile", c.ForbiddenFile},
 		{"uncachableFile", c.UncachableFile},
 		{"socksParentProxy", c.SocksParentProxy},
@@ -161,8 +174,8 @@ func (c *Config) Set(key, val string) error {
 		}
 		c.ProxyPort = port
 	case "diskCacheRoot":
-		// Ensure trailing slash
-		if !strings.HasSuffix(val, "/") && !strings.HasSuffix(val, "\\") {
+		// An empty value disables the disk cache; only normalise real paths.
+		if val != "" && !strings.HasSuffix(val, "/") && !strings.HasSuffix(val, "\\") {
 			val += "/"
 		}
 		c.DiskCacheRoot = val
@@ -200,6 +213,10 @@ func (c *Config) Set(key, val string) error {
 		c.LogFile = val
 	case "disableLocalInterface":
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
+	case "noDiskCache":
+		c.NoDiskCache = strings.ToLower(val) == "true" || val == "1"
+	case "dontCacheCookies":
+		c.DontCacheCookies = strings.ToLower(val) == "true" || val == "1"
 	case "maxConcurrentRequests":
 		limit, err := strconv.Atoi(val)
 		if err != nil {

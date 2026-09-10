@@ -266,6 +266,133 @@ func TestCacheInvalidAndNonGetCases(t *testing.T) {
 	}
 }
 
+// mkResp builds a 200 response with the given body and headers (key,value pairs).
+func mkResp(body string, hdr ...string) *http.Response {
+	h := make(http.Header)
+	for i := 0; i+1 < len(hdr); i += 2 {
+		h.Add(hdr[i], hdr[i+1])
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Proto:      "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+		Header: h,
+		Body:   io.NopCloser(bytes.NewBufferString(body)),
+	}
+}
+
+func fileExistsForURL(t *testing.T, cm *CacheManager, rawURL string) bool {
+	t.Helper()
+	p, err := cm.GetCachePath(rawURL)
+	if err != nil {
+		t.Fatalf("GetCachePath(%q): %v", rawURL, err)
+	}
+	_, err = os.Stat(p)
+	return err == nil
+}
+
+func TestStoreSkipsSetCookie(t *testing.T) {
+	url := "http://example.com/with-cookie"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+
+	// Default config: dontCacheCookies is true -> not written, body preserved.
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+
+	resp := mkResp("body", "Cache-Control", "max-age=3600", "Set-Cookie", "sid=abc")
+	if err := cm.Store(req, resp); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if got, _ := io.ReadAll(resp.Body); string(got) != "body" {
+		t.Errorf("body not preserved for skipped Store, got %q", got)
+	}
+	if fileExistsForURL(t, cm, url) {
+		t.Error("Set-Cookie response should not have been cached")
+	}
+
+	// dontCacheCookies=false restores the historical behaviour.
+	cfg2 := NewDefaultConfig()
+	cfg2.DiskCacheRoot = t.TempDir()
+	cfg2.DontCacheCookies = false
+	cm2 := NewCacheManager(cfg2)
+	if err := cm2.Store(req, mkResp("body", "Cache-Control", "max-age=3600", "Set-Cookie", "sid=abc")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if !fileExistsForURL(t, cm2, url) {
+		t.Error("with dontCacheCookies=false the Set-Cookie response should be cached")
+	}
+}
+
+func TestStoreSkipsAuthenticated(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+
+	url := "http://example.com/private-area"
+
+	// Authorization present, response not explicitly shareable -> not cached.
+	reqAuth := httptest.NewRequest(http.MethodGet, url, nil)
+	reqAuth.Header.Set("Authorization", "Bearer t0ken")
+	if err := cm.Store(reqAuth, mkResp("secret", "Cache-Control", "max-age=3600")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if fileExistsForURL(t, cm, url) {
+		t.Error("authenticated request response should not be cached without an explicit directive")
+	}
+
+	// Same, but Cache-Control: public -> RFC 9111 3.5 permits caching.
+	url2 := "http://example.com/public-but-authed"
+	reqAuth2 := httptest.NewRequest(http.MethodGet, url2, nil)
+	reqAuth2.Header.Set("Authorization", "Bearer t0ken")
+	if err := cm.Store(reqAuth2, mkResp("ok", "Cache-Control", "public, max-age=3600")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if !fileExistsForURL(t, cm, url2) {
+		t.Error("Cache-Control: public should allow caching an authenticated response")
+	}
+
+	// Proxy-Authorization is treated the same way.
+	url3 := "http://example.com/proxy-authed"
+	reqProxyAuth := httptest.NewRequest(http.MethodGet, url3, nil)
+	reqProxyAuth.Header.Set("Proxy-Authorization", "Basic Zm9vOmJhcg==")
+	if err := cm.Store(reqProxyAuth, mkResp("secret", "Cache-Control", "max-age=3600")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if fileExistsForURL(t, cm, url3) {
+		t.Error("Proxy-Authorization request response should not be cached")
+	}
+}
+
+func TestDiskCacheDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tune func(*Config)
+	}{
+		{"noDiskCache", func(c *Config) { c.NoDiskCache = true }},
+		{"emptyRoot", func(c *Config) { c.DiskCacheRoot = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := NewDefaultConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			tc.tune(cfg)
+			cm := NewCacheManager(cfg)
+
+			url := "http://example.com/x"
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			resp := mkResp("body", "Cache-Control", "max-age=3600")
+			if err := cm.Store(req, resp); err != nil {
+				t.Fatalf("Store: %v", err)
+			}
+			if got, _ := io.ReadAll(resp.Body); string(got) != "body" {
+				t.Errorf("body not preserved, got %q", got)
+			}
+			if cm.Lookup(req) != nil {
+				t.Error("Lookup should return nil when the disk cache is disabled")
+			}
+		})
+	}
+}
+
 func TestExpire(t *testing.T) {
 	root := t.TempDir()
 	cfg := NewDefaultConfig()

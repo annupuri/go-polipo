@@ -23,6 +23,43 @@ func TestNewDefaultConfig(t *testing.T) {
 	if c.DisableLocalInterface != false {
 		t.Errorf("expected false, got %t", c.DisableLocalInterface)
 	}
+	if c.NoDiskCache != false {
+		t.Errorf("expected NoDiskCache false, got %t", c.NoDiskCache)
+	}
+	if c.DontCacheCookies != true {
+		t.Errorf("expected DontCacheCookies true, got %t", c.DontCacheCookies)
+	}
+}
+
+func TestSetDiskCacheDisableKeys(t *testing.T) {
+	c := NewDefaultConfig()
+
+	// Empty diskCacheRoot stays empty (no trailing slash appended) and reads
+	// as "disk cache disabled" downstream.
+	if err := c.Set("diskCacheRoot", ""); err != nil {
+		t.Fatalf("Set diskCacheRoot empty: %v", err)
+	}
+	if c.DiskCacheRoot != "" {
+		t.Errorf("empty diskCacheRoot should stay empty, got %q", c.DiskCacheRoot)
+	}
+
+	c.Set("noDiskCache", "true")
+	if !c.NoDiskCache {
+		t.Error(`noDiskCache "true" should be truthy`)
+	}
+	c.Set("noDiskCache", "false")
+	if c.NoDiskCache {
+		t.Error(`noDiskCache "false" should be false`)
+	}
+
+	c.Set("dontCacheCookies", "false")
+	if c.DontCacheCookies {
+		t.Error(`dontCacheCookies "false" should be false`)
+	}
+	c.Set("dontCacheCookies", "1")
+	if !c.DontCacheCookies {
+		t.Error(`dontCacheCookies "1" should be true`)
+	}
 }
 
 func TestParseLine(t *testing.T) {
@@ -151,6 +188,8 @@ func TestSetAllKeys(t *testing.T) {
 	ok("disableLocalInterface", "true")
 	ok("maxConcurrentRequests", "50")
 	ok("diskCacheUnlinkTime", "16d")
+	ok("noDiskCache", "true")
+	ok("dontCacheCookies", "false")
 	ok("thisKeyDoesNotExist", "ignored")
 
 	if c.ProxyAddress != "0.0.0.0" || c.ProxyPort != 3128 {
@@ -173,6 +212,12 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.DiskCacheUnlinkTime != 16*24*time.Hour {
 		t.Errorf("diskCacheUnlinkTime = %s, want 384h0m0s", c.DiskCacheUnlinkTime)
+	}
+	if !c.NoDiskCache {
+		t.Error(`noDiskCache "true" should be truthy`)
+	}
+	if c.DontCacheCookies {
+		t.Error(`dontCacheCookies "false" should be false`)
 	}
 
 	// disableLocalInterface falls back to false for anything not true/1.

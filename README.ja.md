@@ -18,7 +18,10 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 - **SOCKS 親プロキシ**: 上流リクエストを SOCKS5 プロキシ経由で転送。
 - **禁止フィルタ**: ホスト / ドメインおよび正規表現によるブラックリスト。
 - **ディスクキャッシュ**: Polipo 互換のディレクトリ構成とファイル名ハッシュ
-  (MD5 + カスタム Base64 テーブル)。
+  (MD5 + カスタム Base64 テーブル)。`Set-Cookie` を含む応答は既定でキャッシュ
+  しません(`dontCacheCookies`)。認証付きリクエストの応答は明示的に共有可能な
+  場合のみキャッシュします(RFC 9111 §3.5)。`noDiskCache` または空の
+  `diskCacheRoot` でディスクキャッシュ自体を無効化できます。
 - **キャッシュ期限切れ処理**: `polipo -x` がディスク上のキャッシュを走査し、
   壊れたエントリ、(HTTP 鮮度ルール上)古くなったエントリ、長期間アクセスの
   ないエントリ(`diskCacheUnlinkTime`、既定 32 日)を削除し、空になった
@@ -46,7 +49,9 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | :--- | :--- | :--- |
 | `proxyAddress` | `127.0.0.1` | 待ち受けアドレス |
 | `proxyPort` | `8123` | 待ち受けポート |
-| `diskCacheRoot` | `/var/cache/polipo/` | ディスクキャッシュのルートディレクトリ |
+| `diskCacheRoot` | `/var/cache/polipo/` | ディスクキャッシュのルートディレクトリ (空でキャッシュ無効) |
+| `noDiskCache` | `false` | `true` でディスクキャッシュを完全に無効化 |
+| `dontCacheCookies` | `true` | `Set-Cookie` を含む応答をキャッシュしない |
 | `diskCacheUnlinkTime` | `32d` | 最終アクセスからこの期間を過ぎたキャッシュを `-x` で削除 |
 | `forbiddenFile` | (なし) | アクセス禁止リストのファイル |
 | `uncachableFile` | (なし) | キャッシュ対象外リストのファイル |

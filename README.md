@@ -15,6 +15,9 @@ Features
 - **SOCKS Parent Proxy**: Support for forwarding upstream requests via SOCKS5 proxy.
 - **Forbidden Filter**: Host/Domain and regular expression blacklists.
 - **Disk Cache**: Polipo-compatible disk caching directory layout and filename hashing (MD5 + Custom Base64 table).
+  `Set-Cookie` responses are kept out of the cache by default (`dontCacheCookies`), responses to
+  authenticated requests are cached only when explicitly shareable (RFC 9111 §3.5), and the disk
+  cache can be turned off with `noDiskCache` or an empty `diskCacheRoot`.
 - **Cache Expiry**: `polipo -x` walks the on-disk cache and removes corrupt, stale
   (per HTTP freshness), and long-untouched entries (`diskCacheUnlinkTime`, default 32d),
   pruning emptied directories.
