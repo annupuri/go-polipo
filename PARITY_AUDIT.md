@@ -40,8 +40,8 @@ at the end groups findings by how much they matter before a public release.
 | `proxyAddress` | `127.0.0.1` | ✅ | |
 | `proxyPort` | `8123` | ✅ | |
 | `allowedClients` | (none) | ✅ | Bare IP, CIDR, `all`/`*`. Checked against the real TCP peer. |
-| `authCredentials` | (null) | ❌ | **No proxy authentication.** go-polipo authorises clients by IP only; there is no `407` / `Proxy-Authenticate` challenge. `auth.c` is mapped to "stdlib + proxy.go" in ARCHITECTURE.md, but no challenge logic exists. |
-| `authRealm` | (varies) | ❌ | Same. |
+| `authCredentials` | (null) | ✅ | **Enforced (resolved 2026-09-12).** A single `"user:password"` string; empty (the default) requires no authentication, matching Polipo's unset default. When set, `ProxyHandler.isAuthorized` checks every request — forwarded, CONNECT, and local `/polipo/*` pages alike — before any other handling. Missing or wrong credentials get `407`/`Proxy-Authenticate` for an ordinary proxied request or CONNECT, or `401`/`WWW-Authenticate` (checked against `Authorization`, not `Proxy-Authorization`) for a request addressed straight at go-polipo rather than sent through it as a proxy — Polipo's `urlIsLocal` split, confirmed from the vendored C history (`auth.c`, `client.c`). |
+| `authRealm` | (varies) | ✅ | **Enforced (resolved 2026-09-12).** Defaults to `"Polipo"`, only takes effect while `authCredentials` is set (matching Polipo, which fills the same default at startup once `authCredentials` is non-null). Rendered into the `Basic realm="..."` challenge. |
 
 ## 3. Outgoing connections
 
@@ -207,8 +207,18 @@ at the end groups findings by how much they matter before a public release.
 
 ### B. Feature gaps — decide "port later" vs "won't port", then document
 
-- Proxy authentication `authCredentials` / `authRealm` (§2) — the only current
-  access control is IP-based.
+- ~~Proxy authentication `authCredentials` / `authRealm` (§2).~~ **Done
+  (2026-09-12):** ported — `ProxyHandler.isAuthorized` enforces a single
+  `"user:password"` credential and the `401`/`407` split Polipo uses
+  (`urlIsLocal`), sourced from the vendored C history rather than guessed.
+  Fixed a related bug found along the way: `cache.go`'s authenticated-response
+  cache-safety rule (§8/disk-cache hardening) was excluding
+  `Proxy-Authorization` requests from caching, which is wrong — Polipo's own
+  `CACHE_AUTHORIZATION` flag is only ever set for `Authorization`
+  (`http_parse.c`), since `Proxy-Authorization` is hop-by-hop and never
+  reaches the origin. Left uncorrected, every request would have carried
+  `Proxy-Authorization` once this feature was turned on, silently gutting the
+  disk cache for anyone using it.
 - `parentAuthCredentials` / `socksAuthCredentials` (§5) — no authenticated
   upstream proxies.
 - `censoredHeaders` / `censorReferer` (§7) — privacy header stripping; on-theme

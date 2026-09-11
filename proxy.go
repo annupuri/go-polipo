@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"io"
@@ -161,6 +163,19 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 1.4 Proxy authentication (authCredentials)
+	if !ph.isAuthorized(req) {
+		log.Printf("Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
+		if isLocalForm(req) {
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
+			http.Error(w, "Authentication Required", http.StatusUnauthorized)
+		} else {
+			w.Header().Set("Proxy-Authenticate", fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
+			http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
+		}
+		return
+	}
+
 	// 1.5 Local Interface handle (Polipo local web page)
 	if !ph.config.DisableLocalInterface && strings.HasPrefix(req.URL.Path, "/polipo") {
 		ph.handleLocal(w, req)
@@ -267,6 +282,46 @@ func (ph *ProxyHandler) isClientAllowed(remoteAddr string) bool {
 		}
 	}
 	return false
+}
+
+// isLocalForm reports whether req's request-target is origin-form (a bare
+// path, e.g. "GET /polipo/ HTTP/1.1"), matching Polipo's urlIsLocal. That
+// happens when a client talks to go-polipo as if it were an ordinary web
+// server rather than as a configured proxy - CONNECT and absolute-form
+// targets (the normal case for a proxied request) are not local-form.
+// Polipo challenges local-form requests with 401/WWW-Authenticate and
+// everything else with 407/Proxy-Authenticate.
+func isLocalForm(req *http.Request) bool {
+	return req.Method != http.MethodConnect && !req.URL.IsAbs()
+}
+
+// isAuthorized reports whether req carries valid proxy credentials. It
+// always returns true when AuthCredentials is unset (the default, matching
+// Polipo, which only enforces authentication once both authCredentials and
+// authRealm are configured). Local-form requests are checked against
+// Authorization; everything else (proxied requests and CONNECT) against
+// Proxy-Authorization - Polipo makes the same split, since only one of the
+// two headers is meaningful depending on how the client is talking to it.
+func (ph *ProxyHandler) isAuthorized(req *http.Request) bool {
+	if ph.config.AuthCredentials == "" {
+		return true
+	}
+
+	headerName := "Proxy-Authorization"
+	if isLocalForm(req) {
+		headerName = "Authorization"
+	}
+
+	const prefix = "Basic "
+	auth := req.Header.Get(headerName)
+	if len(auth) < len(prefix) || !strings.EqualFold(auth[:len(prefix)], prefix) {
+		return false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(auth[len(prefix):])
+	if err != nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(decoded, []byte(ph.config.AuthCredentials)) == 1
 }
 
 // requestPort returns the TCP port a forwarded (non-CONNECT) request targets.

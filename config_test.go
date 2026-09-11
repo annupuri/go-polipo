@@ -30,6 +30,12 @@ func TestNewDefaultConfig(t *testing.T) {
 	if c.DontCacheCookies != true {
 		t.Errorf("expected DontCacheCookies true, got %t", c.DontCacheCookies)
 	}
+	if c.AuthCredentials != "" {
+		t.Errorf("expected AuthCredentials unset, got %q", c.AuthCredentials)
+	}
+	if c.AuthRealm != "Polipo" {
+		t.Errorf(`expected AuthRealm "Polipo", got %q`, c.AuthRealm)
+	}
 }
 
 func TestSetDiskCacheDisableKeys(t *testing.T) {
@@ -188,6 +194,8 @@ func TestSetAllKeys(t *testing.T) {
 	ok("socksProxyType", "SOCKS5") // lowercased
 	ok("parentProxy", "upstream:8080")
 	ok("allowedClients", "10.0.0.0/8, 127.0.0.1")
+	ok("authCredentials", "alice:secret")
+	ok("authRealm", "My Proxy")
 	ok("tunnelAllowedPorts", "443,563")
 	ok("allowedPorts", "80,443")
 	ok("logLevel", "0x0f")
@@ -225,6 +233,12 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.DontCacheCookies {
 		t.Error(`dontCacheCookies "false" should be false`)
+	}
+	if c.AuthCredentials != "alice:secret" {
+		t.Errorf("authCredentials not applied: %q", c.AuthCredentials)
+	}
+	if c.AuthRealm != "My Proxy" {
+		t.Errorf("authRealm not applied: %q", c.AuthRealm)
 	}
 
 	// disableLocalInterface falls back to false for anything not true/1.

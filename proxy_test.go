@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -562,6 +563,94 @@ func TestProxyConnectTunnel(t *testing.T) {
 	}
 	if string(buf) != "ping" {
 		t.Errorf("tunnel echo = %q, want %q", buf, "ping")
+	}
+}
+
+func TestProxyAuthCredentialsUnsetByDefault(t *testing.T) {
+	ph := newTestHandler(NewDefaultConfig())
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	if !ph.isAuthorized(req) {
+		t.Error("no authCredentials configured: every request should be authorized")
+	}
+}
+
+func TestProxyAuthCredentials(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.AuthCredentials = "alice:secret"
+	cfg.AuthRealm = "go-polipo"
+	ph := newTestHandler(cfg)
+
+	basic := func(user, pass string) string {
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+	}
+
+	// Proxied (absolute-form) request with no credentials: 407, challenged via
+	// Proxy-Authenticate.
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if rr.Code != http.StatusProxyAuthRequired {
+		t.Errorf("no credentials: got %d, want 407", rr.Code)
+	}
+	if got := rr.Header().Get("Proxy-Authenticate"); got != `Basic realm="go-polipo"` {
+		t.Errorf("Proxy-Authenticate = %q", got)
+	}
+
+	// Wrong password: still 407.
+	reqWrong := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	reqWrong.RemoteAddr = "127.0.0.1:12345"
+	reqWrong.Header.Set("Proxy-Authorization", basic("alice", "wrong"))
+	rrWrong := httptest.NewRecorder()
+	ph.ServeHTTP(rrWrong, reqWrong)
+	if rrWrong.Code != http.StatusProxyAuthRequired {
+		t.Errorf("wrong credentials: got %d, want 407", rrWrong.Code)
+	}
+
+	// Correct credentials pass the auth gate and reach the local interface
+	// (chosen because it needs no outbound network access).
+	reqOK := httptest.NewRequest(http.MethodGet, "http://example.com/polipo/", nil)
+	reqOK.RemoteAddr = "127.0.0.1:12345"
+	reqOK.Header.Set("Proxy-Authorization", basic("alice", "secret"))
+	rrOK := httptest.NewRecorder()
+	ph.ServeHTTP(rrOK, reqOK)
+	if rrOK.Code != http.StatusOK {
+		t.Errorf("correct credentials: got %d, want 200", rrOK.Code)
+	}
+
+	// Local-form request (a browser pointed straight at go-polipo rather than
+	// configured to use it as a proxy): challenged with 401/WWW-Authenticate,
+	// against Authorization rather than Proxy-Authorization, matching
+	// Polipo's urlIsLocal split.
+	reqLocal := httptest.NewRequest(http.MethodGet, "/polipo/", nil)
+	reqLocal.RemoteAddr = "127.0.0.1:12345"
+	rrLocal := httptest.NewRecorder()
+	ph.ServeHTTP(rrLocal, reqLocal)
+	if rrLocal.Code != http.StatusUnauthorized {
+		t.Errorf("local-form, no credentials: got %d, want 401", rrLocal.Code)
+	}
+	if got := rrLocal.Header().Get("WWW-Authenticate"); got != `Basic realm="go-polipo"` {
+		t.Errorf("WWW-Authenticate = %q", got)
+	}
+
+	reqLocalOK := httptest.NewRequest(http.MethodGet, "/polipo/", nil)
+	reqLocalOK.RemoteAddr = "127.0.0.1:12345"
+	reqLocalOK.Header.Set("Authorization", basic("alice", "secret"))
+	rrLocalOK := httptest.NewRecorder()
+	ph.ServeHTTP(rrLocalOK, reqLocalOK)
+	if rrLocalOK.Code != http.StatusOK {
+		t.Errorf("local-form, correct Authorization: got %d, want 200", rrLocalOK.Code)
+	}
+
+	// CONNECT without credentials: 407, same as any other proxied request.
+	reqConnect := httptest.NewRequest(http.MethodConnect, "example.com:443", nil)
+	reqConnect.RemoteAddr = "127.0.0.1:12345"
+	reqConnect.RequestURI = "example.com:443"
+	rrConnect := httptest.NewRecorder()
+	ph.ServeHTTP(rrConnect, reqConnect)
+	if rrConnect.Code != http.StatusProxyAuthRequired {
+		t.Errorf("CONNECT, no credentials: got %d, want 407", rrConnect.Code)
 	}
 }
 

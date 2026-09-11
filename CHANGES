@@ -26,7 +26,7 @@
   * The disk cache write policy is stricter than Polipo's.  Responses that
     carry a Set-Cookie header are no longer written to disk by default;
     set the new dontCacheCookies variable to false for the old behaviour.
-    Responses to requests carrying Authorization or Proxy-Authorization
+    Responses to requests carrying an Authorization header
     are not cached unless the response is explicitly shareable
     (Cache-Control: public, s-maxage, or must-revalidate), per RFC 9111
     section 3.5.  Responses that carry a Vary header are not cached at all
@@ -52,6 +52,17 @@
   * Client access control (allowedClients) accepts bare IPs, CIDR ranges
     and "all"; the check uses the real TCP peer address and ignores
     forwarding headers.
+  * Proxy authentication (authCredentials, authRealm) is now enforced;
+    earlier go-polipo parsed and displayed these but never checked them.
+    An unauthenticated or wrongly authenticated request is rejected with
+    407 (Proxy-Authenticate) for an ordinary proxied request or CONNECT,
+    or 401 (WWW-Authenticate) for a request addressed straight at
+    go-polipo rather than sent through it as a proxy -- Polipo's
+    urlIsLocal split. Proxy-Authorization is consumed by this check and,
+    being hop-by-hop rather than forwarded to the origin, does not mark a
+    response as request-specific for cache-safety purposes; only
+    Authorization does (matching Polipo's own CACHE_AUTHORIZATION flag,
+    which is never set for Proxy-Authorization).
   * Incompatible changes from Polipo 1.x:
       - Build system is "go build" / the provided Makefile; the autoconf
         style options and PLATFORM_DEFINES are gone.

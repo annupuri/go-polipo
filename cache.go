@@ -42,9 +42,20 @@ func (cm *CacheManager) diskCacheDisabled() bool {
 
 // requestIsAuthenticated reports whether req carries HTTP credentials that make
 // its response unsafe for a shared cache to reuse for other clients.
+//
+// This checks only Authorization, not Proxy-Authorization: Authorization is
+// end-to-end (forwarded to, and meaningful to, the origin server), so RFC 9111
+// section 3.5 is right to treat it as marking the response as tied to that
+// one client. Proxy-Authorization is hop-by-hop - it authenticates the client
+// to go-polipo itself (see isAuthorized in proxy.go), is stripped before the
+// request is forwarded upstream, and says nothing about who the origin's
+// response may be shared with. Polipo's own cache_control.flags never set
+// CACHE_AUTHORIZATION for Proxy-Authorization (see http_parse.c); once
+// authCredentials is configured, every legitimate request carries
+// Proxy-Authorization, so treating it the same here would make almost
+// nothing cacheable.
 func requestIsAuthenticated(req *http.Request) bool {
-	return req.Header.Get("Authorization") != "" ||
-		req.Header.Get("Proxy-Authorization") != ""
+	return req.Header.Get("Authorization") != ""
 }
 
 // responseVaries reports whether resp's body depends on request headers (a

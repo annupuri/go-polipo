@@ -448,15 +448,22 @@ func TestStoreSkipsAuthenticated(t *testing.T) {
 		t.Error("Cache-Control: public should allow caching an authenticated response")
 	}
 
-	// Proxy-Authorization is treated the same way.
+	// Proxy-Authorization is unlike Authorization: it authenticates the
+	// client to go-polipo itself (see ProxyHandler.isAuthorized), is stripped
+	// before the request goes upstream, and says nothing about whether the
+	// origin's response may be shared - so it must not block caching. Once
+	// authCredentials is configured, every legitimate request carries
+	// Proxy-Authorization; treating it like Authorization here would make
+	// almost nothing cacheable. Polipo agrees: its CACHE_AUTHORIZATION flag
+	// is only ever set for Authorization (http_parse.c).
 	url3 := "http://example.com/proxy-authed"
 	reqProxyAuth := httptest.NewRequest(http.MethodGet, url3, nil)
 	reqProxyAuth.Header.Set("Proxy-Authorization", "Basic Zm9vOmJhcg==")
 	if err := cm.Store(reqProxyAuth, mkResp("secret", "Cache-Control", "max-age=3600")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
-	if fileExistsForURL(t, cm, url3) {
-		t.Error("Proxy-Authorization request response should not be cached")
+	if !fileExistsForURL(t, cm, url3) {
+		t.Error("Proxy-Authorization request response should still be cached")
 	}
 }
 

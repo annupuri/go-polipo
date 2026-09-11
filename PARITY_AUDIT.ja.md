@@ -40,8 +40,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `proxyAddress` | `127.0.0.1` | ✅ | |
 | `proxyPort` | `8123` | ✅ | |
 | `allowedClients` | (なし) | ✅ | 素の IP、CIDR、`all`/`*`。実際の TCP ピアアドレスで判定。 |
-| `authCredentials` | (null) | ❌ | **プロキシ認証なし。** go-polipo はクライアントを IP でのみ認可し、`407` / `Proxy-Authenticate` チャレンジは存在しない。ARCHITECTURE.md では `auth.c` を「標準ライブラリ + proxy.go」に対応づけているが、チャレンジのロジックは無い。 |
-| `authRealm` | (可変) | ❌ | 同上。 |
+| `authCredentials` | (null) | ✅ | **強制済み（2026-09-12 解決）。** `"user:password"` の単一文字列。空（既定）なら Polipo と同じく認証不要。設定時は `ProxyHandler.isAuthorized` が転送・CONNECT・ローカル `/polipo/*` ページを問わず、他のどの処理よりも先に全リクエストを検査する。認証情報が無い/誤りの場合、通常の転送リクエストと CONNECT には `407`/`Proxy-Authenticate`、go-polipo に（プロキシ経由でなく）直接アクセスしたリクエストには `401`/`WWW-Authenticate`（`Proxy-Authorization` ではなく `Authorization` を検証）を返す — これは Polipo の `urlIsLocal` による分岐で、推測ではなくベンダリングされた C 版の履歴（`auth.c`, `client.c`）から確認した。 |
+| `authRealm` | (可変) | ✅ | **強制済み（2026-09-12 解決）。** 既定値は `"Polipo"`。`authCredentials` が設定されているときのみ意味を持つ（Polipo も `authCredentials` が非 null なら起動時に同じ既定値を補う）。`Basic realm="..."` チャレンジにそのまま使われる。 |
 
 ## 3. 外向き接続
 
@@ -203,7 +203,17 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 ### B. 機能ギャップ — 「後で移植」か「移植しない」を決め、文書化する
 
-- プロキシ認証 `authCredentials` / `authRealm`（§2） — 現状のアクセス制御は IP のみ。
+- ~~プロキシ認証 `authCredentials` / `authRealm`（§2）。~~ **完了（2026-09-12）:**
+  移植した — `ProxyHandler.isAuthorized` が単一の `"user:password"` 認証情報と、
+  Polipo の `401`/`407` の使い分け（`urlIsLocal`）を強制する。実装は推測ではなく
+  ベンダリングされた C 版の履歴から確認した。ついでに見つけた関連バグも修正：
+  `cache.go` の認証付き応答のキャッシュ安全性ルール（§8・ディスクキャッシュの
+  ハードニング）が `Proxy-Authorization` を持つリクエストもキャッシュ対象外に
+  していたのは誤りだった — Polipo 自身の `CACHE_AUTHORIZATION` フラグは
+  `Authorization` にしか立たない（`http_parse.c`）。`Proxy-Authorization` は
+  ホップバイホップでオリジンには届かないため。直さないままこの機能を有効化
+  すると、正規のリクエストすべてが `Proxy-Authorization` を持つことになり、
+  ディスクキャッシュが黙って機能しなくなるところだった。
 - `parentAuthCredentials` / `socksAuthCredentials`（§5） — 認証付き上流プロキシを
   使えない。
 - `censoredHeaders` / `censorReferer`（§7） — プライバシー用ヘッダ除去。今回の

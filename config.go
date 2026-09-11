@@ -42,6 +42,16 @@ type Config struct {
 	// header out of the disk cache. Polipo cached them; a cached Set-Cookie is
 	// replayed to every later requester of the same URL.
 	DontCacheCookies bool
+
+	// AuthCredentials, when non-empty, is a "user:password" string clients
+	// must present (as Basic credentials) to use this proxy. Empty, the
+	// default, requires no authentication, matching Polipo's unset default.
+	AuthCredentials string
+
+	// AuthRealm is the realm advertised in the 401/407 challenge issued when
+	// AuthCredentials is set and a request lacks matching credentials. It has
+	// no effect while AuthCredentials is empty.
+	AuthRealm string
 }
 
 // NewDefaultConfig creates a Config with Polipo's default values.
@@ -65,6 +75,8 @@ func NewDefaultConfig() *Config {
 		DiskCacheUnlinkTime:   32 * 24 * time.Hour,
 		NoDiskCache:           false,
 		DontCacheCookies:      true,
+		AuthCredentials:       "",
+		AuthRealm:             "Polipo",
 	}
 }
 
@@ -92,6 +104,8 @@ func (c *Config) Entries() []ConfigEntry {
 		{"socksProxyType", c.SocksProxyType},
 		{"parentProxy", c.ParentProxy},
 		{"allowedClients", strings.Join(c.AllowedClients, ", ")},
+		{"authCredentials", c.AuthCredentials},
+		{"authRealm", c.AuthRealm},
 		{"tunnelAllowedPorts", c.TunnelAllowedPorts.String()},
 		{"allowedPorts", c.AllowedPorts.String()},
 		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
@@ -266,6 +280,10 @@ func (c *Config) Set(key, val string) error {
 		c.ParentProxy = val
 	case "allowedClients":
 		c.AllowedClients = parseStringList(val)
+	case "authCredentials":
+		c.AuthCredentials = val
+	case "authRealm":
+		c.AuthRealm = val
 	case "tunnelAllowedPorts":
 		ports, err := parsePortSet(val)
 		if err != nil {

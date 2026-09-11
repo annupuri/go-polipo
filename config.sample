@@ -21,6 +21,14 @@
 # allowedClients = 127.0.0.1, ::1
 # allowedClients = 127.0.0.1, 192.168.0.0/24
 
+# Require clients to authenticate with these Basic credentials before using
+# the proxy.  Unset (the default) requires no authentication.  A request
+# missing or failing this is rejected with 407 (Proxy Authentication
+# Required), or 401 (WWW-Authenticate) for a request addressed straight at
+# go-polipo rather than sent through it as a proxy.
+# authCredentials = user:password
+# authRealm = "Polipo"
+
 
 ### On-disk cache
 
