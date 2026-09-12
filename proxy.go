@@ -87,9 +87,16 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		// The proxied request already carries an absolute target URL, so there
 		// is nothing to rewrite. ReverseProxy strips hop-by-hop headers itself;
 		// setting X-Forwarded-For to nil keeps the client's IP private, matching
-		// the original hand-rolled forwarder.
+		// the original hand-rolled forwarder. Deleting arbitrary headers here is
+		// safe (unlike adding Proxy-Authorization - see parentProxyAuthTransport):
+		// ReverseProxy only strips its own fixed hop-by-hop list after Director
+		// returns, it never restores anything Director removed.
 		Director: func(outReq *http.Request) {
 			outReq.Header["X-Forwarded-For"] = nil
+			for _, h := range ph.config.CensoredHeaders {
+				outReq.Header.Del(h)
+			}
+			ph.censorReferer(outReq)
 		},
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -112,9 +119,15 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	return ph
 }
 
-// cacheResponse is the ReverseProxy ModifyResponse hook: it writes cacheable
-// responses to disk unless the target is on the uncachable list.
+// cacheResponse is the ReverseProxy ModifyResponse hook: it strips
+// censoredHeaders (applied uniformly to both directions, matching Polipo's
+// single header-copy filter) and writes cacheable responses to disk unless
+// the target is on the uncachable list. Every disk entry passes through here
+// once, when first fetched, so a later cache hit never needs to re-censor.
 func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
+	for _, h := range ph.config.CensoredHeaders {
+		resp.Header.Del(h)
+	}
 	req := resp.Request
 	if ph.uncachable.Match(req.URL.String(), req.URL.Host) {
 		return nil
@@ -123,6 +136,29 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 		log.Printf("Cache store warning: %v", err)
 	}
 	return nil
+}
+
+// censorReferer applies the censorReferer policy to outReq's Referer header,
+// using Polipo's three levels (config.CensorReferer): 0 ("false", the
+// default) leaves it untouched; 1 ("maybe") drops it when it names a
+// different host than the request's own target (cross-origin); 2 ("true")
+// drops it unconditionally. Unlike Polipo's urlSameHost (an ASCII prefix
+// compare that only recognises a literal "http://" scheme), the host
+// comparison here goes through net/url, so it also covers https:// referrers.
+func (ph *ProxyHandler) censorReferer(outReq *http.Request) {
+	referer := outReq.Header.Get("Referer")
+	if referer == "" {
+		return
+	}
+	switch ph.config.CensorReferer {
+	case 2: // true
+		outReq.Header.Del("Referer")
+	case 1: // maybe
+		refURL, err := url.Parse(referer)
+		if err != nil || !strings.EqualFold(refURL.Host, outReq.URL.Host) {
+			outReq.Header.Del("Referer")
+		}
+	}
 }
 
 // parseAllowedClients turns the textual allowedClients list into IPs and

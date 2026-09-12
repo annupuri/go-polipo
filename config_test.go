@@ -36,6 +36,12 @@ func TestNewDefaultConfig(t *testing.T) {
 	if c.AuthRealm != "Polipo" {
 		t.Errorf(`expected AuthRealm "Polipo", got %q`, c.AuthRealm)
 	}
+	if len(c.CensoredHeaders) != 0 {
+		t.Errorf("expected CensoredHeaders empty, got %v", c.CensoredHeaders)
+	}
+	if c.CensorReferer != 0 {
+		t.Errorf("expected CensorReferer 0, got %d", c.CensorReferer)
+	}
 	if c.ProxyOffline != false {
 		t.Errorf("expected ProxyOffline false, got %t", c.ProxyOffline)
 	}
@@ -204,6 +210,8 @@ func TestSetAllKeys(t *testing.T) {
 	ok("authRealm", "My Proxy")
 	ok("parentAuthCredentials", "bob:hunter2")
 	ok("socksAuthCredentials", "carol:s3cret")
+	ok("censoredHeaders", "X-My-Header, X-Another")
+	ok("censorReferer", "maybe")
 	ok("tunnelAllowedPorts", "443,563")
 	ok("allowedPorts", "80,443")
 	ok("logLevel", "0x0f")
@@ -256,6 +264,12 @@ func TestSetAllKeys(t *testing.T) {
 	if c.SocksAuthCredentials != "carol:s3cret" {
 		t.Errorf("socksAuthCredentials not applied: %q", c.SocksAuthCredentials)
 	}
+	if diff := cmp.Diff([]string{"X-My-Header", "X-Another"}, c.CensoredHeaders); diff != "" {
+		t.Errorf("censoredHeaders mismatch (-want +got):\n%s", diff)
+	}
+	if c.CensorReferer != 1 {
+		t.Errorf("censorReferer = %d, want 1 (maybe)", c.CensorReferer)
+	}
 	if !c.ProxyOffline {
 		t.Error(`proxyOffline "true" should be truthy`)
 	}
@@ -284,6 +298,8 @@ func TestSetAllKeys(t *testing.T) {
 	fails("socksProxyType", "http")
 	fails("relaxTransparency", "yes")
 	fails("relaxTransparency", "2")
+	fails("censorReferer", "yes")
+	fails("censorReferer", "2")
 }
 
 func TestPasswordEntriesAreRedacted(t *testing.T) {

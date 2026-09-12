@@ -587,6 +587,158 @@ func TestProxyServedFromCache(t *testing.T) {
 	}
 }
 
+func TestCensoredHeadersStrippedFromRequest(t *testing.T) {
+	var gotSecret, gotOther string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSecret = r.Header.Get("X-Secret")
+		gotOther = r.Header.Get("X-Kept")
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.CensoredHeaders = []string{"X-Secret"}
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("X-Secret", "s3cret")
+	req.Header.Set("X-Kept", "still-here")
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if gotSecret != "" {
+		t.Errorf("X-Secret reached the origin: %q", gotSecret)
+	}
+	if gotOther != "still-here" {
+		t.Errorf("X-Kept = %q, want it forwarded untouched", gotOther)
+	}
+}
+
+func TestCensoredHeadersStrippedFromResponseAndCache(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=100")
+		w.Header().Set("X-Secret", "s3cret")
+		w.Header().Set("X-Kept", "still-here")
+		w.Write([]byte("body"))
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cfg.CensoredHeaders = []string{"X-Secret"}
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got := rr.Header().Get("X-Secret"); got != "" {
+		t.Errorf("X-Secret reached the client: %q", got)
+	}
+	if got := rr.Header().Get("X-Kept"); got != "still-here" {
+		t.Errorf("X-Kept = %q, want it forwarded untouched", got)
+	}
+
+	cached := cm.Lookup(req)
+	if cached == nil {
+		t.Fatal("expected response to be cached")
+	}
+	defer cached.Body.Close()
+	if got := cached.Header.Get("X-Secret"); got != "" {
+		t.Errorf("X-Secret was written to the disk cache: %q", got)
+	}
+}
+
+func TestCensorRefererFalseForwardsUnchanged(t *testing.T) {
+	var got string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Referer")
+	}))
+	defer backend.Close()
+
+	ph := newTestHandler(NewDefaultConfig()) // CensorReferer left at its default (0/"false")
+
+	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Referer", "http://third-party.example/page")
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if got != "http://third-party.example/page" {
+		t.Errorf("Referer = %q, want it forwarded unchanged", got)
+	}
+}
+
+func TestCensorRefererTrueDropsAlways(t *testing.T) {
+	var got string
+	var sawHeader bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, sawHeader = r.Header.Get("Referer"), r.Header.Get("Referer") != ""
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.CensorReferer = 2 // true
+	ph := newTestHandler(cfg)
+
+	// Even a same-host Referer is dropped at "true".
+	req := httptest.NewRequest(http.MethodGet, backend.URL+"/page2", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Referer", backend.URL+"/page1")
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if sawHeader {
+		t.Errorf("Referer = %q, want it dropped unconditionally", got)
+	}
+}
+
+func TestCensorRefererMaybeDropsOnlyCrossOrigin(t *testing.T) {
+	var gotCrossOrigin, gotSameOrigin string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/cross" {
+			gotCrossOrigin = r.Header.Get("Referer")
+		} else {
+			gotSameOrigin = r.Header.Get("Referer")
+		}
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.CensorReferer = 1 // maybe
+	ph := newTestHandler(cfg)
+
+	// Cross-origin Referer: dropped.
+	req := httptest.NewRequest(http.MethodGet, backend.URL+"/cross", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Referer", "http://third-party.example/page")
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if gotCrossOrigin != "" {
+		t.Errorf("cross-origin Referer = %q, want it dropped", gotCrossOrigin)
+	}
+
+	// Same-origin Referer: kept.
+	req2 := httptest.NewRequest(http.MethodGet, backend.URL+"/same", nil)
+	req2.RemoteAddr = "127.0.0.1:12345"
+	req2.Header.Set("Referer", backend.URL+"/other-page")
+	rr2 := httptest.NewRecorder()
+	ph.ServeHTTP(rr2, req2)
+	if gotSameOrigin != backend.URL+"/other-page" {
+		t.Errorf("same-origin Referer = %q, want it kept", gotSameOrigin)
+	}
+}
+
 func TestProxyForwardUncachable(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=100")

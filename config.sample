@@ -105,6 +105,20 @@
 # socksProxyType = socks5   # only "socks5" is supported (Polipo's "socks4a" is rejected)
 
 
+### HTTP header privacy
+
+# Header names stripped from every forwarded request and every response,
+# before either is cached or handed onward.  Case-insensitive.
+# censoredHeaders = x-my-internal-header, x-another-one
+
+# What to do with the Referer request header:
+#   false (default) - forward it unchanged.
+#   maybe            - drop it only when it names a different host than the
+#                       request's own target (cross-origin).
+#   true             - drop it unconditionally.
+# censorReferer = false
+
+
 ### HTTPS tunnelling (CONNECT)
 
 # Ports the proxy may open for CONNECT tunnels.  Checked instead of, not in

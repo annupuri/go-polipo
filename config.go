@@ -66,6 +66,19 @@ type Config struct {
 	// (RFC 1929). It has no effect without SocksParentProxy.
 	SocksAuthCredentials string
 
+	// CensoredHeaders lists header names stripped from both the outgoing
+	// request (before it reaches the origin) and the incoming response
+	// (before it is cached or returned to the client). Matching is
+	// case-insensitive.
+	CensoredHeaders []string
+
+	// CensorReferer controls suppression of the Referer request header,
+	// using Polipo's three levels: 0 ("false", the default) forwards it
+	// unchanged. 1 ("maybe") drops it only when it names a different host
+	// than the request's own target (cross-origin). 2 ("true") drops it
+	// unconditionally.
+	CensorReferer int
+
 	// ProxyOffline, when true, never contacts the origin for a forwarded
 	// request: whatever is on disk (fresh or stale) is served as-is, and a
 	// true cache miss becomes a 502 instead of a network attempt.
@@ -106,6 +119,8 @@ func NewDefaultConfig() *Config {
 		AuthRealm:             "Polipo",
 		ParentAuthCredentials: "",
 		SocksAuthCredentials:  "",
+		CensoredHeaders:       nil,
+		CensorReferer:         0,
 		ProxyOffline:          false,
 		RelaxTransparency:     0,
 	}
@@ -139,6 +154,8 @@ func (c *Config) Entries() []ConfigEntry {
 		{"authRealm", c.AuthRealm},
 		{"parentAuthCredentials", redactedPassword},
 		{"socksAuthCredentials", redactedPassword},
+		{"censoredHeaders", strings.Join(c.CensoredHeaders, ", ")},
+		{"censorReferer", tristateString(c.CensorReferer)},
 		{"tunnelAllowedPorts", c.TunnelAllowedPorts.String()},
 		{"allowedPorts", c.AllowedPorts.String()},
 		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
@@ -357,6 +374,14 @@ func (c *Config) Set(key, val string) error {
 		c.ParentAuthCredentials = val
 	case "socksAuthCredentials":
 		c.SocksAuthCredentials = val
+	case "censoredHeaders":
+		c.CensoredHeaders = parseStringList(val)
+	case "censorReferer":
+		level, err := parseTristate(val)
+		if err != nil {
+			return fmt.Errorf("invalid censorReferer '%s': %w", val, err)
+		}
+		c.CensorReferer = level
 	case "tunnelAllowedPorts":
 		ports, err := parsePortSet(val)
 		if err != nil {

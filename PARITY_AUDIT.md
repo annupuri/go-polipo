@@ -85,8 +85,8 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable / feature | Polipo default | Status | Note |
 | :--- | :--- | :--: | :--- |
-| `censoredHeaders` | (empty) | ❌ | No configurable header stripping (from/to). |
-| `censorReferer` | `false` | ❌ | Cannot suppress/trim `Referer`. |
+| `censoredHeaders` | (empty) | ✅ | **Implemented (resolved 2026-09-13).** A list of header names, stripped from both the outgoing request (`Director`) and the incoming response (`cacheResponse`, before it is cached or returned) — the same list checked in both directions, matching Polipo's single header-copy filter (`http_parse.c`) rather than two separate lists. Applied once per response, at fetch time, so a later cache hit is already clean; matches Polipo's parse-time-once model. |
+| `censorReferer` | `false` | ⚠️ | **Implemented (resolved 2026-09-13).** Polipo's three levels, confirmed from the vendored C history (`http_parse.c`) rather than guessed: `false` (default) forwards `Referer` unchanged; `maybe` drops it only when it names a different host than the request's own target; `true` drops it unconditionally. The cross-origin check goes through `net/url` rather than replicating Polipo's `urlSameHost` — an ASCII prefix compare that only recognises a literal `http://` scheme and so never treats *any* `https://` referrer as same-host — a deliberate, documented improvement over the letter of the C source. |
 | `disableVia` | `true` (no Via) | ⚠️ | go-polipo never emits `Via` — matches Polipo's *default* — but there is no way to turn it **on**, and therefore no proxy-loop detection. |
 | `proxyName` / `displayName` | hostname / `Polipo` | ❌ | No configurable proxy identity; error bodies are Go's plain-text `http.Error`. |
 | `X-Forwarded-For` | — | ✅ | Explicitly nilled so the client IP is not forwarded (`Director`). |
@@ -232,8 +232,17 @@ at the end groups findings by how much they matter before a public release.
   way: `authCredentials` was shown in the clear on `-v` / the config page,
   when Polipo's `CONFIG_PASSWORD` type (which all three of these variables
   share) always renders `(hidden)` there instead - now all three do.
-- `censoredHeaders` / `censorReferer` (§7) — privacy header stripping; on-theme
-  with the cookie/authorization hardening.
+- ~~`censoredHeaders` / `censorReferer` (§7).~~ **Done (2026-09-13):** ported
+  both, sourced from the vendored C history (`http_parse.c`) rather than
+  guessed. `censoredHeaders` is a header-name list stripped from both the
+  outgoing request and the incoming response - one list, checked in both
+  directions, matching Polipo's single header-copy filter rather than two
+  separate config knobs. `censorReferer` is Polipo's `false`/`maybe`/`true`
+  tristate (unchanged / cross-origin only / always dropped). One deliberate
+  deviation: the cross-origin check uses `net/url` instead of replicating
+  Polipo's `urlSameHost`, an ASCII prefix compare that only recognises a
+  literal `http://` scheme and so can never call an `https://` referrer
+  same-host - go-polipo's version also works for `https://`.
 - Conditional revalidation / `304` (§8) — bandwidth, and a prerequisite for a
   fully faithful transparency model (see below for the scoped part that's
   already ported).

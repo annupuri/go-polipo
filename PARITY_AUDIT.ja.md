@@ -85,8 +85,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 | 変数 / 機能 | Polipo 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
-| `censoredHeaders` | (空) | ❌ | 設定可能なヘッダ除去（送受信）なし。 |
-| `censorReferer` | `false` | ❌ | `Referer` の抑制 / 短縮ができない。 |
+| `censoredHeaders` | (空) | ✅ | **実装済み（2026-09-13 解決）。** ヘッダ名のリストを、転送リクエスト（`Director`）と受信レスポンス（`cacheResponse`、キャッシュ・クライアントへの返却より前）の両方から除去する — 送受信で別リストではなく、Polipo の単一のヘッダコピーフィルタ（`http_parse.c`）と同じく1つのリストを両方向でチェックする。レスポンスへの適用はフェッチ時に一度きりなので、後のキャッシュヒットは既にクリーンな状態（Polipo の「パース時に一度だけ」というモデルと一致）。 |
+| `censorReferer` | `false` | ⚠️ | **実装済み（2026-09-13 解決）。** 推測ではなくベンダリングされた C 版の履歴（`http_parse.c`）から確認した Polipo の三値：`false`（既定）は `Referer` をそのまま転送、`maybe` はリクエスト先と異なるホストを指す場合のみ削除（クロスオリジン時のみ）、`true` は常に削除。1点意図的に変えた箇所がある：クロスオリジン判定に Polipo の `urlSameHost`（`http://` という4文字スキームのみを前提にした ASCII 前置比較で、`https://` の Referer は原理的に絶対に「同一ホスト」と判定されない）をそのまま再現するのではなく `net/url` を使った — go-polipo 版は `https://` でも正しく動く、C ソースの字面より踏み込んだ改善。 |
 | `disableVia` | `true`（Via なし） | ⚠️ | go-polipo は `Via` を一切付けない — Polipo の*既定*と一致 — が、**有効化する手段がなく**、プロキシループ検出も無い。 |
 | `proxyName` / `displayName` | ホスト名 / `Polipo` | ❌ | プロキシ識別名を設定できない。エラー本文は Go の平文 `http.Error`。 |
 | `X-Forwarded-For` | — | ✅ | 明示的に nil 化し、クライアント IP を転送しない（`Director`）。 |
@@ -227,8 +227,16 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   `authCredentials` が `-v` / 設定ページで平文表示されていた — この3変数が
   共有する Polipo の `CONFIG_PASSWORD` 型は常に `(hidden)` としか表示しない
   仕様だったので、3つとも揃えた。
-- `censoredHeaders` / `censorReferer`（§7） — プライバシー用ヘッダ除去。今回の
-  Cookie / Authorization ハードニングと地続き。
+- ~~`censoredHeaders` / `censorReferer`（§7）。~~ **完了（2026-09-13）:** 両方とも
+  移植した — 推測ではなく、ベンダリングされた C 版の履歴（`http_parse.c`）から
+  確認した。`censoredHeaders` はヘッダ名のリストで、転送リクエストと受信
+  レスポンスの両方から除去する（送受信で別リストにせず、Polipo の単一の
+  ヘッダコピーフィルタと同じ1リスト方式）。`censorReferer` は Polipo の
+  `false`/`maybe`/`true` 三値（そのまま転送／クロスオリジン時のみ削除／常に
+  削除）。1点意図的に変えた箇所：クロスオリジン判定は Polipo の
+  `urlSameHost`（`http://` のみを前提とした ASCII 前置比較で、`https://` の
+  Referer は原理的に「同一ホスト」と判定されない）をそのまま再現せず
+  `net/url` を使った — go-polipo 版は `https://` でも正しく動く。
 - 条件付き再検証 / `304`（§8） — 帯域幅の問題。完全に忠実な透過性モデルの前提
   （下記の「既に移植した範囲」はこれ抜きでも成立するよう狭く設計した）。
 - ~~`relaxTransparency` / `proxyOffline`（§8）。~~ **完了（2026-09-13）:** 両方とも
