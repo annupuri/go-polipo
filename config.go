@@ -52,6 +52,20 @@ type Config struct {
 	// AuthCredentials is set and a request lacks matching credentials. It has
 	// no effect while AuthCredentials is empty.
 	AuthRealm string
+
+	// ProxyOffline, when true, never contacts the origin for a forwarded
+	// request: whatever is on disk (fresh or stale) is served as-is, and a
+	// true cache miss becomes a 502 instead of a network attempt.
+	ProxyOffline bool
+
+	// RelaxTransparency controls what happens when the origin cannot be
+	// reached, using Polipo's three levels: 0 ("false", the default) means a
+	// failure is always reported as an error. 1 ("maybe") serves a stale
+	// cache entry instead, with a Warning header noting the failure. 2
+	// ("true") goes further: any existing entry, even stale, is served
+	// without even attempting the network - only a true miss reaches the
+	// origin.
+	RelaxTransparency int
 }
 
 // NewDefaultConfig creates a Config with Polipo's default values.
@@ -77,6 +91,8 @@ func NewDefaultConfig() *Config {
 		DontCacheCookies:      true,
 		AuthCredentials:       "",
 		AuthRealm:             "Polipo",
+		ProxyOffline:          false,
+		RelaxTransparency:     0,
 	}
 }
 
@@ -112,6 +128,36 @@ func (c *Config) Entries() []ConfigEntry {
 		{"logFile", c.LogFile},
 		{"disableLocalInterface", strconv.FormatBool(c.DisableLocalInterface)},
 		{"maxConcurrentRequests", strconv.Itoa(c.MaxConcurrentRequests)},
+		{"proxyOffline", strconv.FormatBool(c.ProxyOffline)},
+		{"relaxTransparency", tristateString(c.RelaxTransparency)},
+	}
+}
+
+// tristateString renders a Polipo CONFIG_TRISTATE value (0/1/2) the way `-v`
+// and the config page show it: "false", "maybe", "true".
+func tristateString(v int) string {
+	switch v {
+	case 1:
+		return "maybe"
+	case 2:
+		return "true"
+	default:
+		return "false"
+	}
+}
+
+// parseTristate parses Polipo's tristate config syntax into 0 ("false"), 1
+// ("maybe") or 2 ("true"), case-insensitively.
+func parseTristate(val string) (int, error) {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "false":
+		return 0, nil
+	case "maybe":
+		return 1, nil
+	case "true":
+		return 2, nil
+	default:
+		return 0, fmt.Errorf("invalid tristate value %q: want false, maybe, or true", val)
 	}
 }
 
@@ -310,6 +356,14 @@ func (c *Config) Set(key, val string) error {
 		c.NoDiskCache = strings.ToLower(val) == "true" || val == "1"
 	case "dontCacheCookies":
 		c.DontCacheCookies = strings.ToLower(val) == "true" || val == "1"
+	case "proxyOffline":
+		c.ProxyOffline = strings.ToLower(val) == "true" || val == "1"
+	case "relaxTransparency":
+		level, err := parseTristate(val)
+		if err != nil {
+			return fmt.Errorf("invalid relaxTransparency '%s': %w", val, err)
+		}
+		c.RelaxTransparency = level
 	case "maxConcurrentRequests":
 		limit, err := strconv.Atoi(val)
 		if err != nil {

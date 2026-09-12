@@ -11,7 +11,9 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func newTestHandler(cfg *Config) *ProxyHandler {
@@ -503,6 +505,238 @@ func TestProxyForwardPortNotAllowed(t *testing.T) {
 	ph.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rr.Code)
+	}
+}
+
+// seedCacheEntry writes a GET response for target straight into cm, either
+// fresh (max-age=3600, dated now) or already stale (max-age=1, dated two
+// hours ago), for tests that exercise proxyOffline / relaxTransparency.
+func seedCacheEntry(t *testing.T, cm *CacheManager, target, body string, fresh bool) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        http.Header{},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+	if fresh {
+		resp.Header.Set("Cache-Control", "max-age=3600")
+		resp.Header.Set("Date", timeHeader(0))
+	} else {
+		resp.Header.Set("Cache-Control", "max-age=1")
+		resp.Header.Set("Date", timeHeader(-2*time.Hour))
+	}
+	if err := cm.Store(req, resp); err != nil {
+		t.Fatalf("seed Store failed: %v", err)
+	}
+}
+
+func TestProxyOfflineServesStaleFromCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cfg.ProxyOffline = true
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := "http://cached.example.com/resource"
+	seedCacheEntry(t, cm, target, "stale body", false)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "stale body" {
+		t.Errorf("body = %q, want %q", got, "stale body")
+	}
+	if got := rr.Header().Get("Warning"); got != `112 go-polipo "Disconnected operation"` {
+		t.Errorf("Warning = %q, want the disconnected-operation warning", got)
+	}
+}
+
+func TestProxyOfflineServesFreshWithoutWarning(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cfg.ProxyOffline = true
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := "http://cached.example.com/fresh"
+	seedCacheEntry(t, cm, target, "fresh body", true)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "fresh body" {
+		t.Errorf("body = %q, want %q", got, "fresh body")
+	}
+	if got := rr.Header().Get("Warning"); got != "" {
+		t.Errorf("Warning = %q, want none for a fresh entry", got)
+	}
+}
+
+func TestProxyOfflineMissNeverDialsOrigin(t *testing.T) {
+	var hits int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Write([]byte("should never be seen"))
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cfg.ProxyOffline = true
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, backend.URL+"/not-cached", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); !strings.Contains(string(got), "Disconnected operation and object not in cache") {
+		t.Errorf("body = %q, want the disconnected-operation message", got)
+	}
+	if atomic.LoadInt32(&hits) != 0 {
+		t.Error("proxyOffline must never dial the origin")
+	}
+}
+
+func TestRelaxTransparencyMaybeServesStaleOnFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cfg.RelaxTransparency = 1 // maybe
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	// Port 9999 is in the default allowedPorts range but nothing listens there,
+	// so the round trip fails the way an unreachable origin would.
+	target := "http://127.0.0.1:9999/resource"
+	seedCacheEntry(t, cm, target, "stale body", false)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (served from stale cache)", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "stale body" {
+		t.Errorf("body = %q, want %q", got, "stale body")
+	}
+	if got := rr.Header().Get("Warning"); got != `111 go-polipo "Revalidation failed"` {
+		t.Errorf("Warning = %q, want the revalidation-failed warning", got)
+	}
+}
+
+func TestRelaxTransparencyFalseStillErrorsOnFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	// RelaxTransparency left at its default (0/"false").
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := "http://127.0.0.1:9999/resource"
+	seedCacheEntry(t, cm, target, "stale body", false)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 (relaxTransparency is off)", rr.Code)
+	}
+}
+
+func TestRelaxTransparencyTrueServesStaleWithoutContactingOrigin(t *testing.T) {
+	var hits int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Write([]byte("live body"))
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cfg.RelaxTransparency = 2 // true
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedCacheEntry(t, cm, target, "stale body", false)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (served from stale cache)", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "stale body" {
+		t.Errorf("body = %q, want %q", got, "stale body")
+	}
+	if got := rr.Header().Get("Warning"); got != `110 go-polipo "Object is stale"` {
+		t.Errorf("Warning = %q, want the object-is-stale warning", got)
+	}
+	if atomic.LoadInt32(&hits) != 0 {
+		t.Error(`relaxTransparency "true" must not contact the origin when a stale entry exists`)
+	}
+}
+
+func TestRelaxTransparencyMaybeStillContactsOriginWhenStale(t *testing.T) {
+	var hits int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Write([]byte("live body"))
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cfg.RelaxTransparency = 1 // maybe: only failures fall back to stale
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedCacheEntry(t, cm, target, "stale body", false)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "live body" {
+		t.Errorf(`body = %q, want "live body" (relaxTransparency "maybe" should still try the network)`, got)
+	}
+	if atomic.LoadInt32(&hits) != 1 {
+		t.Errorf("hits = %d, want 1", hits)
 	}
 }
 

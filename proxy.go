@@ -73,6 +73,18 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		},
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
+			// error when the origin cannot be reached at all.
+			if ph.config.RelaxTransparency >= 1 {
+				if staleResp, _ := ph.cacheManager.LookupStale(r); staleResp != nil {
+					defer staleResp.Body.Close()
+					w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
+					copyHeader(w.Header(), staleResp.Header)
+					w.WriteHeader(staleResp.StatusCode)
+					io.Copy(w, staleResp.Body)
+					return
+				}
+			}
 			log.Printf("Proxy error: %s %s: %v", r.Method, r.URL, err)
 			http.Error(w, err.Error(), http.StatusBadGateway)
 		},
@@ -442,6 +454,13 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	// proxyOffline: never contact the origin. Whatever is cached (fresh or
+	// stale) is served as-is; a true miss is a 502, not a network attempt.
+	if ph.config.ProxyOffline {
+		ph.serveOffline(w, req)
+		return
+	}
+
 	// A fresh cache hit is served straight from disk.
 	if cachedResp := ph.cacheManager.Lookup(req); cachedResp != nil {
 		defer cachedResp.Body.Close()
@@ -451,9 +470,45 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	// relaxTransparency "true": an existing entry, even if stale, is served
+	// without even attempting to reach the origin - only a true miss below
+	// falls through to the network.
+	if ph.config.RelaxTransparency >= 2 {
+		if staleResp, stale := ph.cacheManager.LookupStale(req); staleResp != nil {
+			defer staleResp.Body.Close()
+			if stale {
+				w.Header().Set("Warning", `110 go-polipo "Object is stale"`)
+			}
+			copyHeader(w.Header(), staleResp.Header)
+			w.WriteHeader(staleResp.StatusCode)
+			io.Copy(w, staleResp.Body)
+			return
+		}
+	}
+
 	// Otherwise forward upstream; caching and error handling are wired into the
-	// ReverseProxy via ModifyResponse and ErrorHandler.
+	// ReverseProxy via ModifyResponse and ErrorHandler. When relaxTransparency
+	// is "maybe" or "true", the ErrorHandler falls back to a stale cache entry
+	// instead of a raw error if the origin cannot be reached.
 	ph.reverseProxy.ServeHTTP(w, req)
+}
+
+// serveOffline answers a forwarded request under proxyOffline, which never
+// dials the origin: a cached entry (fresh or stale) is served as-is, and a
+// true miss becomes a 502 rather than a network attempt.
+func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
+	resp, stale := ph.cacheManager.LookupStale(req)
+	if resp == nil {
+		http.Error(w, "Disconnected operation and object not in cache", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if stale {
+		w.Header().Set("Warning", `112 go-polipo "Disconnected operation"`)
+	}
+	copyHeader(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // copyHeader appends every value of src into dst.

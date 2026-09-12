@@ -61,6 +61,25 @@
 # ...).  They are forwarded normally, just not stored.
 
 
+### Behaviour when the origin can't be reached
+
+# Never contact the origin for a forwarded request: serve whatever is cached
+# (fresh or stale) as-is, and answer a true miss with 502 instead of dialing
+# out.  CONNECT tunnels are unaffected.
+# proxyOffline = false
+
+# What to do instead of a raw error when the origin can't be reached, or (at
+# "true") to skip trying at all when something is already cached:
+#   false (default) - a failure is always reported as an error.
+#   maybe            - serve a stale cache entry instead, with a Warning
+#                       header noting the failure; a live origin is still
+#                       used normally.
+#   true             - go further: any cached entry, even stale, is served
+#                       without even attempting the network; only a true
+#                       miss reaches the origin.
+# relaxTransparency = false
+
+
 ### Access filters (see forbidden.sample for the file format)
 
 # forbiddenFile = "/etc/polipo/forbidden"     # URLs to reject with 403

@@ -105,8 +105,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | **ヒューリスティック鮮度**（`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`） | (可変) | ⚠️ | **実装済み・設定不可（2026-09-11 解決）。** `Expires` / `max-age` / `s-maxage` の無い `200` は `isExpired` でヒューリスティック寿命 `min(0.1 × (Date − Last-Modified), 24h)`（`Last-Modified` 無しなら 24h 固定）を得る。`Lookup` と `-x` の両方に効く。**`maxAge` / `maxAgeFraction`：** Polipo は設定変数だったが go-polipo は同じ既定値をハードコード — 運用ポリシーではなく実質 RFC 由来の定数で、緩い値にすると今回直した過剰配信が復活するため（`cache.go` のコメント参照）。**`maxExpiresAge`**（未来の `Expires`/`max-age` をどこまで信用するかの上限）：先送り — `diskCacheUnlinkTime`（32日）が失効を頭打ちにするが、継続アクセスされるエントリには不完全。**`maxNoModifiedAge`**：条件付き再検証 / `304` が無い限り無意味（そのギャップは B 章）。 |
 | `preciseExpiry` | `false` | 🔷 | 上記が無い以上、該当なし。 |
 | `cacheIsShared` | `true` | ⚠️ | トグルは無いが、共有キャッシュのルールは部分的に強制されている。`private` は常にスキップ。認証付き応答は明示的に共有可能でない限りスキップ（ディスクキャッシュのハードニング）。 |
-| `relaxTransparency` | `false` | ❌ | 「上流失敗時に stale を配信する」モードなし。 |
-| `proxyOffline` | `false` | ❌ | オフライン / キャッシュ専用モードなし。 |
+| `relaxTransparency` | `false` | ⚠️ | **実装済み・GET/HEAD のみ（2026-09-13 解決）。** `false`/`maybe`/`true` の三値。ベンダリングされた C 版の履歴（`http.c` の `proxyOffline`/`relaxTransparency` 直前のコメント、`client.c` での使用箇所）から確認した挙動に合わせた。`false`（既定）：上流との通信に失敗すればそのままエラー。`maybe`：上流に一切到達できないとき、`ReverseProxy` の `ErrorHandler` がエラーの代わりに stale なキャッシュを `Warning: 111 ... "Revalidation failed"` 付きで返す。上流に到達できた場合は通常どおり配信・キャッシュする。`true`：`handleForward` がネットワークに一切触れず既存エントリを配信する — 新鮮なら通常経路、stale なら `Warning: 110 ... "Object is stale"` 付き — ので、本当にキャッシュミスのときだけ上流へ到達する。go-polipo には Polipo の「再検証が必要」という独立した状態がない（期限切れエントリは無条件に丸ごと再取得する）ため、Polipo 内部の `validate`/`objectMustRevalidate` の仕組みそのものではなく、観測可能な「失敗時／stale 配信」挙動だけを移植した。CONNECT トンネルは対象外（Polipo でも `tunnel.c` にはどちらの変数も現れず、影響しない）。 |
+| `proxyOffline` | `false` | ⚠️ | **実装済み・GET/HEAD のみ（2026-09-13 解決）。** true のとき `handleForward` は転送リクエストで上流に一切ダイヤルしない：キャッシュにあれば新鮮でも stale でもそのまま配信し（stale なら `Warning: 112 ... "Disconnected operation"`）、本当にキャッシュミスなら通信を試みず Polipo と同じ文言 `502 Disconnected operation and object not in cache` を返す。CONNECT トンネルは対象外で、Polipo の `httpServerRequest` のゲート（`server.c`）にも手を入れていない点と一致する。 |
 
 ## 9. キャッシュ — Vary とコンテンツネゴシエーション
 
@@ -218,9 +218,19 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   使えない。
 - `censoredHeaders` / `censorReferer`（§7） — プライバシー用ヘッダ除去。今回の
   Cookie / Authorization ハードニングと地続き。
-- 条件付き再検証 / `304`（§8） — 帯域幅の問題。`relaxTransparency` や忠実な
-  透過性モデルの前提でもある。
-- `relaxTransparency` / `proxyOffline`（§8） — 失敗時 stale 配信・オフラインモード。
+- 条件付き再検証 / `304`（§8） — 帯域幅の問題。完全に忠実な透過性モデルの前提
+  （下記の「既に移植した範囲」はこれ抜きでも成立するよう狭く設計した）。
+- ~~`relaxTransparency` / `proxyOffline`（§8）。~~ **完了（2026-09-13）:** 両方とも
+  観測可能な挙動を移植した — 推測ではなく、ベンダリングされた C 版の履歴
+  （`http.c` のコメントブロック、`client.c` での両変数の使用箇所）から確認した。
+  `relaxTransparency` は `false`/`maybe`/`true` の三値：`maybe` は上流に到達
+  できないとき stale なキャッシュを（`Warning: 111` 付きで）代わりに返し、
+  `true` はネットワークを一切試みず既存エントリ（stale でも）をそのまま返す。
+  `proxyOffline` は上流に一切ダイヤルしない — キャッシュヒットか `502` のどちらか。
+  GET/HEAD（go-polipo のキャッシュが扱う唯一のメソッド）と転送リクエストのみが
+  対象（CONNECT は対象外、Polipo と同様）。見送った部分：Polipo 内部の
+  `validate`/`objectMustRevalidate` の区別そのもの — 条件付き再検証（上記の
+  `304` 項目）が無い go-polipo にはこれに相当する状態がない。
 - シグナルまたはエンドポイント経由の `forbidden`/`uncachable` 実行時リロード
   （§4, §15）。
 - `forbiddenTunnelsFile`（§4） — ホスト単位の CONNECT ブロックリスト。

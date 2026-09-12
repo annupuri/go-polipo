@@ -36,6 +36,12 @@ func TestNewDefaultConfig(t *testing.T) {
 	if c.AuthRealm != "Polipo" {
 		t.Errorf(`expected AuthRealm "Polipo", got %q`, c.AuthRealm)
 	}
+	if c.ProxyOffline != false {
+		t.Errorf("expected ProxyOffline false, got %t", c.ProxyOffline)
+	}
+	if c.RelaxTransparency != 0 {
+		t.Errorf("expected RelaxTransparency 0, got %d", c.RelaxTransparency)
+	}
 }
 
 func TestSetDiskCacheDisableKeys(t *testing.T) {
@@ -205,6 +211,8 @@ func TestSetAllKeys(t *testing.T) {
 	ok("diskCacheUnlinkTime", "16d")
 	ok("noDiskCache", "true")
 	ok("dontCacheCookies", "false")
+	ok("proxyOffline", "true")
+	ok("relaxTransparency", "maybe")
 	ok("thisKeyDoesNotExist", "ignored")
 
 	if c.ProxyAddress != "0.0.0.0" || c.ProxyPort != 3128 {
@@ -240,6 +248,12 @@ func TestSetAllKeys(t *testing.T) {
 	if c.AuthRealm != "My Proxy" {
 		t.Errorf("authRealm not applied: %q", c.AuthRealm)
 	}
+	if !c.ProxyOffline {
+		t.Error(`proxyOffline "true" should be truthy`)
+	}
+	if c.RelaxTransparency != 1 {
+		t.Errorf("relaxTransparency = %d, want 1 (maybe)", c.RelaxTransparency)
+	}
 
 	// disableLocalInterface falls back to false for anything not true/1.
 	c.Set("disableLocalInterface", "false")
@@ -260,6 +274,38 @@ func TestSetAllKeys(t *testing.T) {
 	fails("socksProxyType", "socks4a") // Polipo accepted it; go-polipo only does SOCKS5
 	fails("socksProxyType", "socks4")
 	fails("socksProxyType", "http")
+	fails("relaxTransparency", "yes")
+	fails("relaxTransparency", "2")
+}
+
+func TestRelaxTransparencyTristate(t *testing.T) {
+	c := NewDefaultConfig()
+
+	tests := []struct {
+		val  string
+		want int
+	}{
+		{"false", 0},
+		{"maybe", 1},
+		{"true", 2},
+		{"FALSE", 0}, // case-insensitive
+		{"True", 2},
+	}
+	for _, tt := range tests {
+		if err := c.Set("relaxTransparency", tt.val); err != nil {
+			t.Errorf("Set(relaxTransparency, %q) unexpected error: %v", tt.val, err)
+		}
+		if c.RelaxTransparency != tt.want {
+			t.Errorf("relaxTransparency = %d after %q, want %d", c.RelaxTransparency, tt.val, tt.want)
+		}
+	}
+
+	// Entries() renders the tristate name, not the raw int, matching Polipo's -v.
+	for _, e := range c.Entries() {
+		if e.Name == "relaxTransparency" && e.Value != "true" {
+			t.Errorf("relaxTransparency entry = %q, want %q", e.Value, "true")
+		}
+	}
 }
 
 func TestParseLevelFormats(t *testing.T) {

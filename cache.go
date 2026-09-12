@@ -130,22 +130,46 @@ func (cm *CacheManager) GetCachePath(rawURL string) (string, error) {
 
 // Lookup retrieves a cached response for the request if it exists and is fresh.
 func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
-	if cm.diskCacheDisabled() {
+	resp, stale := cm.lookupEntry(req)
+	if resp == nil {
 		return nil
 	}
-	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+	if stale {
+		// We could support conditional validation here, but for simplicity
+		// we treat expired cache as a miss.
+		resp.Body.Close()
 		return nil
+	}
+	return resp
+}
+
+// LookupStale retrieves a cached response regardless of freshness, reporting
+// whether it is expired. It backs relaxTransparency and proxyOffline, which
+// serve a stale entry rather than contacting (or, for proxyOffline, ever
+// attempting to contact) the origin. resp is nil when there is no usable
+// entry at all, in which case stale is meaningless.
+func (cm *CacheManager) LookupStale(req *http.Request) (resp *http.Response, stale bool) {
+	return cm.lookupEntry(req)
+}
+
+// lookupEntry does the actual disk read shared by Lookup and LookupStale.
+func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, stale bool) {
+	if cm.diskCacheDisabled() {
+		return nil, false
+	}
+	if req.Method != http.MethodGet && req.Method != http.MethodHead {
+		return nil, false
 	}
 
 	// Cache-Control checks
 	cc := req.Header.Get("Cache-Control")
 	if strings.Contains(cc, "no-cache") || strings.Contains(cc, "no-store") {
-		return nil
+		return nil, false
 	}
 
 	path, err := cm.GetCachePath(req.URL.String())
 	if err != nil {
-		return nil
+		return nil, false
 	}
 
 	cm.mu.RLock()
@@ -153,14 +177,14 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 
 	file, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 
 	// Parse response from file
-	resp, err := http.ReadResponse(bufio.NewReader(file), req)
+	resp, err = http.ReadResponse(bufio.NewReader(file), req)
 	if err != nil {
 		file.Close()
-		return nil
+		return nil, false
 	}
 
 	// Verify X-Polipo-Location to prevent hash collisions
@@ -168,7 +192,7 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 	if loc != req.URL.String() {
 		resp.Body.Close()
 		file.Close()
-		return nil
+		return nil, false
 	}
 
 	// A stored response carrying Vary cannot be matched against this request's
@@ -178,17 +202,10 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 	if responseVaries(resp) {
 		resp.Body.Close()
 		file.Close()
-		return nil
+		return nil, false
 	}
 
-	// Check expiration
-	if cm.isExpired(resp) {
-		resp.Body.Close()
-		file.Close()
-		// We could support conditional validation here, but for simplicity
-		// we treat expired cache as a miss.
-		return nil
-	}
+	stale = cm.isExpired(resp)
 
 	// Clean up X-Polipo headers before returning
 	resp.Header.Del("X-Polipo-Location")
@@ -196,7 +213,7 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 	resp.Header.Del("X-Polipo-Access")
 	resp.Header.Del("X-Polipo-Body-Offset")
 
-	return resp
+	return resp, stale
 }
 
 // Heuristic freshness parameters (RFC 9111 section 4.2.2). Polipo exposed the

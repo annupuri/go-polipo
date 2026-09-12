@@ -105,8 +105,8 @@ at the end groups findings by how much they matter before a public release.
 | **Heuristic freshness** (`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`) | (varies) | ⚠️ | **Implemented, not configurable (resolved 2026-09-11).** A `200` with no `Expires`/`max-age`/`s-maxage` now gets a heuristic lifetime in `isExpired`: `min(0.1 × (Date − Last-Modified), 24h)`, or a flat 24h with no `Last-Modified`. Governs both `Lookup` and `-x`. **`maxAge` / `maxAgeFraction`:** Polipo made these config variables; go-polipo hard-codes the same defaults — they behave as RFC-blessed constants, not operator policy, and a permissive value would re-open the over-serving this fixes (comment in `cache.go`). **`maxExpiresAge`** (cap on how far a future `Expires`/`max-age` is trusted): deferred — `diskCacheUnlinkTime` (32d) bounds on-disk staleness, though imperfectly for a continuously re-accessed entry. **`maxNoModifiedAge`**: moot until conditional revalidation / `304` exists (that gap is in section B). |
 | `preciseExpiry` | `false` | 🔷 | N/A without the above. |
 | `cacheIsShared` | `true` | ⚠️ | No toggle, but the shared-cache rules are now partly enforced: `private` always skipped; authenticated responses skipped unless explicitly shareable (disk-cache hardening). |
-| `relaxTransparency` | `false` | ❌ | No "serve stale on upstream failure" mode. |
-| `proxyOffline` | `false` | ❌ | No offline / cache-only mode. |
+| `relaxTransparency` | `false` | ⚠️ | **Implemented, GET/HEAD only (resolved 2026-09-13).** Tristate `false`/`maybe`/`true`, matching Polipo's semantics from the vendored C history (the comment above `proxyOffline`/`relaxTransparency` in `http.c`, and their use in `client.c`). `false` (default): a failed round trip is still a raw error. `maybe`: the `ReverseProxy` `ErrorHandler` falls back to a stale cache entry with `Warning: 111 ... "Revalidation failed"` when the origin can't be reached at all; a reachable origin is still used and its response served/cached normally. `true`: `handleForward` serves any existing entry without even attempting the network — fresh via the normal path, stale with `Warning: 110 ... "Object is stale"` — so only a true cache miss reaches the origin. go-polipo has no distinct "must revalidate" step (an expired entry with no override is simply refetched in full), so this ports the observable failure/stale-serving behaviour rather than Polipo's internal `validate`/`objectMustRevalidate` machinery. CONNECT tunnels are unaffected, matching Polipo (neither variable appears in `tunnel.c`). |
+| `proxyOffline` | `false` | ⚠️ | **Implemented, GET/HEAD only (resolved 2026-09-13).** When true, `handleForward` never dials the origin for a forwarded request: any cached entry, fresh or stale, is served as-is (a stale one gets `Warning: 112 ... "Disconnected operation"`), and a true miss returns Polipo's own message, `502 Disconnected operation and object not in cache`, without a network attempt. CONNECT tunnels are unaffected, matching Polipo's `httpServerRequest` gate (`server.c`), which this doesn't touch. |
 
 ## 9. Cache — Vary & content negotiation
 
@@ -223,9 +223,21 @@ at the end groups findings by how much they matter before a public release.
   upstream proxies.
 - `censoredHeaders` / `censorReferer` (§7) — privacy header stripping; on-theme
   with the cookie/authorization hardening.
-- Conditional revalidation / `304` (§8) — bandwidth, and a prerequisite for
-  `relaxTransparency` and a faithful transparency model.
-- `relaxTransparency` / `proxyOffline` (§8) — stale-on-failure and offline modes.
+- Conditional revalidation / `304` (§8) — bandwidth, and a prerequisite for a
+  fully faithful transparency model (see below for the scoped part that's
+  already ported).
+- ~~`relaxTransparency` / `proxyOffline` (§8).~~ **Done (2026-09-13):** ported
+  the observable behaviour of both, sourced from the vendored C history
+  (`http.c`'s comment block, `client.c`'s use of the two variables) rather
+  than guessed. `relaxTransparency` is a `false`/`maybe`/`true` tristate:
+  `maybe` serves a stale cache entry (with a `Warning: 111` header) instead of
+  an error when the origin can't be reached; `true` serves any existing entry,
+  even stale, without even trying the network. `proxyOffline` never dials the
+  origin at all — cache hit or `502`. Scoped to GET/HEAD (the only methods
+  go-polipo's cache handles) and to forwarded requests (CONNECT is untouched,
+  matching Polipo). Not attempted: Polipo's internal `validate`/
+  `objectMustRevalidate` distinction, which has no equivalent here without
+  conditional revalidation (the `304` item above).
 - Runtime reload of `forbidden`/`uncachable` via signal or endpoint (§4, §15).
 - `forbiddenTunnelsFile` (§4) — per-host CONNECT blocklist.
 - On-disk size cap `maxDiskCacheEntrySize` / truncation (§11) — unbounded growth
