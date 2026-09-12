@@ -101,8 +101,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `Expires` / `Cache-Control: max-age` | — | ✅ | `isExpired` で尊重。`s-maxage` も尊重し、共有キャッシュである本実装では優先。不正な `Expires`（例 `0`）は失効済み扱い（RFC 9111 §5.3）。 |
 | リクエストの `Cache-Control: no-cache`/`no-store` | — | ✅ | ルックアップをスキップ。 |
 | レスポンスの `no-store` / `private` | — | ✅ | ストアをスキップ。 |
-| **条件付き再検証** | — | ❌ | `If-None-Match` / `If-Modified-Since` なし。`cache.go` のコメント曰く *"we treat expired cache as a miss."*。期限切れエントリは毎回まるごと再取得し、`304` の経路が存在しない。Polipo の透過性モデルは再検証を前提にしている。 |
-| **ヒューリスティック鮮度**（`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`） | (可変) | ⚠️ | **実装済み・設定不可（2026-09-11 解決）。** `Expires` / `max-age` / `s-maxage` の無い `200` は `isExpired` でヒューリスティック寿命 `min(0.1 × (Date − Last-Modified), 24h)`（`Last-Modified` 無しなら 24h 固定）を得る。`Lookup` と `-x` の両方に効く。**`maxAge` / `maxAgeFraction`：** Polipo は設定変数だったが go-polipo は同じ既定値をハードコード — 運用ポリシーではなく実質 RFC 由来の定数で、緩い値にすると今回直した過剰配信が復活するため（`cache.go` のコメント参照）。**`maxExpiresAge`**（未来の `Expires`/`max-age` をどこまで信用するかの上限）：先送り — `diskCacheUnlinkTime`（32日）が失効を頭打ちにするが、継続アクセスされるエントリには不完全。**`maxNoModifiedAge`**：条件付き再検証 / `304` が無い限り無意味（そのギャップは B 章）。 |
+| **条件付き再検証** | — | ⚠️ | **実装済み・上流方向のみ（2026-09-13 解決）。** 期限切れキャッシュエントリが `ETag` および/または `Last-Modified` を持つ場合、`ProxyHandler` の `Director`（`addConditionalHeaders`）が転送リクエストを条件付きにする。`304 Not Modified` が返れば、RFC 9111 §4.3.4 に沿って保存済みエントリへマージする（`reviveFromCache`、`ModifyResponse` 内）— `Cache-Control`・`Content-Location`・`Date`・`ETag`・`Expires`・`Vary` を `304` の値で更新し、キャッシュ済みの本文と他のヘッダはそのまま維持、マージ結果を再度 `Store` することで新しい鮮度期間が即座に有効になる（本文の再取得なし）。`200` が返れば従来どおりエントリを丸ごと置き換える。意図的にスコープを絞った点：go-polipo 自身が**クライアントからの**条件付きリクエストをキャッシュだけで処理する機能（RFC 9111 §4.3.5）は実装していない — クライアントが送ってきた `If-None-Match`/`If-Modified-Since` はそのまま尊重し（go-polipo 自身が合成した値で上書きしない）上流にそのまま転送するだけで、返ってきた応答（本文なしの `304` を含む）はどちらの経路でも同じロジックで処理する。 |
+| **ヒューリスティック鮮度**（`maxAge`, `maxAgeFraction`, `maxExpiresAge`, `maxNoModifiedAge`） | (可変) | ⚠️ | **実装済み・設定不可（2026-09-11 解決）。** `Expires` / `max-age` / `s-maxage` の無い `200` は `isExpired` でヒューリスティック寿命 `min(0.1 × (Date − Last-Modified), 24h)`（`Last-Modified` 無しなら 24h 固定）を得る。`Lookup` と `-x` の両方に効く。**`maxAge` / `maxAgeFraction`：** Polipo は設定変数だったが go-polipo は同じ既定値をハードコード — 運用ポリシーではなく実質 RFC 由来の定数で、緩い値にすると今回直した過剰配信が復活するため（`cache.go` のコメント参照）。**`maxExpiresAge`**（未来の `Expires`/`max-age` をどこまで信用するかの上限）：先送り — `diskCacheUnlinkTime`（32日）が失効を頭打ちにするが、継続アクセスされるエントリには不完全。**`maxNoModifiedAge`**：条件付き再検証の実装中にベンダリングされた C 版の履歴（`object.c`）で確認したところ、これは再検証とは無関係で、`Expires`/`max-age` も `Last-Modified` も無い応答に対するヒューリスティック鮮度の上限だった（`maxNoModifiedAge = 23 * 60` 秒 = 23分）。これにより go-polipo の既存のヒューリスティック鮮度実装（`heuristicMaxLifetime`、2026-09-11 解決）に忠実性のバグがあることが判明した：go-polipo は同じ「`Last-Modified` 無し」のケースに一律24時間を使っている（Polipo の23分より約1300倍も緩い）上に、`Last-Modified` が**ある**場合の `maxAgeFraction` 計算の上限としても同じ24時間を使っているが、Polipo はそちらには `maxAge`（`14 * 24 + 1` 時間 ≈ 約14日、go-polipo の24時間よりずっと緩い）を使っている。この項目の範囲外なので今回は修正していない — ショートリスト参照。 |
 | `preciseExpiry` | `false` | 🔷 | 上記が無い以上、該当なし。 |
 | `cacheIsShared` | `true` | ⚠️ | トグルは無いが、共有キャッシュのルールは部分的に強制されている。`private` は常にスキップ。認証付き応答は明示的に共有可能でない限りスキップ（ディスクキャッシュのハードニング）。 |
 | `relaxTransparency` | `false` | ⚠️ | **実装済み・GET/HEAD のみ（2026-09-13 解決）。** `false`/`maybe`/`true` の三値。ベンダリングされた C 版の履歴（`http.c` の `proxyOffline`/`relaxTransparency` 直前のコメント、`client.c` での使用箇所）から確認した挙動に合わせた。`false`（既定）：上流との通信に失敗すればそのままエラー。`maybe`：上流に一切到達できないとき、`ReverseProxy` の `ErrorHandler` がエラーの代わりに stale なキャッシュを `Warning: 111 ... "Revalidation failed"` 付きで返す。上流に到達できた場合は通常どおり配信・キャッシュする。`true`：`handleForward` がネットワークに一切触れず既存エントリを配信する — 新鮮なら通常経路、stale なら `Warning: 110 ... "Object is stale"` 付き — ので、本当にキャッシュミスのときだけ上流へ到達する。go-polipo には Polipo の「再検証が必要」という独立した状態がない（期限切れエントリは無条件に丸ごと再取得する）ため、Polipo 内部の `validate`/`objectMustRevalidate` の仕組みそのものではなく、観測可能な「失敗時／stale 配信」挙動だけを移植した。CONNECT トンネルは対象外（Polipo でも `tunnel.c` にはどちらの変数も現れず、影響しない）。 |
@@ -237,8 +237,19 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   `urlSameHost`（`http://` のみを前提とした ASCII 前置比較で、`https://` の
   Referer は原理的に「同一ホスト」と判定されない）をそのまま再現せず
   `net/url` を使った — go-polipo 版は `https://` でも正しく動く。
-- 条件付き再検証 / `304`（§8） — 帯域幅の問題。完全に忠実な透過性モデルの前提
-  （下記の「既に移植した範囲」はこれ抜きでも成立するよう狭く設計した）。
+- ~~条件付き再検証 / `304`（§8）。~~ **完了（2026-09-13）:** 上流方向の半分を
+  移植した — 推測ではなく、ベンダリングされた C 版の履歴（`object.c`、
+  `http_parse.c`）から確認した。バリデータを持つ stale なエントリはまるごと
+  再取得ではなく条件付き GET になり、`304` が返れば（RFC 9111 §4.3.4）
+  新規ダウンロードの代わりに保存済みエントリへマージする。意図的に見送った点：
+  **クライアントからの**条件付きリクエストを上流に一切問い合わせずキャッシュ
+  だけで処理する機能（RFC 9111 §4.3.5）— クライアント自身のバリデータは
+  ショートカットせずそのまま上流に転送する。今回発見したが対応していない点
+  （このアイテムの範囲外）：`maxNoModifiedAge` の意味を確認する過程で、
+  既存のヒューリスティック鮮度の実装が一律24時間の上限を使っているが、
+  Polipo は`Last-Modified` がある場合は `maxAge`（約14日）、無い場合は
+  `maxNoModifiedAge`（23分）という全く異なる2つの値を使い分けていることが
+  判明した — §8のヒューリスティック鮮度の行を参照。
 - ~~`relaxTransparency` / `proxyOffline`（§8）。~~ **完了（2026-09-13）:** 両方とも
   観測可能な挙動を移植した — 推測ではなく、ベンダリングされた C 版の履歴
   （`http.c` のコメントブロック、`client.c` での両変数の使用箇所）から確認した。

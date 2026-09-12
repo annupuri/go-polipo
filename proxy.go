@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
@@ -97,6 +98,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 				outReq.Header.Del(h)
 			}
 			ph.censorReferer(outReq)
+			ph.addConditionalHeaders(outReq)
 		},
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -119,12 +121,20 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	return ph
 }
 
-// cacheResponse is the ReverseProxy ModifyResponse hook: it strips
-// censoredHeaders (applied uniformly to both directions, matching Polipo's
-// single header-copy filter) and writes cacheable responses to disk unless
-// the target is on the uncachable list. Every disk entry passes through here
-// once, when first fetched, so a later cache hit never needs to re-censor.
+// cacheResponse is the ReverseProxy ModifyResponse hook: it turns a 304 Not
+// Modified from a conditional revalidation (see addConditionalHeaders) back
+// into the full cached representation, strips censoredHeaders (applied
+// uniformly to both directions, matching Polipo's single header-copy
+// filter), and writes cacheable responses to disk unless the target is on
+// the uncachable list. Every disk entry passes through here once, when
+// first fetched or last revalidated, so a later cache hit never needs to
+// re-censor or re-merge.
 func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
+	if resp.StatusCode == http.StatusNotModified {
+		if err := ph.reviveFromCache(resp); err != nil {
+			return err
+		}
+	}
 	for _, h := range ph.config.CensoredHeaders {
 		resp.Header.Del(h)
 	}
@@ -136,6 +146,82 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 		log.Printf("Cache store warning: %v", err)
 	}
 	return nil
+}
+
+// revalidationHeaders are the response headers RFC 9111 section 3.4 and
+// 4.3.4 say a 304 may use to update a stored representation; everything
+// else about the cached entry (body, Content-Type, and so on) is unchanged
+// because the origin is asserting the entity itself has not changed.
+var revalidationHeaders = []string{
+	"Cache-Control", "Content-Location", "Date", "ETag", "Expires", "Vary",
+}
+
+// reviveFromCache turns a 304 Not Modified response, received for a
+// conditional request addConditionalHeaders built from a stale cache entry,
+// back into the equivalent of a fresh 200: the cached body, plus the stored
+// headers with revalidationHeaders overwritten from the 304's own headers
+// where present. The caller (cacheResponse) then re-Stores the result, so
+// the refreshed freshness lifetime takes effect immediately. An error here
+// means the entry vanished between the conditional request going out and
+// the 304 coming back - too rare to do anything but report it, which
+// surfaces as a normal ErrorHandler failure (falling back to a stale entry
+// under relaxTransparency, same as any other round-trip error).
+func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
+	req := resp.Request
+	cached, _ := ph.cacheManager.LookupStale(req)
+	if cached == nil {
+		return fmt.Errorf("304 Not Modified for %s, but no cached entry to revalidate", req.URL)
+	}
+	defer cached.Body.Close()
+	body, err := io.ReadAll(cached.Body)
+	if err != nil {
+		return fmt.Errorf("reading cached body for %s: %w", req.URL, err)
+	}
+
+	merged := cached.Header.Clone()
+	for _, name := range revalidationHeaders {
+		if v := resp.Header.Values(name); len(v) > 0 {
+			merged[http.CanonicalHeaderKey(name)] = v
+		}
+	}
+
+	resp.StatusCode = http.StatusOK
+	resp.Status = "200 OK"
+	resp.Header = merged
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	return nil
+}
+
+// addConditionalHeaders is part of the Director: when there is a stale cache
+// entry for outReq with a validator (ETag and/or Last-Modified), it turns
+// the forwarded request into a conditional one, so the origin can answer
+// with a bodyless 304 instead of retransmitting content go-polipo already
+// has. A client-supplied validator is left alone - this only synthesises
+// one when the client didn't already send its own, since we have no way to
+// know whether the client's validator matches what's on disk here.
+func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
+	if outReq.Header.Get("If-None-Match") != "" || outReq.Header.Get("If-Modified-Since") != "" {
+		return
+	}
+	cached, stale := ph.cacheManager.LookupStale(outReq)
+	if cached == nil {
+		return
+	}
+	defer cached.Body.Close()
+	if !stale {
+		// A fresh hit is served straight from disk by handleForward and never
+		// reaches the Director; this would only happen for a request Lookup
+		// itself declines (e.g. a client Cache-Control: no-cache), which
+		// should reach the origin unconditionally rather than revalidate.
+		return
+	}
+	if etag := cached.Header.Get("ETag"); etag != "" {
+		outReq.Header.Set("If-None-Match", etag)
+	}
+	if lm := cached.Header.Get("Last-Modified"); lm != "" {
+		outReq.Header.Set("If-Modified-Since", lm)
+	}
 }
 
 // censorReferer applies the censorReferer policy to outReq's Referer header,

@@ -1028,6 +1028,229 @@ func TestRelaxTransparencyMaybeStillContactsOriginWhenStale(t *testing.T) {
 	}
 }
 
+// seedStaleEntryWithValidators seeds an already-stale (max-age=1, dated two
+// hours ago) GET cache entry for target, carrying whichever of etag /
+// lastModified is non-empty, for conditional-revalidation tests.
+func seedStaleEntryWithValidators(t *testing.T, cm *CacheManager, target, body, etag, lastModified string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        http.Header{},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+	resp.Header.Set("Cache-Control", "max-age=1")
+	resp.Header.Set("Date", timeHeader(-2*time.Hour))
+	if etag != "" {
+		resp.Header.Set("ETag", etag)
+	}
+	if lastModified != "" {
+		resp.Header.Set("Last-Modified", lastModified)
+	}
+	if err := cm.Store(req, resp); err != nil {
+		t.Fatalf("seed Store failed: %v", err)
+	}
+}
+
+func TestConditionalRevalidation304ServesCachedBodyAndRefreshes(t *testing.T) {
+	var gotINM string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotINM = r.Header.Get("If-None-Match")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Header().Set("Date", timeHeader(0))
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedStaleEntryWithValidators(t, cm, target, "cached body", `"v1"`, "")
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "cached body" {
+		t.Errorf("body = %q, want the cached body (a 304 must not replace it)", got)
+	}
+	if gotINM != `"v1"` {
+		t.Errorf("If-None-Match sent = %q, want %q", gotINM, `"v1"`)
+	}
+
+	// The 304 carried Cache-Control: max-age=3600 and a fresh Date, so the
+	// re-stored entry should now be fresh - a second request must not even
+	// need to consider the network.
+	if cached := cm.Lookup(httptest.NewRequest(http.MethodGet, target, nil)); cached == nil {
+		t.Error("expected the revalidated entry to be fresh")
+	} else {
+		cached.Body.Close()
+	}
+}
+
+func TestConditionalRevalidationSendsIfModifiedSince(t *testing.T) {
+	lastModified := timeHeader(-48 * time.Hour)
+	var gotIMS string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotIMS = r.Header.Get("If-Modified-Since")
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedStaleEntryWithValidators(t, cm, target, "cached body", "", lastModified)
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if gotIMS != lastModified {
+		t.Errorf("If-Modified-Since sent = %q, want %q", gotIMS, lastModified)
+	}
+}
+
+func TestConditionalRevalidation200ReplacesCache(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A real origin would only do this when the validator no longer
+		// matches; the fake backend always answers with new content so the
+		// test can check go-polipo replaces the stale entry outright.
+		w.Header().Set("ETag", `"v2"`)
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write([]byte("new body"))
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedStaleEntryWithValidators(t, cm, target, "old body", `"v1"`, "")
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "new body" {
+		t.Errorf("body = %q, want %q", got, "new body")
+	}
+
+	cached := cm.Lookup(httptest.NewRequest(http.MethodGet, target, nil))
+	if cached == nil {
+		t.Fatal("expected the new response to be cached")
+	}
+	defer cached.Body.Close()
+	if got, _ := io.ReadAll(cached.Body); string(got) != "new body" {
+		t.Errorf("cached body = %q, want %q", got, "new body")
+	}
+}
+
+func TestNoConditionalHeadersWithoutValidators(t *testing.T) {
+	var sawINM, sawIMS bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawINM = r.Header.Get("If-None-Match") != ""
+		sawIMS = r.Header.Get("If-Modified-Since") != ""
+		w.Write([]byte("full body"))
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedStaleEntryWithValidators(t, cm, target, "old body", "", "") // no validators
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if sawINM || sawIMS {
+		t.Error("no conditional header should be sent without a stored validator")
+	}
+}
+
+func TestClientConditionalHeaderNotOverridden(t *testing.T) {
+	var gotINM string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotINM = r.Header.Get("If-None-Match")
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedStaleEntryWithValidators(t, cm, target, "cached body", `"cached-etag"`, "")
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("If-None-Match", `"client-etag"`)
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if gotINM != `"client-etag"` {
+		t.Errorf("If-None-Match sent = %q, want the client's own %q", gotINM, `"client-etag"`)
+	}
+}
+
+func TestRevalidation304WithoutCachedEntryIsAnError(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, backend.URL+"/never-cached", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502 (no cached entry to revalidate against)", rr.Code)
+	}
+}
+
 func TestProxyConnectTunnel(t *testing.T) {
 	// Echo backend the tunnel will connect to.
 	backend, err := net.Listen("tcp", "127.0.0.1:0")

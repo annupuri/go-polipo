@@ -135,8 +135,10 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 		return nil
 	}
 	if stale {
-		// We could support conditional validation here, but for simplicity
-		// we treat expired cache as a miss.
+		// A stale entry is a miss as far as Lookup is concerned; the caller
+		// (ProxyHandler's Director/ModifyResponse) is what turns this into a
+		// conditional GET and merges a 304 back into the entry - see
+		// addConditionalHeaders and reviveFromCache in proxy.go.
 		resp.Body.Close()
 		return nil
 	}
