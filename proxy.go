@@ -53,7 +53,14 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 
 	if config.SocksParentProxy != "" {
 		// Only SOCKS5 is supported; Config.Set rejects any other socksProxyType.
-		dialer, err := proxy.SOCKS5("tcp", config.SocksParentProxy, nil, proxy.Direct)
+		var auth *proxy.Auth
+		if config.SocksAuthCredentials != "" {
+			// Polipo splits on the first ':'; no colon means the whole string is
+			// the username and there is no password (socks.c's preinitSocks).
+			user, pass, _ := strings.Cut(config.SocksAuthCredentials, ":")
+			auth = &proxy.Auth{User: user, Password: pass}
+		}
+		dialer, err := proxy.SOCKS5("tcp", config.SocksParentProxy, auth, proxy.Direct)
 		if err != nil {
 			log.Printf("Warning: invalid socksParentProxy %q: %v", config.SocksParentProxy, err)
 		} else {
@@ -62,8 +69,21 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	}
 
 	ph.transport = ph.createTransport()
+	var transport http.RoundTripper = ph.transport
+	if config.ParentProxy != "" && config.ParentAuthCredentials != "" {
+		// Added via a wrapping RoundTripper, not the Director: ReverseProxy
+		// strips hop-by-hop headers (Proxy-Authorization among them) right
+		// after Director returns, so anything set there would be discarded
+		// before the request ever reaches the transport.
+		transport = &parentProxyAuthTransport{
+			RoundTripper: ph.transport,
+			// Matches Polipo's buildServerAuthHeaders: the configured string is
+			// base64-encoded as-is, not split into user/password first.
+			header: "Basic " + base64.StdEncoding.EncodeToString([]byte(config.ParentAuthCredentials)),
+		}
+	}
 	ph.reverseProxy = &httputil.ReverseProxy{
-		Transport: ph.transport,
+		Transport: transport,
 		// The proxied request already carries an absolute target URL, so there
 		// is nothing to rewrite. ReverseProxy strips hop-by-hop headers itself;
 		// setting X-Forwarded-For to nil keeps the client's IP private, matching
@@ -164,6 +184,22 @@ func normalizeProxyURL(raw string) (*url.URL, error) {
 		raw = "http://" + raw
 	}
 	return url.Parse(raw)
+}
+
+// parentProxyAuthTransport adds a fixed Proxy-Authorization header to every
+// request before handing it to the wrapped transport. It exists because
+// ReverseProxy strips hop-by-hop headers (Proxy-Authorization included)
+// immediately after Director runs, so the header must be added downstream of
+// that, on the request that actually reaches the parent proxy.
+type parentProxyAuthTransport struct {
+	http.RoundTripper
+	header string
+}
+
+func (t *parentProxyAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Proxy-Authorization", t.header)
+	return t.RoundTripper.RoundTrip(req)
 }
 
 // ServeHTTP handles HTTP proxy requests.

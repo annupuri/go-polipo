@@ -99,7 +99,9 @@
 ### Parent proxies
 
 # parentProxy = "squid.example.org:3128"      # upstream HTTP proxy
+# parentAuthCredentials = user:password       # Basic credentials for parentProxy
 # socksParentProxy = "localhost:9050"         # upstream SOCKS5 proxy
+# socksAuthCredentials = user:password        # username/password for socksParentProxy
 # socksProxyType = socks5   # only "socks5" is supported (Polipo's "socks4a" is rejected)
 
 

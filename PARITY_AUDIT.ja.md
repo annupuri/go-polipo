@@ -40,7 +40,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `proxyAddress` | `127.0.0.1` | ✅ | |
 | `proxyPort` | `8123` | ✅ | |
 | `allowedClients` | (なし) | ✅ | 素の IP、CIDR、`all`/`*`。実際の TCP ピアアドレスで判定。 |
-| `authCredentials` | (null) | ✅ | **強制済み（2026-09-12 解決）。** `"user:password"` の単一文字列。空（既定）なら Polipo と同じく認証不要。設定時は `ProxyHandler.isAuthorized` が転送・CONNECT・ローカル `/polipo/*` ページを問わず、他のどの処理よりも先に全リクエストを検査する。認証情報が無い/誤りの場合、通常の転送リクエストと CONNECT には `407`/`Proxy-Authenticate`、go-polipo に（プロキシ経由でなく）直接アクセスしたリクエストには `401`/`WWW-Authenticate`（`Proxy-Authorization` ではなく `Authorization` を検証）を返す — これは Polipo の `urlIsLocal` による分岐で、推測ではなくベンダリングされた C 版の履歴（`auth.c`, `client.c`）から確認した。 |
+| `authCredentials` | (null) | ✅ | **強制済み（2026-09-12 解決）。** `"user:password"` の単一文字列。空（既定）なら Polipo と同じく認証不要。設定時は `ProxyHandler.isAuthorized` が転送・CONNECT・ローカル `/polipo/*` ページを問わず、他のどの処理よりも先に全リクエストを検査する。認証情報が無い/誤りの場合、通常の転送リクエストと CONNECT には `407`/`Proxy-Authenticate`、go-polipo に（プロキシ経由でなく）直接アクセスしたリクエストには `401`/`WWW-Authenticate`（`Proxy-Authorization` ではなく `Authorization` を検証）を返す — これは Polipo の `urlIsLocal` による分岐で、推測ではなくベンダリングされた C 版の履歴（`auth.c`, `client.c`）から確認した。`parentAuthCredentials` 実装時（2026-09-13）に発見：Polipo の `config.c` は `CONFIG_PASSWORD` 型の変数の実際の値を `-v` や設定ページに一切表示せず、常に `(hidden)` とだけ表示する。`authCredentials` もこの型の一つだが、go-polipo の `Entries()` は平文で表示していた。新規追加した2つのパスワード変数と併せて修正済み。 |
 | `authRealm` | (可変) | ✅ | **強制済み（2026-09-12 解決）。** 既定値は `"Polipo"`。`authCredentials` が設定されているときのみ意味を持つ（Polipo も `authCredentials` が非 null なら起動時に同じ既定値を補う）。`Basic realm="..."` チャレンジにそのまま使われる。 |
 
 ## 3. 外向き接続
@@ -68,10 +68,10 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | 変数 | Polipo 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
 | `parentProxy` | (未設定) | ✅ | `http.Transport.Proxy` 経由の HTTP 親プロキシ。 |
-| `parentAuthCredentials` | (未設定) | ❌ | HTTP 親プロキシへの認証不可。 |
+| `parentAuthCredentials` | (未設定) | ✅ | **実装済み（2026-09-13 解決）。** `"user:password"` 文字列をそのまま（ユーザー名/パスワードに分割せず）base64 エンコードし、`parentProxy` 経由の全リクエストに `Proxy-Authorization: Basic ...` として付与する。推測ではなくベンダリングされた C 版の履歴（`auth.c` の `buildServerAuthHeaders`）そのままの挙動。`ReverseProxy` の `Director` ではなく、それをラップする `http.RoundTripper` 経由で付与している — `Director` はホップバイホップヘッダ（`Proxy-Authorization` を含む）が返却直後に剥がされてしまうため、そこで設定しても実際の通信には乗らない。 |
 | `socksParentProxy` | (未設定) | ✅ | `golang.org/x/net/proxy` 経由。 |
 | `socksProxyType` | `socks5` | ✅ | **`socks5` のみ受理（2026-09-11 解決）。** `golang.org/x/net/proxy` は SOCKS5 専用。`Config.Set` が `socks4a` やタイプミスを起動時エラーで弾くようにした（従来は保持だけして結局 SOCKS5 で接続）。SOCKS4/4a は意図的に非実装 — RFC が無く、認証も IPv6 も無く、現代の SOCKS プロキシで必要とされない。 |
-| `socksAuthCredentials` | (未設定) | ❌ | SOCKS のユーザー / パスワード認証なし。 |
+| `socksAuthCredentials` | (未設定) | ✅ | **実装済み（2026-09-13 解決）。** `"username:password"`（コロン無しなら `"username"` のみ、パスワード無し）を最初の `:` で分割し、`golang.org/x/net/proxy.SOCKS5` の `*Auth` に渡す（RFC 1929 のサブネゴシエーション）。Polipo の `preinitSocks`（`socks.c`）と同じ分割ロジック。go-polipo は SOCKS5 のみ対応するのでSOCKS5の範囲でのみ意味を持つ（Polipo は SOCKS4a でも受け付けていた）。 |
 
 ## 6. トンネリング（CONNECT）
 
@@ -214,8 +214,19 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   ホップバイホップでオリジンには届かないため。直さないままこの機能を有効化
   すると、正規のリクエストすべてが `Proxy-Authorization` を持つことになり、
   ディスクキャッシュが黙って機能しなくなるところだった。
-- `parentAuthCredentials` / `socksAuthCredentials`（§5） — 認証付き上流プロキシを
-  使えない。
+- ~~`parentAuthCredentials` / `socksAuthCredentials`（§5）。~~ **完了
+  （2026-09-13）:** 両方とも移植した — 推測ではなく、ベンダリングされた C 版の
+  履歴（`auth.c` の `buildServerAuthHeaders`、`socks.c` の `preinitSocks`）から
+  確認した。`parentAuthCredentials` は（ユーザー名/パスワードに分割せず）文字列
+  全体を base64 エンコードし、`parentProxy` 経由の全リクエストに
+  `Proxy-Authorization` として付与する — `ReverseProxy` の `Director` ではなく、
+  それをラップする `http.RoundTripper` が必要だった（`Director` が設定した
+  ホップバイホップヘッダは `Director` の返却直後に剥がされ、実際の通信には
+  乗らないため）。`socksAuthCredentials` は最初の `:` で分割し、
+  `golang.org/x/net/proxy.SOCKS5` の RFC 1929 認証に渡す。ついでに発見・修正:
+  `authCredentials` が `-v` / 設定ページで平文表示されていた — この3変数が
+  共有する Polipo の `CONFIG_PASSWORD` 型は常に `(hidden)` としか表示しない
+  仕様だったので、3つとも揃えた。
 - `censoredHeaders` / `censorReferer`（§7） — プライバシー用ヘッダ除去。今回の
   Cookie / Authorization ハードニングと地続き。
 - 条件付き再検証 / `304`（§8） — 帯域幅の問題。完全に忠実な透過性モデルの前提

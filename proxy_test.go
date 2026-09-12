@@ -369,6 +369,62 @@ func TestCreateTransportParentProxy(t *testing.T) {
 	}
 }
 
+func TestParentProxyAuthCredentials(t *testing.T) {
+	var gotAuth string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Proxy-Authorization")
+		w.Write([]byte("via parent"))
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.ParentProxy = strings.TrimPrefix(backend.URL, "http://")
+	cfg.ParentAuthCredentials = "alice:secret"
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "via parent" {
+		t.Errorf("body = %q", got)
+	}
+	want := "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:secret"))
+	if gotAuth != want {
+		t.Errorf("Proxy-Authorization = %q, want %q", gotAuth, want)
+	}
+}
+
+func TestParentProxyNoAuthHeaderWithoutCredentials(t *testing.T) {
+	var sawAuth bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Proxy-Authorization") != ""
+		w.Write([]byte("via parent"))
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.ParentProxy = strings.TrimPrefix(backend.URL, "http://")
+	// ParentAuthCredentials left empty.
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if sawAuth {
+		t.Error("no Proxy-Authorization header should be sent without parentAuthCredentials")
+	}
+}
+
 func TestDialContextDirect(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -399,6 +455,86 @@ func TestDialContextSocks(t *testing.T) {
 	}
 	if _, err := ph.dialContext(context.Background(), "tcp", "example.com:443"); err == nil {
 		t.Error("expected dial through dead SOCKS proxy to fail")
+	}
+}
+
+// TestSocksAuthCredentials runs a minimal SOCKS5 server that only speaks the
+// RFC 1929 username/password subnegotiation, to verify socksAuthCredentials
+// is split and sent correctly. It stops right after accepting the
+// credentials, before the CONNECT step, since only the auth exchange matters
+// here.
+func TestSocksAuthCredentials(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	type authResult struct {
+		user, pass string
+		err        error
+	}
+	done := make(chan authResult, 1)
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			done <- authResult{err: err}
+			return
+		}
+		defer conn.Close()
+
+		hdr := make([]byte, 2)
+		if _, err := io.ReadFull(conn, hdr); err != nil {
+			done <- authResult{err: err}
+			return
+		}
+		methods := make([]byte, hdr[1])
+		if _, err := io.ReadFull(conn, methods); err != nil {
+			done <- authResult{err: err}
+			return
+		}
+		conn.Write([]byte{0x05, 0x02}) // select username/password auth
+
+		if _, err := io.ReadFull(conn, hdr); err != nil { // ver, ulen
+			done <- authResult{err: err}
+			return
+		}
+		userBuf := make([]byte, hdr[1])
+		if _, err := io.ReadFull(conn, userBuf); err != nil {
+			done <- authResult{err: err}
+			return
+		}
+		plen := make([]byte, 1)
+		if _, err := io.ReadFull(conn, plen); err != nil {
+			done <- authResult{err: err}
+			return
+		}
+		passBuf := make([]byte, plen[0])
+		if _, err := io.ReadFull(conn, passBuf); err != nil {
+			done <- authResult{err: err}
+			return
+		}
+		conn.Write([]byte{0x01, 0x00}) // auth success
+		done <- authResult{user: string(userBuf), pass: string(passBuf)}
+	}()
+
+	cfg := NewDefaultConfig()
+	cfg.SocksParentProxy = ln.Addr().String()
+	cfg.SocksAuthCredentials = "alice:s3cret"
+	ph := newTestHandler(cfg)
+
+	// The fake server closes right after authenticating, without completing
+	// the CONNECT step, so this dial is expected to fail; only the
+	// credentials exchanged during auth are under test.
+	ph.dialContext(context.Background(), "tcp", "example.com:443")
+
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("fake SOCKS server error: %v", res.err)
+	}
+	if res.user != "alice" || res.pass != "s3cret" {
+		t.Errorf("SOCKS auth = %q/%q, want %q/%q", res.user, res.pass, "alice", "s3cret")
 	}
 }
 

@@ -202,6 +202,8 @@ func TestSetAllKeys(t *testing.T) {
 	ok("allowedClients", "10.0.0.0/8, 127.0.0.1")
 	ok("authCredentials", "alice:secret")
 	ok("authRealm", "My Proxy")
+	ok("parentAuthCredentials", "bob:hunter2")
+	ok("socksAuthCredentials", "carol:s3cret")
 	ok("tunnelAllowedPorts", "443,563")
 	ok("allowedPorts", "80,443")
 	ok("logLevel", "0x0f")
@@ -248,6 +250,12 @@ func TestSetAllKeys(t *testing.T) {
 	if c.AuthRealm != "My Proxy" {
 		t.Errorf("authRealm not applied: %q", c.AuthRealm)
 	}
+	if c.ParentAuthCredentials != "bob:hunter2" {
+		t.Errorf("parentAuthCredentials not applied: %q", c.ParentAuthCredentials)
+	}
+	if c.SocksAuthCredentials != "carol:s3cret" {
+		t.Errorf("socksAuthCredentials not applied: %q", c.SocksAuthCredentials)
+	}
 	if !c.ProxyOffline {
 		t.Error(`proxyOffline "true" should be truthy`)
 	}
@@ -276,6 +284,30 @@ func TestSetAllKeys(t *testing.T) {
 	fails("socksProxyType", "http")
 	fails("relaxTransparency", "yes")
 	fails("relaxTransparency", "2")
+}
+
+func TestPasswordEntriesAreRedacted(t *testing.T) {
+	c := NewDefaultConfig()
+	c.AuthCredentials = "alice:secret"
+	c.ParentAuthCredentials = "bob:hunter2"
+	c.SocksAuthCredentials = "carol:s3cret"
+
+	entries := map[string]string{}
+	for _, e := range c.Entries() {
+		entries[e.Name] = e.Value
+	}
+
+	// Polipo's CONFIG_PASSWORD variables never show the actual value on `-v`
+	// or the config page - only "(hidden)" - regardless of whether one is
+	// set (config.c's CONFIG_PASSWORD case). This must hold both when a
+	// credential is configured (checked here) and when it's left empty (the
+	// NewDefaultConfig() case covered by TestNewDefaultConfig's Entries doing
+	// the equivalent implicitly through this same map).
+	for _, key := range []string{"authCredentials", "parentAuthCredentials", "socksAuthCredentials"} {
+		if got := entries[key]; got != "(hidden)" {
+			t.Errorf("%s entry = %q, want %q", key, got, "(hidden)")
+		}
+	}
 }
 
 func TestRelaxTransparencyTristate(t *testing.T) {

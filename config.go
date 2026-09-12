@@ -53,6 +53,19 @@ type Config struct {
 	// no effect while AuthCredentials is empty.
 	AuthRealm string
 
+	// ParentAuthCredentials, when non-empty, is a "user:password" string sent
+	// as a Basic Proxy-Authorization header on every request forwarded
+	// through ParentProxy. It has no effect without ParentProxy, and unlike
+	// AuthCredentials the raw string is not parsed - it is base64-encoded
+	// as-is, matching Polipo's buildServerAuthHeaders.
+	ParentAuthCredentials string
+
+	// SocksAuthCredentials, when non-empty, is a "username:password" string
+	// (username only, with no colon) used to authenticate to
+	// SocksParentProxy via SOCKS5's username/password subnegotiation
+	// (RFC 1929). It has no effect without SocksParentProxy.
+	SocksAuthCredentials string
+
 	// ProxyOffline, when true, never contacts the origin for a forwarded
 	// request: whatever is on disk (fresh or stale) is served as-is, and a
 	// true cache miss becomes a 502 instead of a network attempt.
@@ -91,6 +104,8 @@ func NewDefaultConfig() *Config {
 		DontCacheCookies:      true,
 		AuthCredentials:       "",
 		AuthRealm:             "Polipo",
+		ParentAuthCredentials: "",
+		SocksAuthCredentials:  "",
 		ProxyOffline:          false,
 		RelaxTransparency:     0,
 	}
@@ -120,8 +135,10 @@ func (c *Config) Entries() []ConfigEntry {
 		{"socksProxyType", c.SocksProxyType},
 		{"parentProxy", c.ParentProxy},
 		{"allowedClients", strings.Join(c.AllowedClients, ", ")},
-		{"authCredentials", c.AuthCredentials},
+		{"authCredentials", redactedPassword},
 		{"authRealm", c.AuthRealm},
+		{"parentAuthCredentials", redactedPassword},
+		{"socksAuthCredentials", redactedPassword},
 		{"tunnelAllowedPorts", c.TunnelAllowedPorts.String()},
 		{"allowedPorts", c.AllowedPorts.String()},
 		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
@@ -132,6 +149,12 @@ func (c *Config) Entries() []ConfigEntry {
 		{"relaxTransparency", tristateString(c.RelaxTransparency)},
 	}
 }
+
+// redactedPassword is what Polipo's CONFIG_PASSWORD variables show on `-v`
+// and the config page - always "(hidden)", regardless of whether a
+// credential is actually set (config.c never prints the value itself outside
+// of a machine-readable config dump, which go-polipo does not implement).
+const redactedPassword = "(hidden)"
 
 // tristateString renders a Polipo CONFIG_TRISTATE value (0/1/2) the way `-v`
 // and the config page show it: "false", "maybe", "true".
@@ -330,6 +353,10 @@ func (c *Config) Set(key, val string) error {
 		c.AuthCredentials = val
 	case "authRealm":
 		c.AuthRealm = val
+	case "parentAuthCredentials":
+		c.ParentAuthCredentials = val
+	case "socksAuthCredentials":
+		c.SocksAuthCredentials = val
 	case "tunnelAllowedPorts":
 		ports, err := parsePortSet(val)
 		if err != nil {

@@ -40,7 +40,7 @@ at the end groups findings by how much they matter before a public release.
 | `proxyAddress` | `127.0.0.1` | ✅ | |
 | `proxyPort` | `8123` | ✅ | |
 | `allowedClients` | (none) | ✅ | Bare IP, CIDR, `all`/`*`. Checked against the real TCP peer. |
-| `authCredentials` | (null) | ✅ | **Enforced (resolved 2026-09-12).** A single `"user:password"` string; empty (the default) requires no authentication, matching Polipo's unset default. When set, `ProxyHandler.isAuthorized` checks every request — forwarded, CONNECT, and local `/polipo/*` pages alike — before any other handling. Missing or wrong credentials get `407`/`Proxy-Authenticate` for an ordinary proxied request or CONNECT, or `401`/`WWW-Authenticate` (checked against `Authorization`, not `Proxy-Authorization`) for a request addressed straight at go-polipo rather than sent through it as a proxy — Polipo's `urlIsLocal` split, confirmed from the vendored C history (`auth.c`, `client.c`). |
+| `authCredentials` | (null) | ✅ | **Enforced (resolved 2026-09-12).** A single `"user:password"` string; empty (the default) requires no authentication, matching Polipo's unset default. When set, `ProxyHandler.isAuthorized` checks every request — forwarded, CONNECT, and local `/polipo/*` pages alike — before any other handling. Missing or wrong credentials get `407`/`Proxy-Authenticate` for an ordinary proxied request or CONNECT, or `401`/`WWW-Authenticate` (checked against `Authorization`, not `Proxy-Authorization`) for a request addressed straight at go-polipo rather than sent through it as a proxy — Polipo's `urlIsLocal` split, confirmed from the vendored C history (`auth.c`, `client.c`). Found while implementing `parentAuthCredentials` (2026-09-13): Polipo's config.c never prints a `CONFIG_PASSWORD` variable's actual value on `-v` or the config page, only `(hidden)`; `authCredentials` is one, but go-polipo's `Entries()` was showing it in the clear. Fixed alongside the two new password variables. |
 | `authRealm` | (varies) | ✅ | **Enforced (resolved 2026-09-12).** Defaults to `"Polipo"`, only takes effect while `authCredentials` is set (matching Polipo, which fills the same default at startup once `authCredentials` is non-null). Rendered into the `Basic realm="..."` challenge. |
 
 ## 3. Outgoing connections
@@ -68,10 +68,10 @@ at the end groups findings by how much they matter before a public release.
 | Variable | Polipo default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `parentProxy` | (unset) | ✅ | HTTP parent via `http.Transport.Proxy`. |
-| `parentAuthCredentials` | (unset) | ❌ | Cannot authenticate to an HTTP parent proxy. |
+| `parentAuthCredentials` | (unset) | ✅ | **Implemented (resolved 2026-09-13).** A `"user:password"` string is base64-encoded as-is and sent as `Proxy-Authorization: Basic ...` on every request forwarded through `parentProxy`, matching Polipo's `buildServerAuthHeaders` (`auth.c`) exactly - confirmed from the vendored C history, not guessed. Added via a wrapping `http.RoundTripper` rather than `ReverseProxy`'s `Director`, since `Director`-set headers are discarded: `ReverseProxy` strips hop-by-hop headers (`Proxy-Authorization` included) immediately after `Director` returns. |
 | `socksParentProxy` | (unset) | ✅ | Via `golang.org/x/net/proxy`. |
 | `socksProxyType` | `socks5` | ✅ | **Only `socks5` accepted (resolved 2026-09-11).** `golang.org/x/net/proxy` speaks SOCKS5 only; `Config.Set` now rejects any other value (`socks4a`, typos) with a startup error instead of storing it and dialing SOCKS5 regardless. SOCKS4/4a is deliberately not implemented — no RFC, no IPv6/auth, and no modern SOCKS proxy needs it. |
-| `socksAuthCredentials` | (unset) | ❌ | No SOCKS user/password auth. |
+| `socksAuthCredentials` | (unset) | ✅ | **Implemented (resolved 2026-09-13).** A `"username:password"` string (or just `"username"`, with no colon) is passed to `golang.org/x/net/proxy.SOCKS5` as its `*Auth`, which speaks the RFC 1929 subnegotiation - the same split Polipo's `preinitSocks` does (`socks.c`). Only meaningful for SOCKS5 (the only type this implements); Polipo also accepted it for SOCKS4a. |
 
 ## 6. Tunnelling (CONNECT)
 
@@ -219,8 +219,19 @@ at the end groups findings by how much they matter before a public release.
   reaches the origin. Left uncorrected, every request would have carried
   `Proxy-Authorization` once this feature was turned on, silently gutting the
   disk cache for anyone using it.
-- `parentAuthCredentials` / `socksAuthCredentials` (§5) — no authenticated
-  upstream proxies.
+- ~~`parentAuthCredentials` / `socksAuthCredentials` (§5).~~ **Done
+  (2026-09-13):** ported both, sourced from the vendored C history
+  (`auth.c`'s `buildServerAuthHeaders`, `socks.c`'s `preinitSocks`) rather
+  than guessed. `parentAuthCredentials` is base64-encoded as a whole (no
+  user/password split, matching Polipo) and sent as `Proxy-Authorization` on
+  every request through `parentProxy`; it needed a wrapping `http.RoundTripper`
+  rather than `ReverseProxy`'s `Director`; because `Director`-set hop-by-hop
+  headers are stripped right after `Director` returns and would never reach
+  the wire. `socksAuthCredentials` is split on the first `:` and passed to
+  `golang.org/x/net/proxy.SOCKS5`'s RFC 1929 auth. Found and fixed along the
+  way: `authCredentials` was shown in the clear on `-v` / the config page,
+  when Polipo's `CONFIG_PASSWORD` type (which all three of these variables
+  share) always renders `(hidden)` there instead - now all three do.
 - `censoredHeaders` / `censorReferer` (§7) — privacy header stripping; on-theme
   with the cookie/authorization hardening.
 - Conditional revalidation / `304` (§8) — bandwidth, and a prerequisite for a
