@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -61,6 +62,8 @@ func (f *ForbiddenList) Load(filePath string) error {
 			re, err := regexp.Compile(line)
 			if err == nil {
 				f.Regexps = append(f.Regexps, re)
+			} else {
+				log.Printf("Warning: %s: skipping invalid regex line %q: %v", filePath, line, err)
 			}
 		} else {
 			// Domain match

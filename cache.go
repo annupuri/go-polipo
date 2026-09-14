@@ -192,6 +192,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// Parse response from file
 	resp, err = http.ReadResponse(bufio.NewReader(file), req)
 	if err != nil {
+		log.Printf("Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
 		file.Close()
 		return nil, false
 	}
@@ -199,6 +200,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// Verify X-Polipo-Location to prevent hash collisions
 	loc := resp.Header.Get("X-Polipo-Location")
 	if loc != req.URL.String() {
+		log.Printf("Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
 		resp.Body.Close()
 		file.Close()
 		return nil, false

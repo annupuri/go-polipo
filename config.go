@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -499,8 +500,12 @@ func (c *Config) Set(key, val string) error {
 		}
 		c.DiskCacheTruncateSize = size
 	default:
-		// Ignore unknown variables silently or log them (Polipo ignores them but we can log them)
-		// We'll log them or just skip to match Polipo's config style.
+		// Not fatal - Polipo itself only logs and moves on for an unknown
+		// variable (config.c's parseConfigLine) - but silent is wrong: a
+		// typo'd or removed key would otherwise take effect as "ignored"
+		// with no trace anywhere that the setting the user asked for never
+		// applied.
+		log.Printf("Warning: unknown config variable %q (ignored)", key)
 	}
 	return nil
 }

@@ -309,11 +309,15 @@ func (ph *ProxyHandler) parseAllowedClients() {
 		if strings.Contains(allowed, "/") {
 			if _, ipNet, err := net.ParseCIDR(allowed); err == nil {
 				ph.allowNets = append(ph.allowNets, ipNet)
+			} else {
+				log.Printf("Warning: allowedClients: skipping invalid CIDR %q: %v", allowed, err)
 			}
 			continue
 		}
 		if ip := net.ParseIP(allowed); ip != nil {
 			ph.allowIPs = append(ph.allowIPs, ip)
+		} else {
+			log.Printf("Warning: allowedClients: skipping invalid IP %q", allowed)
 		}
 	}
 }
