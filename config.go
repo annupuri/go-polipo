@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -505,7 +504,7 @@ func (c *Config) Set(key, val string) error {
 		// typo'd or removed key would otherwise take effect as "ignored"
 		// with no trace anywhere that the setting the user asked for never
 		// applied.
-		log.Printf("Warning: unknown config variable %q (ignored)", key)
+		logf(c.LogLevel, LogWarn, "Warning: unknown config variable %q (ignored)", key)
 	}
 	return nil
 }

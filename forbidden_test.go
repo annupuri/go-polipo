@@ -85,7 +85,7 @@ google.co.jp # inline comment
 	}
 
 	fl := NewForbiddenList()
-	err = fl.Load(filePath)
+	err = fl.Load(filePath, 0x07)
 	if err != nil {
 		t.Fatalf("failed to load forbidden file: %v", err)
 	}
@@ -121,14 +121,14 @@ google.co.jp # inline comment
 	}
 	// Test empty path
 	flEmpty := NewForbiddenList()
-	err = flEmpty.Load("")
+	err = flEmpty.Load("", 0x07)
 	if err != nil {
 		t.Errorf("expected no error for empty forbidden path, got %v", err)
 	}
 
 	// Test non-existent path (should not return error)
 	flNonExist := NewForbiddenList()
-	err = flNonExist.Load("non_existent_file")
+	err = flNonExist.Load("non_existent_file", 0x07)
 	if err != nil {
 		t.Errorf("expected no error for non-existent path, got %v", err)
 	}
@@ -144,7 +144,7 @@ google.co.jp # inline comment
 	}
 
 	flInvalid := NewForbiddenList()
-	err = flInvalid.Load(filePathInvalid)
+	err = flInvalid.Load(filePathInvalid, 0x07)
 	if err != nil {
 		t.Errorf("expected no error for invalid regex list, got %v", err)
 	}

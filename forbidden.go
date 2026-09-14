@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -22,8 +21,9 @@ func NewForbiddenList() *ForbiddenList {
 	}
 }
 
-// Load reads and parses the domain file.
-func (f *ForbiddenList) Load(filePath string) error {
+// Load reads and parses the domain file. logLevel gates the warning logged
+// for an invalid regex line (see logf); pass the owning Config's LogLevel.
+func (f *ForbiddenList) Load(filePath string, logLevel int) error {
 	if filePath == "" {
 		return nil
 	}
@@ -63,7 +63,7 @@ func (f *ForbiddenList) Load(filePath string) error {
 			if err == nil {
 				f.Regexps = append(f.Regexps, re)
 			} else {
-				log.Printf("Warning: %s: skipping invalid regex line %q: %v", filePath, line, err)
+				logf(logLevel, LogWarn, "Warning: %s: skipping invalid regex line %q: %v", filePath, line, err)
 			}
 		} else {
 			// Domain match

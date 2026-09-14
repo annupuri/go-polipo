@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -120,6 +122,40 @@ func TestProxyForbiddenFiltering(t *testing.T) {
 	ph.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403, got %d", rr.Code)
+	}
+}
+
+// TestProxyLogLevelGatesDenialLogging confirms config.LogLevel actually
+// reaches ServeHTTP's "Denied" log line (LogForbidden), not just the logf
+// helper in isolation - this is the wiring most likely to regress if a call
+// site is ever moved to a place without ph in scope.
+func TestProxyLogLevelGatesDenialLogging(t *testing.T) {
+	newHandler := func(logLevel int) *ProxyHandler {
+		cfg := NewDefaultConfig()
+		cfg.LogLevel = logLevel
+		forbidden := NewForbiddenList()
+		forbidden.Domains = []string{"badsite.com"}
+		return NewProxyHandler(cfg, NewCacheManager(cfg), forbidden, NewForbiddenList(), NewForbiddenList())
+	}
+	deny := func(ph *ProxyHandler) {
+		req := httptest.NewRequest(http.MethodGet, "http://badsite.com/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		ph.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(io.Discard) // TestMain's resting state; see main_test.go.
+
+	deny(newHandler(0x07)) // Polipo's default: LogForbidden's bit (0x8) unset.
+	if strings.Contains(buf.String(), "Denied") {
+		t.Errorf("expected no denial log at the default logLevel, got %q", buf.String())
+	}
+
+	buf.Reset()
+	deny(newHandler(0x0f)) // 0x07 | LogForbidden.
+	if !strings.Contains(buf.String(), "Denied: http://badsite.com/ is blacklisted") {
+		t.Errorf("expected a denial log once LogForbidden is enabled, got %q", buf.String())
 	}
 }
 

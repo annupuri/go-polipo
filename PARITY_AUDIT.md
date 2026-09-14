@@ -165,7 +165,7 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable | Status | Note |
 | :--- | :--: | :--- |
-| `logLevel` | ⚠️ | Parsed and stored; the standard `log` package does not actually gate output by level, so this is largely cosmetic. |
+| `logLevel` | ✅ | **Done (2026-09-14):** enforced. `logLevel` is a bitmask of independent message categories (`log.h`'s `L_ERROR`/`L_WARN`/`L_INFO`/`L_FORBIDDEN`/`L_TUNNEL`/...), not an ordered severity threshold - `logging.go`'s `logf` gates each existing call site on the one category it belongs to, same as Polipo's own `do_log` call sites (`if (type & LOGGING_MAX & logLevel) ...`). Default `0x07` (`LogError\|LogWarn\|LogInfo`) matches Polipo's `LOGGING_DEFAULT` exactly. Behavioural note: this default does *not* include `LogForbidden`/`LogTunnel`, so the "Denied: ..." access-denial lines added throughout this audit are opt-in from here on, not unconditional - matching Polipo, but a real change from how go-polipo behaved a moment earlier in this same audit. `LogUncacheable`/`LogSuperseded`/`LogVary` are defined for bitmask parity but have no go-polipo call site yet (Polipo itself barely uses `L_FORBIDDEN` either). |
 | `logFile` | ✅ | Redirects `log` output; append mode. |
 | `logFilePermissions` | ⚠️ | Hard-coded `0644` (Polipo default is `0640`). |
 | `logSyslog`, `logFacility` | ❌ | No syslog sink. |
@@ -375,7 +375,7 @@ at the end groups findings by how much they matter before a public release.
 - PMM (§10).
 - All DNS knobs (§12), all connection-pool/pipelining knobs (§10).
 - `daemonise` / `pidFile` (§15).
-- `logLevel` granularity, syslog (§14).
+- `logSyslog` / `logFacility` (§14) - no syslog sink.
 
 ### D. Cosmetic / low value
 

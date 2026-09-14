@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -192,7 +191,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// Parse response from file
 	resp, err = http.ReadResponse(bufio.NewReader(file), req)
 	if err != nil {
-		log.Printf("Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
+		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
 		file.Close()
 		return nil, false
 	}
@@ -200,7 +199,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// Verify X-Polipo-Location to prevent hash collisions
 	loc := resp.Header.Get("X-Polipo-Location")
 	if loc != req.URL.String() {
-		log.Printf("Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
+		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
 		resp.Body.Close()
 		file.Close()
 		return nil, false
@@ -394,7 +393,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 
 	path, err := cm.GetCachePath(req.URL.String())
 	if err != nil {
-		log.Printf("Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
+		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
 		return nil
 	}
 
@@ -404,13 +403,13 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		log.Printf("Cache store warning: %s: couldn't create cache directory %s: %v", req.URL, dir, err)
+		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't create cache directory %s: %v", req.URL, dir, err)
 		return nil
 	}
 
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
-		log.Printf("Cache store warning: %s: couldn't open cache file %s: %v", req.URL, path, err)
+		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't open cache file %s: %v", req.URL, path, err)
 		return nil
 	}
 	defer file.Close()
@@ -427,7 +426,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 
 	// Write to disk in HTTP format
 	if err := cloneResp.Write(file); err != nil {
-		log.Printf("Cache store warning: %s: couldn't write cache file %s: %v", req.URL, path, err)
+		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't write cache file %s: %v", req.URL, path, err)
 		os.Remove(path) // Delete incomplete cache file
 	}
 
@@ -489,14 +488,14 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 			return nil
 		}
 		if err := os.Remove(path); err != nil {
-			log.Printf("Cache expire warning: couldn't remove %s (%s): %v", path, reason, err)
+			logf(cm.config.LogLevel, LogWarn, "Cache expire warning: couldn't remove %s (%s): %v", path, reason, err)
 			return nil
 		}
 		stats.Removed++
 		stats.Freed += info.Size()
 		if reason == "size" {
 			stats.RemovedForSize++
-			log.Printf("Cache expire: removed %s (%d bytes, unused since %s): "+
+			logf(cm.config.LogLevel, LogInfo, "Cache expire: removed %s (%d bytes, unused since %s): "+
 				"larger than diskCacheTruncateSize and older than diskCacheTruncateTime",
 				path, info.Size(), info.ModTime().Format(http.TimeFormat))
 		}

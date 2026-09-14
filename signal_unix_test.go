@@ -12,7 +12,7 @@ import (
 
 func TestSetupReloadSignals(t *testing.T) {
 	var calls atomic.Int32
-	setupReloadSignals(func() error {
+	setupReloadSignals(0x07, func() error {
 		calls.Add(1)
 		return nil
 	})

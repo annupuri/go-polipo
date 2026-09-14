@@ -170,6 +170,13 @@
 
 # maxConcurrentRequests = 100   # 0 = unlimited
 # disableLocalInterface = false # disables /polipo/ and /polipo/config
+
+# Bitmask of message categories to log (hex), matching Polipo's own bits:
+# 0x1 error, 0x2 warn, 0x4 info, 0x8 forbidden/denied, 0x80 CONNECT tunnels
+# (0x10/0x20/0x40 are reserved for parity; nothing sets them yet). Bits
+# combine independently - this is not an ordered severity threshold, so
+# enabling 0x2 does not imply 0x1. The default, 0x07, omits "denied" and
+# tunnel accept/reject messages; add 0x8 and/or 0x80 to see those too.
 # logLevel = 0x07
 
 # Redirect logs to a file instead of standard error.  Required for silent

@@ -3,7 +3,6 @@
 package main
 
 import (
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,7 +14,9 @@ import (
 // SIGUSR2; go-polipo has no separate in-memory cache to discard (§10 of
 // PARITY_AUDIT), so both signals just reload here. Windows has no SIGUSR1/
 // SIGUSR2 (see signal_windows.go) - POST /polipo/reload covers that case.
-func setupReloadSignals(reload func() error) {
+// logLevel gates the reload-outcome messages (see logf); pass the owning
+// Config's LogLevel.
+func setupReloadSignals(logLevel int, reload func() error) {
 	// Buffered for 2: os/signal sends non-blocking, so SIGUSR1 and SIGUSR2
 	// arriving before the goroutine below drains the channel would otherwise
 	// silently drop one of them.
@@ -24,10 +25,10 @@ func setupReloadSignals(reload func() error) {
 	go func() {
 		for sig := range c {
 			if err := reload(); err != nil {
-				log.Printf("Reload (%s) failed: %v", sig, err)
+				logf(logLevel, LogError, "Reload (%s) failed: %v", sig, err)
 				continue
 			}
-			log.Printf("Reloaded forbidden/uncachable lists (%s)", sig)
+			logf(logLevel, LogInfo, "Reloaded forbidden/uncachable lists (%s)", sig)
 		}
 	}()
 }

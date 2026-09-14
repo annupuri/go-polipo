@@ -165,7 +165,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 | 変数 | 状態 | 備考 |
 | :--- | :--: | :--- |
-| `logLevel` | ⚠️ | パースして保持するが、標準 `log` パッケージは出力をレベルで絞らないため、ほぼ飾り。 |
+| `logLevel` | ✅ | **完了（2026-09-14）:** 強制するようにした。`logLevel` はPolipo自身と同じ、独立したメッセージ種別のビットマスク（`log.h`の`L_ERROR`/`L_WARN`/`L_INFO`/`L_FORBIDDEN`/`L_TUNNEL`等）であり、順序付きの重大度しきい値ではない — `logging.go`の`logf`が各既存呼び出し箇所を該当する1カテゴリで判定する、Polipo自身の`do_log`呼び出し（`if (type & LOGGING_MAX & logLevel) ...`）と同じ方式。既定値`0x07`（`LogError|LogWarn|LogInfo`）はPolipoの`LOGGING_DEFAULT`と完全一致する。挙動上の注意点: この既定値には`LogForbidden`/`LogTunnel`が含まれないため、これまでの監査作業で追加してきた「Denied: ...」系のアクセス拒否ログは、ここからは既定では出力されないオプトイン扱いになる — Polipoに合わせた結果だが、この監査の少し前までのgo-polipoの挙動からは実質的な変更である。`LogUncacheable`/`LogSuperseded`/`LogVary`はビットマスクとしての整合性のために定義したのみで、対応する呼び出し箇所はまだ無い（Polipo自身も`L_FORBIDDEN`をほとんど使っていない）。 |
 | `logFile` | ✅ | `log` の出力先を切り替え。追記モード。 |
 | `logFilePermissions` | ⚠️ | `0644` にハードコード（Polipo 既定は `0640`）。 |
 | `logSyslog`, `logFacility` | ❌ | syslog 出力なし。 |
@@ -362,7 +362,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 - PMM（§10）。
 - すべての DNS ノブ（§12）、すべてのコネクションプール / パイプラインノブ（§10）。
 - `daemonise` / `pidFile`（§15）。
-- `logLevel` の粒度、syslog（§14）。
+- `logSyslog` / `logFacility`（§14）— syslog への出力先が無い。
 
 ### D. 些末 / 価値が低い
 

@@ -22,7 +22,7 @@ Go言語版は、並行処理 (Goroutines) や標準ライブラリの利点を�
 | `forbidden.c` | `forbidden.go` | **アクセス制限フィルタ**<br>禁止URLリストの読み込み。ドメインの後方一致および正規表現マッチングによるアクセス可否判定。 |
 | `io.c` | *(Go標準 `net` / `bufio`)* | **ソケットI/O制御**<br>ソケットバッファリングやタイムアウトなどの非同期I/O制御は、Goの標準ライブラリ（`net.Conn`, `bufio` 等）と Goroutine が自動的に行うため、独自の I/O レイヤーは不要。 |
 | `local.c` | `proxy.go` | **ローカルWebインターフェース**<br>`local.c` の設定変数表示や動的設定などのローカルWebインターフェース（`/polipo/`, `/polipo/config`）は、`proxy.go` 内の `handleLocal` メソッドにて簡略化して再実装・統合。 |
-| `log.c` | *(Go標準 `log`)* | **ロギング**<br>Go標準の `log` パッケージを利用して簡略化。`logLevel` はパースして保持するだけで出力を絞り込まない — Polipo の `logLevel` はエラー・警告・禁止リストによる拒否・トンネル動作などの独立したメッセージ種別を表すビットマスクであり、Go標準の `log` パッケージにはそれに対応する「レベル」という概念自体が無いため、すべての呼び出し箇所が無条件に出力する。`logSyslog`/`logFacility` に相当するものは無く、syslog への出力先も無い。 |
+| `log.c` | *(Go標準 `log`)* / `logging.go` | **ロギング**<br>Go標準の `log` パッケージを利用して簡略化。`logLevel` はPolipo自身と同じ、エラー・警告・禁止リストによる拒否・トンネル動作などの独立したメッセージ種別を表すビットマスクであり、順序付きの重大度しきい値ではない — `logging.go` の `logf` が各呼び出し箇所をカテゴリビットで判定する（Go標準の `log` パッケージにはそれに対応する「レベル」という概念自体が無いため、自前で実装）。`logSyslog`/`logFacility` に相当するものは今も無く、syslog への出力先も無い。 |
 | `main.c` | `main.go` | **エントリーポイント**<br>コマンドライン引数（`-c`, `-v`, `-x` 等）の解析と、HTTPプロキシサーバーの初期化・起動処理。デーモン化そのもの（`daemonise`、`pidFile`）は再実装しておらず、go-polipo をバックグラウンドサービスとして動かすことはOS側の仕組み（Unixではサービスマネージャ、WindowsではインストーラーのTaskSchedulerエントリ）に委ねている。 |
 | `md5.c`<br>`md5import.c` | *(Go標準 `crypto/md5`)* | **ハッシュ計算**<br>C言語用の MD5 インポートファイルは不要となり、標準ライブラリ `crypto/md5` を直接利用するため不要。 |
 | `parse_time.c` | *(Go標準 `time` / `net/http`)* | **日時パース**<br>HTTP日時文字列のパースは、Go標準ライブラリの `time.Parse` や `http.ParseTime` に置き換えられたため不要。 |

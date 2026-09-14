@@ -72,7 +72,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if configFile != "" {
-		log.Printf("Loading config file: %s", configFile)
+		logf(config.LogLevel, LogInfo, "Loading config file: %s", configFile)
 		if err := config.LoadConfig(configFile); err != nil {
 			fmt.Fprintf(stderr, "Error loading config: %v\n", err)
 			return 1
@@ -131,21 +131,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 // server actually started.
 func serve(config *Config) int {
 	forbidden := NewForbiddenList()
-	if err := forbidden.Load(config.ForbiddenFile); err != nil {
-		log.Printf("Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
+	if err := forbidden.Load(config.ForbiddenFile, config.LogLevel); err != nil {
+		logf(config.LogLevel, LogWarn, "Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
 	}
 	uncachable := NewForbiddenList()
-	if err := uncachable.Load(config.UncachableFile); err != nil {
-		log.Printf("Warning: failed to load uncachable file %s: %v", config.UncachableFile, err)
+	if err := uncachable.Load(config.UncachableFile, config.LogLevel); err != nil {
+		logf(config.LogLevel, LogWarn, "Warning: failed to load uncachable file %s: %v", config.UncachableFile, err)
 	}
 	forbiddenTunnels := NewForbiddenList()
-	if err := forbiddenTunnels.Load(config.ForbiddenTunnelsFile); err != nil {
-		log.Printf("Warning: failed to load forbiddenTunnels file %s: %v", config.ForbiddenTunnelsFile, err)
+	if err := forbiddenTunnels.Load(config.ForbiddenTunnelsFile, config.LogLevel); err != nil {
+		logf(config.LogLevel, LogWarn, "Warning: failed to load forbiddenTunnels file %s: %v", config.ForbiddenTunnelsFile, err)
 	}
 
 	cacheMgr := NewCacheManager(config)
 	handler := NewProxyHandler(config, cacheMgr, forbidden, uncachable, forbiddenTunnels)
-	setupReloadSignals(handler.Reload)
+	setupReloadSignals(config.LogLevel, handler.Reload)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))
 	server := &http.Server{Addr: addr, Handler: handler}
@@ -154,13 +154,13 @@ func serve(config *Config) int {
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
-		log.Println("Shutting down go-polipo...")
+		logf(config.LogLevel, LogInfo, "Shutting down go-polipo...")
 		server.Close()
 	}()
 
-	log.Printf("go-polipo version %s starting on http://%s", Version, addr)
+	logf(config.LogLevel, LogInfo, "go-polipo version %s starting on http://%s", Version, addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("Server error: %v", err)
+		logf(config.LogLevel, LogError, "Server error: %v", err)
 		return 1
 	}
 	return 0
