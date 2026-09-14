@@ -156,7 +156,7 @@ at the end groups findings by how much they matter before a public release.
 | `/polipo/` , `/polipo/config` | ✅ | Present; `config` is a **read-only** table. |
 | `disableLocalInterface` | ✅ | Honoured. |
 | Config **editing** via web / `disableConfiguration` | ❌ | Not implemented (page is read-only), so the guard is moot. |
-| `/polipo/status?` (status + cache-flush actions) | ❌ | No status page, no runtime cache flush. |
+| `/polipo/status?` (status + cache-flush actions) | ⚠️ | **Cache-flush only, done 2026-09-14; the status/stats half stays ❌.** Polipo's own `/polipo/status?` actions (`local.c`: `init-forbidden`, `reopen-log`, `discard-objects`, `writeout-objects`, `free-chunk-arenas`) map to either something go-polipo already has under a different path (`init-forbidden` → `POST /polipo/reload`, §4/§15) or nothing at all (the other four are about Polipo's in-memory object cache and chunk arenas, which go-polipo has no equivalent of - §10). None of them touch the *disk* cache; Polipo only ever purges it via the separate `-x` invocation, never over HTTP. So there was no literal action to port here - `POST /polipo/flush` (`proxy.go`) is a new go-polipo-only endpoint that runs the same `CacheManager.Expire()` as `-x` on the running server and renders the resulting counts, so a long-running instance (especially on Windows, where there is often no separate shell session to run `-x` from - see §15) can be purged without a restart. The RTT/server-capability statistics half of Polipo's status page (§13 row below) remains unimplemented; that was explicitly out of scope for this item. |
 | `/polipo/servers?` (per-server RTT, rates, capabilities) / `disableServersList` | ❌ | No server statistics are collected. |
 | `/polipo/index?URL`, `/polipo/recursive-index?` / `disableIndexing` | ❌ | No cache-index browsing. |
 | `localDocumentRoot`, `disableProxy` | ❌ | Cannot run as a plain local file server. |
@@ -326,8 +326,20 @@ at the end groups findings by how much they matter before a public release.
   `dontTrustVaryETag`). A per-URL multi-variant store remains out of
   scope - more bookkeeping and an on-disk format break, and Polipo doesn't
   do it either.
-- `/polipo/status?` with a cache-flush action (§13) — cheap observability +
-  operability win for a long-running proxy.
+- ~~`/polipo/status?` with a cache-flush action (§13).~~ **Done
+  (2026-09-14):** turned out, checked against the vendored C history
+  (`local.c`), that Polipo's own `/polipo/status?` actions don't include
+  anything that flushes the *disk* cache at all - see §13 for the full
+  breakdown of where each of the five real actions actually maps (one
+  already ported under a different path, four moot for lack of an
+  in-memory object cache). `POST /polipo/flush` is therefore a new
+  go-polipo-only endpoint, not a port: it runs the same `CacheManager.Expire`
+  that `-x` does and reports scanned/removed/freed counts, so a running
+  instance can be purged without a restart - particularly useful on
+  Windows, where there is often no separate shell session available to run
+  `-x` from (see §15). Gated by `disableLocalInterface` and `authCredentials`
+  like every other local page, and POST-only like `/polipo/reload` to avoid
+  a GET-triggered purge from a prefetcher or crawler.
 - In-memory object cache (§10) — originally filed under tier C per
   ARCHITECTURE.md's rationale ("Go's GC/standard library make Polipo's
   hand-rolled allocator - `atom.c`/`chunk.c`/`object.c` - unnecessary"), but

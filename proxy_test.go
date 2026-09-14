@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -219,6 +220,73 @@ func TestProxyReloadEndpoint(t *testing.T) {
 	ph.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 after POST /polipo/reload, got %d", rr.Code)
+	}
+}
+
+func TestProxyFlushEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = dir
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	// GET must not trigger a flush (avoids prefetch/crawler side effects).
+	getReq := httptest.NewRequest(http.MethodGet, "http://localhost:8123/polipo/flush", nil)
+	getReq.RemoteAddr = "127.0.0.1:12345"
+	getRR := httptest.NewRecorder()
+	ph.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET /polipo/flush: expected 405, got %d", getRR.Code)
+	}
+
+	// A corrupt entry so the flush has something concrete to remove and
+	// report on.
+	corruptDir := filepath.Join(dir, "corrupt.example.com")
+	if err := os.MkdirAll(corruptDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(corruptDir, "garbage"), []byte("not an HTTP response"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/flush", nil)
+	postReq.RemoteAddr = "127.0.0.1:12345"
+	postRR := httptest.NewRecorder()
+	ph.ServeHTTP(postRR, postReq)
+	if postRR.Code != http.StatusOK {
+		t.Fatalf("POST /polipo/flush: expected 200, got %d", postRR.Code)
+	}
+	body, _ := io.ReadAll(postRR.Body)
+	if !strings.Contains(string(body), "Scanned: 1") || !strings.Contains(string(body), "Removed: 1") {
+		t.Errorf("flush result page missing expected stats, got: %s", body)
+	}
+
+	// disableLocalInterface must still gate /polipo/flush like every other
+	// local page.
+	cfg2 := NewDefaultConfig()
+	cfg2.DiskCacheRoot = t.TempDir()
+	cfg2.DisableLocalInterface = true
+	ph2 := newTestHandler(cfg2)
+	disabledReq := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/flush", nil)
+	disabledReq.RemoteAddr = "127.0.0.1:12345"
+	disabledRR := httptest.NewRecorder()
+	ph2.ServeHTTP(disabledRR, disabledReq)
+	if disabledRR.Code == http.StatusOK {
+		t.Error("expected /polipo/flush to be unreachable with disableLocalInterface=true")
+	}
+}
+
+func TestProxyFlushEndpointErrorWhenNoDiskCache(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = "" // disk cache disabled -> Expire() errors
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/flush", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when diskCacheRoot is unset, got %d", rr.Code)
 	}
 }
 

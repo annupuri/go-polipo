@@ -28,7 +28,9 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
   ディレクトリを整理します。
 - **ローカル Web インターフェース**: `/polipo/config` で設定内容を確認でき、
   再起動不要のランタイム操作として `/polipo/reload`（`forbiddenFile` /
-  `uncachableFile` / `forbiddenTunnelsFile` の再読み込み）を用意しています。
+  `uncachableFile` / `forbiddenTunnelsFile` の再読み込み）と
+  `/polipo/flush`（`-x` と同じディスクキャッシュの期限切れ処理を実行）を
+  用意しています。
 
 コマンドラインオプション
 ------------------------

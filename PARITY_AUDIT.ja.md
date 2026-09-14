@@ -156,7 +156,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `/polipo/` , `/polipo/config` | ✅ | 実装済み。`config` は**読み取り専用**の表。 |
 | `disableLocalInterface` | ✅ | 尊重。 |
 | Web からの設定**編集** / `disableConfiguration` | ❌ | 未実装（ページは読み取り専用）なのでガードは無意味。 |
-| `/polipo/status?`（状態表示 + キャッシュフラッシュ操作） | ❌ | 状態ページなし、実行時キャッシュフラッシュなし。 |
+| `/polipo/status?`（状態表示 + キャッシュフラッシュ操作） | ⚠️ | **キャッシュフラッシュのみ完了（2026-09-14）。状態/統計表示側は今も❌。** Polipo自身の `/polipo/status?` アクション（`local.c`: `init-forbidden`、`reopen-log`、`discard-objects`、`writeout-objects`、`free-chunk-arenas`）は、go-polipoでは「既に別パスで対応済み」（`init-forbidden` → `POST /polipo/reload`、§4/§15）か「対応するものが無い」（残り4つはPolipoのメモリ上オブジェクトキャッシュとチャンクアリーナ向けで、go-polipoには相当する仕組みが無い — §10）のいずれかにしか当たらない。どのアクションも**ディスクキャッシュには一切触れない** — Polipoがディスクキャッシュを削除するのは別プロセスの`-x`実行時のみで、HTTP経由での操作は存在しない。つまりこの項目には移植すべき実物のアクションが元から無かった。`POST /polipo/flush`（`proxy.go`）はPolipoの移植ではなく**go-polipo独自の新設エンドポイント**で、稼働中のサーバー上で`-x`と同じ`CacheManager.Expire()`を実行し、結果件数を表示する — 特にWindowsでは`-x`を実行するための別シェルセッションが無いことが多いため有用（§15参照）。統計表示（RTT・サーバー能力など）側は下の別行の通り今回も未対応で、そもそもこの項目のスコープ外としていた。 |
 | `/polipo/servers?`（サーバー別 RTT・転送レート・能力） / `disableServersList` | ❌ | サーバー統計を一切収集しない。 |
 | `/polipo/index?URL`, `/polipo/recursive-index?` / `disableIndexing` | ❌ | キャッシュインデックスの閲覧なし。 |
 | `localDocumentRoot`, `disableProxy` | ❌ | 単なるローカルファイルサーバーとしては動かせない。 |
@@ -316,8 +316,19 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   推測よりずっと小さな変更で済み、go-polipo も同じ方式にした（上記§9、
   `dontTrustVaryETag`）。URL ごとの複数変種ストアは今も対象外 — 管理が増え
   ディスク形式が非互換になる上、Polipo 自身もやっていない。
-- キャッシュフラッシュ操作つきの `/polipo/status?`（§13） — 長時間稼働プロキシに
-  とって安価な可観測性 + 運用性の向上。
+- ~~キャッシュフラッシュ操作つきの `/polipo/status?`（§13）。~~ **完了
+  （2026-09-14）:** ベンダリング済みのC版履歴（`local.c`）を確認したところ、
+  Polipo自身の `/polipo/status?` アクションには**ディスクキャッシュを
+  フラッシュするものが一つも無い**ことが判明した — 詳細は§13参照（5つの
+  実アクションのうち1つは既に別パスで対応済み、残り4つはメモリ上オブジェクト
+  キャッシュが無いため対応不可）。したがって `POST /polipo/flush` は移植
+  ではなく**go-polipo独自の新設エンドポイント**であり、稼働中サーバー上で
+  `-x`と同じ`CacheManager.Expire`を実行し、走査/削除/解放件数を表示する
+  — 特にWindowsでは`-x`を実行するための別シェルセッションが無いことが
+  多く（§15参照）、再起動無しでパージできるのは実用上の利点がある。
+  `disableLocalInterface`と`authCredentials`による保護は他のローカルページ
+  と同様に適用し、`/polipo/reload`と同様にPOST専用にしてプリフェッチや
+  クローラによる誤爆を防いでいる。
 - インメモリオブジェクトキャッシュ（§10）— 当初は ARCHITECTURE.md の通り
   「Go の GC / 標準ライブラリに任せれば手製アロケータ（`atom.c`/`chunk.c`/
   `object.c`）は不要」という設計上の割り切りとして C 枠に分類していたが、

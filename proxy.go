@@ -455,7 +455,38 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 <form method="post" action="/polipo/reload">
 <button type="submit">Reload forbidden/uncachable lists</button>
 </form>
+<form method="post" action="/polipo/flush">
+<button type="submit">Flush disk cache</button>
+</form>
 </body></html>`, Version)
+		return
+	}
+
+	if path == "/polipo/flush" {
+		if req.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		stats, err := ph.cacheManager.Expire()
+		if err != nil {
+			log.Printf("Cache flush failed: %v", err)
+			http.Error(w, fmt.Sprintf("Cache flush failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Cache flush: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale), freed %d bytes",
+			stats.Scanned, stats.Removed, stats.RemovedForSize, stats.Freed)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<html><head><title>go-polipo Cache Flush</title></head>
+<body>
+<h1>Cache Flush Complete</h1>
+<ul>
+<li>Scanned: %d</li>
+<li>Removed: %d (%d for exceeding diskCacheTruncateSize while stale)</li>
+<li>Freed: %d bytes</li>
+</ul>
+<p><a href="/polipo/">Back</a></p>
+</body></html>`, stats.Scanned, stats.Removed, stats.RemovedForSize, stats.Freed)
 		return
 	}
 
