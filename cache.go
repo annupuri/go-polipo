@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -363,6 +364,16 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 		return nil
 	}
 
+	// maxDiskCacheEntrySize: reject known-oversized responses before ever
+	// reading the body into memory - matching Polipo's makeDiskEntry, which
+	// makes this same check against the declared Content-Length (its
+	// object->length) before deciding to store. The response is still
+	// forwarded to the client untouched; only caching is skipped.
+	maxSize := cm.config.MaxDiskCacheEntrySize
+	if maxSize >= 0 && resp.ContentLength >= 0 && resp.ContentLength > maxSize {
+		return nil
+	}
+
 	// Read the body into memory so it can be both written to disk and replayed.
 	bodyBytes, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -373,8 +384,16 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	// Restore the response body for the caller.
 	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
+	// Fallback for when Content-Length was absent or understated (chunked
+	// transfer, or a lying origin): the fast path above only catches a
+	// declared size, so re-check against what was actually read.
+	if maxSize >= 0 && int64(len(bodyBytes)) > maxSize {
+		return nil
+	}
+
 	path, err := cm.GetCachePath(req.URL.String())
 	if err != nil {
+		log.Printf("Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
 		return nil
 	}
 
@@ -384,11 +403,13 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
+		log.Printf("Cache store warning: %s: couldn't create cache directory %s: %v", req.URL, dir, err)
 		return nil
 	}
 
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
+		log.Printf("Cache store warning: %s: couldn't open cache file %s: %v", req.URL, path, err)
 		return nil
 	}
 	defer file.Close()
@@ -405,6 +426,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 
 	// Write to disk in HTTP format
 	if err := cloneResp.Write(file); err != nil {
+		log.Printf("Cache store warning: %s: couldn't write cache file %s: %v", req.URL, path, err)
 		os.Remove(path) // Delete incomplete cache file
 	}
 
@@ -416,12 +438,23 @@ type ExpireStats struct {
 	Scanned int   // cache files examined
 	Removed int   // cache files deleted
 	Freed   int64 // bytes reclaimed
+
+	// RemovedForSize counts entries removed early by the
+	// DiskCacheTruncateTime/DiskCacheTruncateSize policy (large, stale
+	// entries that predate the general DiskCacheUnlinkTime cutoff) rather
+	// than for being corrupt, HTTP-stale, or past DiskCacheUnlinkTime. It is
+	// a subset of Removed, broken out because it is go-polipo's deliberate
+	// substitute for Polipo's in-place truncation (see DiskCacheTruncateTime
+	// on Config) - worth being able to tell apart from ordinary housekeeping.
+	RemovedForSize int
 }
 
 // Expire walks the disk cache and removes entries that are no longer usable:
-// corrupt files, responses that are stale by HTTP freshness rules, and files
-// whose last access is older than Config.DiskCacheUnlinkTime. Empty host
-// directories left behind are pruned. It implements the `-x` command.
+// corrupt files, responses that are stale by HTTP freshness rules, files
+// whose last access is older than Config.DiskCacheUnlinkTime, and large
+// files that have gone unused past DiskCacheTruncateTime (see
+// expireReason). Empty host directories left behind are pruned. It
+// implements the `-x` command.
 func (cm *CacheManager) Expire() (ExpireStats, error) {
 	var stats ExpireStats
 
@@ -450,12 +483,21 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 			return nil // vanished between listing and stat; ignore
 		}
 		stats.Scanned++
-		if !cm.shouldExpire(path, info) {
+		reason := cm.expireReason(path, info)
+		if reason == "" {
 			return nil
 		}
-		if err := os.Remove(path); err == nil {
-			stats.Removed++
-			stats.Freed += info.Size()
+		if err := os.Remove(path); err != nil {
+			log.Printf("Cache expire warning: couldn't remove %s (%s): %v", path, reason, err)
+			return nil
+		}
+		stats.Removed++
+		stats.Freed += info.Size()
+		if reason == "size" {
+			stats.RemovedForSize++
+			log.Printf("Cache expire: removed %s (%d bytes, unused since %s): "+
+				"larger than diskCacheTruncateSize and older than diskCacheTruncateTime",
+				path, info.Size(), info.ModTime().Format(http.TimeFormat))
 		}
 		return nil
 	})
@@ -467,22 +509,25 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 	return stats, nil
 }
 
-// shouldExpire reports whether a single cache file is safe to delete.
-func (cm *CacheManager) shouldExpire(path string, info fs.FileInfo) bool {
+// expireReason reports why a single cache file should be deleted ("" if it
+// should be kept). The specific non-empty values are for Expire's own
+// bookkeeping/logging; callers other than Expire only need to know whether
+// the result is empty.
+func (cm *CacheManager) expireReason(path string, info fs.FileInfo) string {
 	file, err := os.Open(path)
 	if err != nil {
-		return false
+		return ""
 	}
 	defer file.Close()
 
 	resp, err := http.ReadResponse(bufio.NewReader(file), nil)
 	if err != nil {
-		return true // unparseable cache file: junk, drop it
+		return "corrupt" // unparseable cache file: junk, drop it
 	}
 	defer resp.Body.Close()
 
 	if cm.isExpired(resp) {
-		return true
+		return "http-stale"
 	}
 
 	// Absolute age cap based on last recorded access (fall back to mtime).
@@ -494,10 +539,23 @@ func (cm *CacheManager) shouldExpire(path string, info fs.FileInfo) bool {
 	}
 	if cm.config.DiskCacheUnlinkTime > 0 &&
 		time.Since(lastAccess) > cm.config.DiskCacheUnlinkTime {
-		return true
+		return "unlink-time"
 	}
 
-	return false
+	// Polipo would truncate a large, long-unused entry down to
+	// diskCacheTruncateSize rather than remove it, then serve the remainder
+	// via partial instantiation. go-polipo has no partial-instance support
+	// (§10 of PARITY_AUDIT): truncating the body in place here would leave
+	// the stored Content-Length pointing past the end of the file, so a
+	// later Lookup would hand a client a response that claims to be
+	// complete but silently cuts off short. Deleting the entry outright
+	// reclaims the same space without ever serving that broken response.
+	if cm.config.DiskCacheTruncateSize > 0 && info.Size() > cm.config.DiskCacheTruncateSize &&
+		time.Since(lastAccess) > cm.config.DiskCacheTruncateTime {
+		return "size"
+	}
+
+	return ""
 }
 
 // pruneEmptyDirs removes empty directories under root, deepest first, keeping

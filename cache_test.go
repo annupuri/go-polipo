@@ -467,6 +467,85 @@ func TestStoreSkipsAuthenticated(t *testing.T) {
 	}
 }
 
+func TestStoreSkipsOversizedEntries(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cfg.MaxDiskCacheEntrySize = 5
+	cm := NewCacheManager(cfg)
+
+	// Declared (Content-Length) size over the limit: rejected before the
+	// body is even read - resp.Body must come back completely untouched.
+	t.Run("oversized Content-Length", func(t *testing.T) {
+		url := "http://example.com/big-declared"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		resp := mkResp("this body is way over 5 bytes", "Cache-Control", "max-age=3600")
+		resp.ContentLength = int64(len("this body is way over 5 bytes"))
+
+		if err := cm.Store(req, resp); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if fileExistsForURL(t, cm, url) {
+			t.Error("oversized entry should not have been cached")
+		}
+		got, err := io.ReadAll(resp.Body)
+		if err != nil || string(got) != "this body is way over 5 bytes" {
+			t.Errorf("body not preserved for a caller that never gets a cache hit: %q, %v", got, err)
+		}
+	})
+
+	// No declared size (as when Content-Length is absent/chunked, mkResp's
+	// default): the fallback check on the actual bytes read must still
+	// catch it.
+	t.Run("oversized with no declared Content-Length", func(t *testing.T) {
+		url := "http://example.com/big-undeclared"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		resp := mkResp("also way over the limit", "Cache-Control", "max-age=3600")
+
+		if err := cm.Store(req, resp); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if fileExistsForURL(t, cm, url) {
+			t.Error("oversized entry should not have been cached")
+		}
+		got, err := io.ReadAll(resp.Body)
+		if err != nil || string(got) != "also way over the limit" {
+			t.Errorf("body not preserved: %q, %v", got, err)
+		}
+	})
+
+	// Under the limit: cached as usual.
+	t.Run("under the limit is cached", func(t *testing.T) {
+		url := "http://example.com/small"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		resp := mkResp("ok", "Cache-Control", "max-age=3600")
+
+		if err := cm.Store(req, resp); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if !fileExistsForURL(t, cm, url) {
+			t.Error("entry under the limit should have been cached")
+		}
+	})
+
+	// -1 (the default) means unlimited: nothing is rejected on size.
+	t.Run("-1 disables the limit", func(t *testing.T) {
+		cfg2 := NewDefaultConfig()
+		cfg2.DiskCacheRoot = t.TempDir()
+		cm2 := NewCacheManager(cfg2)
+		url := "http://example.com/unlimited"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		resp := mkResp("this body is way over 5 bytes", "Cache-Control", "max-age=3600")
+		resp.ContentLength = int64(len("this body is way over 5 bytes"))
+
+		if err := cm2.Store(req, resp); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if !fileExistsForURL(t, cm2, url) {
+			t.Error("with maxDiskCacheEntrySize=-1 nothing should be rejected on size")
+		}
+	})
+}
+
 func TestDiskCacheDisabled(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -652,6 +731,89 @@ func TestCacheLookupRejections(t *testing.T) {
 		got.Body.Close()
 		t.Error("Lookup should reject a cached entry that carries Vary")
 	}
+}
+
+func TestExpireRemovesLargeStaleEntries(t *testing.T) {
+	now := time.Now()
+	httpDate := func(d time.Duration) string { return now.Add(d).UTC().Format(http.TimeFormat) }
+
+	// "cached body" (writeCacheEntry's fixed body) is 11 bytes. Unused for
+	// 48h: past DiskCacheTruncateTime, nowhere near the 32-day
+	// DiskCacheUnlinkTime default, and fresh by HTTP rules (max-age high,
+	// Date now) - the only thing that can remove it is the size policy.
+	mtime := now.Add(-48 * time.Hour)
+
+	t.Run("larger than diskCacheTruncateSize is removed early", func(t *testing.T) {
+		root := t.TempDir()
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = root
+		cfg.DiskCacheTruncateTime = 24 * time.Hour
+		cfg.DiskCacheTruncateSize = 5 // smaller than the 11-byte body
+		cm := NewCacheManager(cfg)
+
+		p := writeCacheEntry(t, cm, "http://large.example.com/a",
+			"max-age=999999", httpDate(0), "", mtime)
+
+		stats, err := cm.Expire()
+		if err != nil {
+			t.Fatalf("Expire: %v", err)
+		}
+		if stats.Removed != 1 || stats.RemovedForSize != 1 {
+			t.Errorf("stats = %+v, want Removed=1 RemovedForSize=1", stats)
+		}
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("expected large stale entry to be removed, stat err = %v", err)
+		}
+	})
+
+	t.Run("smaller than diskCacheTruncateSize survives", func(t *testing.T) {
+		root := t.TempDir()
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = root
+		cfg.DiskCacheTruncateTime = 24 * time.Hour
+		// info.Size() is the whole on-disk file (status line + headers +
+		// body), not just the 11-byte body, so the threshold needs enough
+		// headroom above that to land on the "small" side.
+		cfg.DiskCacheTruncateSize = 10000
+		cm := NewCacheManager(cfg)
+
+		p := writeCacheEntry(t, cm, "http://small.example.com/a",
+			"max-age=999999", httpDate(0), "", mtime)
+
+		stats, err := cm.Expire()
+		if err != nil {
+			t.Fatalf("Expire: %v", err)
+		}
+		if stats.Removed != 0 {
+			t.Errorf("stats = %+v, want Removed=0", stats)
+		}
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected small entry to survive: %v", err)
+		}
+	})
+
+	t.Run("diskCacheTruncateSize=0 disables the policy", func(t *testing.T) {
+		root := t.TempDir()
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = root
+		cfg.DiskCacheTruncateTime = 24 * time.Hour
+		cfg.DiskCacheTruncateSize = 0
+		cm := NewCacheManager(cfg)
+
+		p := writeCacheEntry(t, cm, "http://large.example.com/a",
+			"max-age=999999", httpDate(0), "", mtime)
+
+		stats, err := cm.Expire()
+		if err != nil {
+			t.Fatalf("Expire: %v", err)
+		}
+		if stats.Removed != 0 {
+			t.Errorf("stats = %+v, want Removed=0", stats)
+		}
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected entry to survive with the policy disabled: %v", err)
+		}
+	})
 }
 
 func TestExpireErrors(t *testing.T) {

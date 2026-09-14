@@ -220,6 +220,9 @@ func TestSetAllKeys(t *testing.T) {
 	ok("disableLocalInterface", "true")
 	ok("maxConcurrentRequests", "50")
 	ok("diskCacheUnlinkTime", "16d")
+	ok("maxDiskCacheEntrySize", "5000000")
+	ok("diskCacheTruncateTime", "2d")
+	ok("diskCacheTruncateSize", "2097152")
 	ok("noDiskCache", "true")
 	ok("dontCacheCookies", "false")
 	ok("proxyOffline", "true")
@@ -246,6 +249,15 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.DiskCacheUnlinkTime != 16*24*time.Hour {
 		t.Errorf("diskCacheUnlinkTime = %s, want 384h0m0s", c.DiskCacheUnlinkTime)
+	}
+	if c.MaxDiskCacheEntrySize != 5000000 {
+		t.Errorf("maxDiskCacheEntrySize = %d, want 5000000", c.MaxDiskCacheEntrySize)
+	}
+	if c.DiskCacheTruncateTime != 2*24*time.Hour {
+		t.Errorf("diskCacheTruncateTime = %s, want 48h0m0s", c.DiskCacheTruncateTime)
+	}
+	if c.DiskCacheTruncateSize != 2097152 {
+		t.Errorf("diskCacheTruncateSize = %d, want 2097152", c.DiskCacheTruncateSize)
 	}
 	if !c.NoDiskCache {
 		t.Error(`noDiskCache "true" should be truthy`)
@@ -294,6 +306,9 @@ func TestSetAllKeys(t *testing.T) {
 	fails("logLevel", "not-hex")
 	fails("maxConcurrentRequests", "lots")
 	fails("diskCacheUnlinkTime", "5w")
+	fails("maxDiskCacheEntrySize", "big")
+	fails("diskCacheTruncateTime", "5w")
+	fails("diskCacheTruncateSize", "big")
 	fails("socksProxyType", "socks4a") // Polipo accepted it; go-polipo only does SOCKS5
 	fails("socksProxyType", "socks4")
 	fails("socksProxyType", "http")

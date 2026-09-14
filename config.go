@@ -35,6 +35,27 @@ type Config struct {
 	// file may reach before `-x` removes it, regardless of HTTP freshness.
 	DiskCacheUnlinkTime time.Duration
 
+	// MaxDiskCacheEntrySize caps how large a single response body may be
+	// before Store refuses to write it to disk (the response is still
+	// forwarded to the client; it just isn't cached). -1 (the default,
+	// matching Polipo) means no limit.
+	MaxDiskCacheEntrySize int64
+
+	// DiskCacheTruncateTime and DiskCacheTruncateSize identify entries `-x`
+	// removes early, before the general DiskCacheUnlinkTime cutoff: ones
+	// larger than DiskCacheTruncateSize that have gone unused for
+	// DiskCacheTruncateTime. Polipo truncates such a file's body down to
+	// DiskCacheTruncateSize instead of deleting it, relying on its partial-
+	// instance machinery to refetch the missing tail on demand; go-polipo
+	// has no partial-instance support (§10 of PARITY_AUDIT), so truncating
+	// in place would leave a corrupt entry - a stored Content-Length that no
+	// longer matches the body - that gets served as if it were complete.
+	// Deleting instead is the safe equivalent: the same "reclaim space
+	// early" outcome, without ever serving a broken response. A
+	// DiskCacheTruncateSize of 0 disables this early-removal check.
+	DiskCacheTruncateTime time.Duration
+	DiskCacheTruncateSize int64
+
 	// NoDiskCache disables the on-disk cache entirely: no lookups, no writes.
 	// An empty DiskCacheRoot has the same effect.
 	NoDiskCache bool
@@ -115,6 +136,9 @@ func NewDefaultConfig() *Config {
 		MaxConcurrentRequests: 100,
 		LogFile:               "",
 		DiskCacheUnlinkTime:   32 * 24 * time.Hour,
+		MaxDiskCacheEntrySize: -1,
+		DiskCacheTruncateTime: 108 * time.Hour, // 4.5 days, matching Polipo
+		DiskCacheTruncateSize: 1024 * 1024,
 		NoDiskCache:           false,
 		DontCacheCookies:      true,
 		AuthCredentials:       "",
@@ -145,6 +169,9 @@ func (c *Config) Entries() []ConfigEntry {
 		{"diskCacheRoot", c.DiskCacheRoot},
 		{"noDiskCache", strconv.FormatBool(c.NoDiskCache)},
 		{"diskCacheUnlinkTime", c.DiskCacheUnlinkTime.String()},
+		{"maxDiskCacheEntrySize", strconv.FormatInt(c.MaxDiskCacheEntrySize, 10)},
+		{"diskCacheTruncateTime", c.DiskCacheTruncateTime.String()},
+		{"diskCacheTruncateSize", strconv.FormatInt(c.DiskCacheTruncateSize, 10)},
 		{"dontCacheCookies", strconv.FormatBool(c.DontCacheCookies)},
 		{"forbiddenFile", c.ForbiddenFile},
 		{"uncachableFile", c.UncachableFile},
@@ -433,6 +460,24 @@ func (c *Config) Set(key, val string) error {
 			return fmt.Errorf("invalid diskCacheUnlinkTime '%s': %w", val, err)
 		}
 		c.DiskCacheUnlinkTime = d
+	case "maxDiskCacheEntrySize":
+		size, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid maxDiskCacheEntrySize '%s': %w", val, err)
+		}
+		c.MaxDiskCacheEntrySize = size
+	case "diskCacheTruncateTime":
+		d, err := parseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid diskCacheTruncateTime '%s': %w", val, err)
+		}
+		c.DiskCacheTruncateTime = d
+	case "diskCacheTruncateSize":
+		size, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid diskCacheTruncateSize '%s': %w", val, err)
+		}
+		c.DiskCacheTruncateSize = size
 	default:
 		// Ignore unknown variables silently or log them (Polipo ignores them but we can log them)
 		// We'll log them or just skip to match Polipo's config style.

@@ -135,11 +135,12 @@ at the end groups findings by how much they matter before a public release.
 | `diskCacheRoot` | `/var/cache/polipo/` | ✅ | Same layout & MD5+base64 filenames; a Polipo cache tree is reusable. Empty value now disables the cache (disk-cache hardening; previously normalised to `/`). |
 | `noDiskCache` | — (go-polipo only) | ✅ | New; disables lookups and writes. |
 | `diskCacheUnlinkTime` | `32d` | ✅ | Enforced by `-x` (`Expire`), with empty-dir pruning. |
-| `maxDiskCacheEntrySize` | `-1` (unlimited) | ❌ | No per-object size cap; a multi-GB download is cached in full. |
-| `diskCacheTruncateTime` / `diskCacheTruncateSize` | 4.5d / 1MB | ❌ | No truncation of large, ageing entries — only whole-file unlink. |
+| `maxDiskCacheEntrySize` | `-1` (unlimited) | ✅ | **Done (2026-09-14):** enforced in `Store` (`cache.go`), matching Polipo's `makeDiskEntry` (`diskcache.c`) - checked against the declared `Content-Length` before the body is even read (avoiding a needless buffer for the common case), with a fallback check against the actual bytes read for chunked/undeclared-length responses. Rejected responses are still forwarded to the client; only caching is skipped. |
+| `diskCacheTruncateTime` / `diskCacheTruncateSize` | 4.5d / 1MB | ✅ | **Done (2026-09-14), deliberately not truncation:** `-x` now removes entries larger than `diskCacheTruncateSize` that have gone unused for `diskCacheTruncateTime`, ahead of the general `diskCacheUnlinkTime` cutoff - same trigger condition as Polipo's `expireDiskObject` (`diskcache.c`), sourced from the vendored C history rather than guessed. What differs on purpose: Polipo truncates the file's body down to `diskCacheTruncateSize` in place and later refetches the missing tail through partial instantiation; go-polipo has no partial-instance support (§10), so truncating in place would leave a stored `Content-Length` pointing past the end of the file - a later `Lookup` would hand a client a response that claims to be complete but silently cuts off short. Deleting the entry outright gets the same "reclaim space early" effect without ever serving that broken response. Tracked separately from ordinary `-x` removals via `ExpireStats.RemovedForSize` and a dedicated log line, at the request of the person who found the real-world case this guards against below. |
 | `diskCacheWriteoutOnClose`, `maxDiskEntries` | 64KB / 32 | 🔷 | FD management / write batching owned by the Go runtime. |
 | `diskCacheDirectoryPermissions` / `diskCacheFilePermissions` | `0700` / `0600` | ⚠️ | Hard-coded to `0700` / `0600` (`MkdirAll`/`OpenFile`); not configurable. Matches the defaults. |
 | Atomic write (write temp, rename) | — | ⚠️ | `Store` writes in place with `O_TRUNC` and `os.Remove` on failure — a crash mid-write leaves a short file (caught later as "corrupt" by `Lookup`/`Expire`). Polipo avoids in-place truncation. |
+| Logging on disk-cache write/expire failures | Polipo logs via `do_log_error` | ✅ | **Done (2026-09-14), found while working the two rows above:** every failure branch in `Store` (`GetCachePath`, `MkdirAll`, `OpenFile`, `Write`) and in `Expire`'s removal step was silently swallowed — `cache.go` didn't even import `log`. These are now logged; the new size-based removal above also gets its own log line, distinct from ordinary corrupt/stale/unlink-time removals. |
 | `X-Polipo-Location` collision guard | — | ✅ | Present; exact-URL compare on read. |
 
 ## 12. DNS
@@ -294,8 +295,22 @@ at the end groups findings by how much they matter before a public release.
   `do_tunnel`); go-polipo's broader behavior predates this item (present
   since the original rewrite) and is kept as an intentional, documented
   addition on top of the new `forbiddenTunnelsFile`, not replaced by it.
-- On-disk size cap `maxDiskCacheEntrySize` / truncation (§11) — unbounded growth
-  between `-x` runs.
+- ~~On-disk size cap `maxDiskCacheEntrySize` / truncation (§11) — unbounded
+  growth between `-x` runs.~~ **Done (2026-09-14):** `maxDiskCacheEntrySize`
+  ported as a straight entry gate on `Store`. `diskCacheTruncateTime` /
+  `diskCacheTruncateSize` ported as early *deletion* rather than Polipo's
+  in-place truncation - truncating would corrupt the entry without the
+  partial-instance support (§10) needed to make it safe, so this is a
+  deliberate substitution, not a shortcut. Also fixed along the way: none of
+  `Store`'s or `Expire`'s failure paths logged anything (`cache.go` didn't
+  import `log` at all) - found because the person working this item asked
+  whether abnormal cases were visible in the log at all, and they were not.
+  Concrete motivation for choosing deletion over truncation: a real ~10-year-
+  old cache file from the original Polipo, recovered during this
+  conversation, turned out to be exactly this scenario - `Content-Length:
+  218811050` declared but only ~111MB actually on disk, i.e. an instance
+  Polipo's own truncation (or an incomplete original fetch) had already
+  shrunk below its declared size.
 - `Vary` matching, Polipo-style (§9) — A.3 made `Vary` responses safe by not
   caching them at all; the follow-up is to store the request's Vary-named header
   values with the entry (one added `X-Polipo-Vary` metadata header, cache stays
@@ -320,10 +335,25 @@ at the end groups findings by how much they matter before a public release.
   lock contention is expected to be a non-issue in practice as long as
   deadlocks are avoided. Not started - disk-only remains the confirmed
   choice for now.
+- Partial instantiation / range assembly (§10) - originally filed under
+  tier C as settled-by-design, but resurfaced (2026-09-14) while explaining
+  why `diskCacheTruncateTime`/`diskCacheTruncateSize` deletes rather than
+  truncates (see the item above): the underlying reason go-polipo can't
+  safely truncate is exactly that it lacks this feature. The user asked
+  whether splitting a large cached entry across multiple files would help;
+  the conclusion was that it would not add anything over Polipo's own
+  approach - a single file plus a byte-offset marking how much of it is
+  actually populated (`X-Polipo-Body-Offset`), which is simpler than a
+  multi-file scheme (no chunk manifest, no merge-on-read logic) - and either
+  way the hard part is the same regardless of on-disk layout: parsing a
+  client's `Range` request, serving what is cached, and fetching only the
+  missing span from the origin to fill the rest. Not started; PMM (splitting
+  a *live* fetch across multiple upstream connections) is a related but
+  separate mechanism, not needed to get plain range-serving working.
 
 ### C. Explicitly by-design (already in ARCHITECTURE.md; just needs a sentence)
 
-- Partial instillation, range assembly, PMM (§10).
+- PMM (§10).
 - All DNS knobs (§12), all connection-pool/pipelining knobs (§10).
 - `daemonise` / `pidFile` (§15).
 - `logLevel` granularity, syslog (§14).

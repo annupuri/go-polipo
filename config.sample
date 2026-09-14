@@ -46,6 +46,24 @@
 # "polipo -x" removes entries not accessed within this period (plus corrupt
 # and HTTP-stale entries).  Units: s, m, h, d.  0 disables the age cap.
 # diskCacheUnlinkTime = 32d
+
+# Reject a response body larger than this many bytes: Store skips caching it
+# (the response is still forwarded to the client), so a single huge download
+# cannot grow the disk cache unbounded.  -1 (the default, matching Polipo)
+# means no limit.
+# maxDiskCacheEntrySize = -1
+
+# "polipo -x" also removes entries larger than diskCacheTruncateSize bytes
+# that have gone unused for diskCacheTruncateTime, ahead of the general
+# diskCacheUnlinkTime cutoff above.  Polipo instead truncates such a file's
+# body down to diskCacheTruncateSize and later refetches the missing tail on
+# demand; go-polipo has no such partial-instance support, so truncating in
+# place would leave a corrupt entry (a stored Content-Length past the actual
+# end of the file) that gets served as if complete.  Deleting instead gets
+# the same "reclaim space early" effect without that risk.
+# diskCacheTruncateSize = 0 disables this early removal.
+# diskCacheTruncateTime = 4d12h  # 4.5 days, Polipo's default
+# diskCacheTruncateSize = 1048576
 #
 # A response with no Expires / max-age / s-maxage gets a heuristic freshness
 # lifetime (10% of the time since Last-Modified, capped at 24h; a flat 24h with
