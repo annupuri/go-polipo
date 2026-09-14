@@ -1188,6 +1188,180 @@ func seedStaleEntryWithValidators(t *testing.T, cm *CacheManager, target, body, 
 	}
 }
 
+// seedStaleVaryEntry writes a stale, Vary-bearing cache entry directly to
+// disk, bypassing Store's usual staleness computation - Store already always
+// writes Vary'd responses, but this pins the Date/max-age so the entry is
+// unambiguously stale regardless (LookupStale would already report it
+// stale purely for carrying Vary; the low max-age just keeps the test
+// independent of that specific mechanism).
+func seedStaleVaryEntry(t *testing.T, cm *CacheManager, target, body, vary, etag, lastModified string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        http.Header{},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+	resp.Header.Set("Cache-Control", "max-age=1")
+	resp.Header.Set("Date", timeHeader(-2*time.Hour))
+	resp.Header.Set("Vary", vary)
+	if etag != "" {
+		resp.Header.Set("ETag", etag)
+	}
+	if lastModified != "" {
+		resp.Header.Set("Last-Modified", lastModified)
+	}
+	if err := cm.Store(req, resp); err != nil {
+		t.Fatalf("seed Store failed: %v", err)
+	}
+}
+
+func TestAddConditionalHeadersVaryTrustsOnlyETag(t *testing.T) {
+	var gotINM, gotIMS string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotINM = r.Header.Get("If-None-Match")
+		gotIMS = r.Header.Get("If-Modified-Since")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Vary", "Accept-Encoding")
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig() // DontTrustVaryETag defaults to 1 ("maybe")
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedStaleVaryEntry(t, cm, target, "cached body", "Accept-Encoding", `"v1"`, timeHeader(-48*time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if gotINM != `"v1"` {
+		t.Errorf("If-None-Match sent = %q, want %q (ETag should be trusted at the default dontTrustVaryETag)", gotINM, `"v1"`)
+	}
+	if gotIMS != "" {
+		t.Errorf("If-Modified-Since sent = %q, want empty (Last-Modified alone is never trusted for a Vary'd entry)", gotIMS)
+	}
+}
+
+func TestAddConditionalHeadersVaryNoETagMeansFullRefetch(t *testing.T) {
+	var sawINM, sawIMS bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawINM = r.Header.Get("If-None-Match") != ""
+		sawIMS = r.Header.Get("If-Modified-Since") != ""
+		w.Write([]byte("fresh body"))
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	// Only Last-Modified, no ETag: per client.c, a Vary'd entry with no ETag
+	// is never revalidated - only a full, unconditional fetch is attempted.
+	seedStaleVaryEntry(t, cm, target, "old body", "Accept-Language", "", timeHeader(-48*time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if sawINM || sawIMS {
+		t.Error("a Vary'd entry with no ETag should never trigger a conditional request")
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "fresh body" {
+		t.Errorf("body = %q, want the full fresh fetch", got)
+	}
+}
+
+func TestAddConditionalHeadersDontTrustVaryETagTrue(t *testing.T) {
+	var sawINM bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawINM = r.Header.Get("If-None-Match") != ""
+		w.Write([]byte("fresh body"))
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cfg.DontTrustVaryETag = 2 // "true": never trust an ETag on a Vary'd entry
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	seedStaleVaryEntry(t, cm, target, "old body", "Accept-Encoding", `"v1"`, "")
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if sawINM {
+		t.Error("dontTrustVaryETag=true should suppress If-None-Match even with a stored ETag")
+	}
+	if got, _ := io.ReadAll(rr.Body); string(got) != "fresh body" {
+		t.Errorf("body = %q, want the full fresh fetch", got)
+	}
+}
+
+func TestVaryEntryNeverServedWithoutRevalidation(t *testing.T) {
+	hits := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Vary", "Accept-Encoding")
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	// A high max-age would make an ordinary entry fresh; Vary must override
+	// that and force a round-trip regardless.
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+		Header: http.Header{}, Body: io.NopCloser(strings.NewReader("cached body")),
+	}
+	resp.Header.Set("Cache-Control", "max-age=999999")
+	resp.Header.Set("Date", timeHeader(0))
+	resp.Header.Set("ETag", `"v1"`)
+	resp.Header.Set("Vary", "Accept-Encoding")
+	if err := cm.Store(req, resp); err != nil {
+		t.Fatalf("seed Store failed: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, r)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i, rr.Code)
+		}
+	}
+	if hits != 2 {
+		t.Errorf("origin hits = %d, want 2 (every request must revalidate a Vary'd entry)", hits)
+	}
+}
+
 func TestConditionalRevalidation304ServesCachedBodyAndRefreshes(t *testing.T) {
 	var gotINM string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

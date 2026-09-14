@@ -114,6 +114,18 @@ type Config struct {
 	// without even attempting the network - only a true miss reaches the
 	// origin.
 	RelaxTransparency int
+
+	// DontTrustVaryETag controls whether a Vary'd cache entry may be
+	// revalidated using its ETag, Polipo's three levels: 0 ("false") and 1
+	// ("maybe", the default) both allow it; only 2 ("true") disables it,
+	// forcing a full, unconditional re-fetch every time instead. Polipo's
+	// "maybe" adds an extra check that only matters for its in-memory
+	// object-sharing model, which go-polipo has no equivalent of (see
+	// PARITY_AUDIT §9); the two behave identically here, hence the default
+	// matching Polipo's own ("maybe") rather than the most conservative
+	// value - see PARITY_AUDIT for what is actually at stake in each
+	// direction.
+	DontTrustVaryETag int
 }
 
 // NewDefaultConfig creates a Config with Polipo's default values.
@@ -149,6 +161,7 @@ func NewDefaultConfig() *Config {
 		CensorReferer:         0,
 		ProxyOffline:          false,
 		RelaxTransparency:     0,
+		DontTrustVaryETag:     1,
 	}
 }
 
@@ -194,6 +207,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{"maxConcurrentRequests", strconv.Itoa(c.MaxConcurrentRequests)},
 		{"proxyOffline", strconv.FormatBool(c.ProxyOffline)},
 		{"relaxTransparency", tristateString(c.RelaxTransparency)},
+		{"dontTrustVaryETag", tristateString(c.DontTrustVaryETag)},
 	}
 }
 
@@ -448,6 +462,12 @@ func (c *Config) Set(key, val string) error {
 			return fmt.Errorf("invalid relaxTransparency '%s': %w", val, err)
 		}
 		c.RelaxTransparency = level
+	case "dontTrustVaryETag":
+		level, err := parseTristate(val)
+		if err != nil {
+			return fmt.Errorf("invalid dontTrustVaryETag '%s': %w", val, err)
+		}
+		c.DontTrustVaryETag = level
 	case "maxConcurrentRequests":
 		limit, err := strconv.Atoi(val)
 		if err != nil {

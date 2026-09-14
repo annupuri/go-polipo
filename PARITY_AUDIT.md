@@ -112,9 +112,9 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable / feature | Polipo default | Status | Note |
 | :--- | :--- | :--: | :--- |
-| `Vary` handling | — | ⚠️ | **Safe, not full (resolved 2026-09-11).** Cache key is still the URL alone (`md5(url)`), so no variant *matching*. Instead, a response with a non-empty `Vary` is never written to the cache (`Store`) and any such entry found in an inherited cache tree is never served (`Lookup`) — so the wrong-variant bug cannot occur. Cost: `Vary` responses (very common: `Vary: Accept-Encoding`) are always fetched upstream. Full per-variant caching (Polipo parity) would be a later item. |
-| `mindlesslyCacheVary` | `false` | ❌ | Moot: no `Vary` response is cached. |
-| `dontTrustVaryETag` | `maybe` | ❌ | Same. |
+| `Vary` handling | — | ✅ | **Polipo-accurate as of 2026-09-14** (superseding the 2026-09-11 minimal fix below). Cache key is still the URL alone (`md5(url)`), so there is still no variant *matching* - but that turns out not to be how Polipo itself handles `Vary` either (guessed, then corrected against the vendored C history: `http_parse.c`, `object.c`, `client.c`). Polipo has no per-variant storage at all; a `Vary`'d response is simply never served as a fresh hit - `objectMustRevalidate` forces a round-trip to the origin on every access, which is what actually resolves the variant, via a conditional GET (reusing the stored body on `304`) or, lacking a usable validator, a full re-fetch. go-polipo's `lookupEntry` now does the same: any response with a non-empty `Vary` is written to disk normally, but always reported stale regardless of its computed HTTP freshness. *2026-09-11 history:* the minimal fix at the time was simpler and more conservative - skip storing/serving `Vary`'d responses outright - because go-polipo had no conditional-revalidation machinery yet to force a safe round-trip through. That machinery landed 2026-09-13, which is what unlocked this follow-up. |
+| `mindlesslyCacheVary` | `false` | ❌ | Not added: it is the *opt out* of the behaviour above (serve a `Vary`'d hit without revalidating, accepting the wrong-variant risk `dontTrustVaryETag` and forced revalidation exist to avoid). Straightforward to add later - `lookupEntry` would skip the forced-stale override - but out of scope here since it re-opens the exact risk this item closes. |
+| `dontTrustVaryETag` | `maybe` | ✅ | **Done (2026-09-14):** `ProxyHandler.addConditionalHeaders` trusts a `Vary`'d entry's `ETag` for revalidation (and never a bare `Last-Modified` - matching `client.c`'s conditional-request logic, which only ever checks `object->etag` for a `CACHE_VARY` object) unless `dontTrustVaryETag` is `true`, which disables that trust and forces a full re-fetch every time. Guessed initially, then corrected against the vendored C history: Polipo's `maybe`/`false` distinction (`server.c`) only matters for deciding whether to update or supersede a shared in-memory `Object` - a concept go-polipo has no equivalent of, since `Store` always rewrites the file wholesale - so the two behave identically here; the default was kept at Polipo's own `maybe` (not the more conservative `true`) after discussing the actual risk (a stale/wrong-variant response, not a confidentiality issue) and how narrow the triggering conditions are in practice. |
 | `dontCacheCookies` | (off) | ✅ | Present (disk-cache hardening); **default on** in go-polipo, unlike Polipo. |
 | `dontCacheRedirects` | (varies) | ⚠️ | Not configurable; `Store` only caches `200`, so `301`/`302` are never cached anyway (stricter than Polipo, but no knob). |
 
@@ -311,14 +311,21 @@ at the end groups findings by how much they matter before a public release.
   218811050` declared but only ~111MB actually on disk, i.e. an instance
   Polipo's own truncation (or an incomplete original fetch) had already
   shrunk below its declared size.
-- `Vary` matching, Polipo-style (§9) — A.3 made `Vary` responses safe by not
-  caching them at all; the follow-up is to store the request's Vary-named header
-  values with the entry (one added `X-Polipo-Vary` metadata header, cache stays
-  one file per URL) and compare on lookup, so `Vary: Accept-Encoding` responses
-  become cacheable again. ~80–140 LoC in `cache.go`; the risk is in normalising
-  header values (token-set compare for `Accept-Encoding`, the "no header" case
-  that Go's transport rewrites). A per-URL multi-variant store is explicitly out
-  of scope — more bookkeeping and an on-disk format break.
+- ~~`Vary` matching, Polipo-style (§9).~~ **Done (2026-09-14), and not what
+  this bullet originally guessed:** the plan written here at the time (store
+  each request's Vary-named header values in an `X-Polipo-Vary` metadata
+  header and compare on lookup) was never checked against the vendored C
+  history, and turned out to describe a feature Polipo doesn't actually
+  have - it does no per-variant storage or matching at all. What it
+  actually does, confirmed this time from `http_parse.c`/`object.c`/
+  `client.c`: cache a `Vary`'d response same as any other, but never serve
+  it as a fresh hit - force a revalidation round-trip (conditional GET, or a
+  full re-fetch lacking a validator) on every access, and let the origin's
+  answer settle which variant is correct. That is a much smaller change
+  than the guessed plan, and it is what go-polipo now does too (`§9` above,
+  `dontTrustVaryETag`). A per-URL multi-variant store remains out of
+  scope - more bookkeeping and an on-disk format break, and Polipo doesn't
+  do it either.
 - `/polipo/status?` with a cache-flush action (§13) — cheap observability +
   operability win for a long-running proxy.
 - In-memory object cache (§10) — originally filed under tier C per

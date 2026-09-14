@@ -227,6 +227,7 @@ func TestSetAllKeys(t *testing.T) {
 	ok("dontCacheCookies", "false")
 	ok("proxyOffline", "true")
 	ok("relaxTransparency", "maybe")
+	ok("dontTrustVaryETag", "true")
 	ok("thisKeyDoesNotExist", "ignored")
 
 	if c.ProxyAddress != "0.0.0.0" || c.ProxyPort != 3128 {
@@ -289,6 +290,9 @@ func TestSetAllKeys(t *testing.T) {
 	if c.RelaxTransparency != 1 {
 		t.Errorf("relaxTransparency = %d, want 1 (maybe)", c.RelaxTransparency)
 	}
+	if c.DontTrustVaryETag != 2 {
+		t.Errorf("dontTrustVaryETag = %d, want 2 (true)", c.DontTrustVaryETag)
+	}
 
 	// disableLocalInterface falls back to false for anything not true/1.
 	c.Set("disableLocalInterface", "false")
@@ -316,6 +320,8 @@ func TestSetAllKeys(t *testing.T) {
 	fails("relaxTransparency", "2")
 	fails("censorReferer", "yes")
 	fails("censorReferer", "2")
+	fails("dontTrustVaryETag", "yes")
+	fails("dontTrustVaryETag", "2")
 }
 
 func TestPasswordEntriesAreRedacted(t *testing.T) {

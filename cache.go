@@ -61,9 +61,15 @@ func requestIsAuthenticated(req *http.Request) bool {
 
 // responseVaries reports whether resp's body depends on request headers (a
 // non-empty Vary). go-polipo keys the cache on the URL alone, so it cannot tell
-// which stored variant matches a later request; such responses are neither
-// written to the cache nor served from it. (RFC 9111 section 4.1 requires a
-// cache to match the nominated request headers before reusing a Vary response.)
+// which stored variant matches a later request. Matching Polipo's default
+// (mindlesslyCacheVary=false): such a response is still stored, but is never
+// served as a fresh hit - lookupEntry always reports it stale, forcing a
+// revalidation (or, absent a usable validator, a full re-fetch) on every
+// access, so it is the origin, not a stale local guess, that ends up
+// resolving which variant is correct for the current request. (RFC 9111
+// section 4.1 requires a cache to match the nominated request headers before
+// reusing a Vary response; forced revalidation is how Polipo satisfies that
+// without actually keying the cache on those headers.)
 func responseVaries(resp *http.Response) bool {
 	return strings.TrimSpace(resp.Header.Get("Vary")) != ""
 }
@@ -198,17 +204,13 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 		return nil, false
 	}
 
-	// A stored response carrying Vary cannot be matched against this request's
-	// headers (the cache key is the URL alone), so serving it risks handing back
-	// the wrong variant. Store skips these, but a cache tree written by Polipo or
-	// an older go-polipo may still contain them.
-	if responseVaries(resp) {
-		resp.Body.Close()
-		file.Close()
-		return nil, false
-	}
-
-	stale = cm.isExpired(resp)
+	// A response carrying Vary is always reported stale, regardless of its
+	// actual HTTP freshness: the cache key is the URL alone, so this entry
+	// cannot be matched against the current request's headers, and only a
+	// round-trip to the origin (a revalidation, or a full re-fetch when
+	// there is no usable validator - see addConditionalHeaders) can settle
+	// which variant is correct. See responseVaries.
+	stale = cm.isExpired(resp) || responseVaries(resp)
 
 	// Clean up X-Polipo headers before returning
 	resp.Header.Del("X-Polipo-Location")
@@ -342,13 +344,10 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	}
 
 	// go-polipo's cache key is the URL alone, so it cannot store more than one
-	// variant per URL or pick between them. Caching a Vary response would let a
-	// later client be served a variant selected for someone else (a gzipped body
-	// to a client that did not offer gzip, a French page to an English one). Skip
-	// them; they are still forwarded, just not cached.
-	if responseVaries(resp) {
-		return nil
-	}
+	// variant per URL or pick between them - a Vary response is still written
+	// (matching Polipo), but lookupEntry always reports it stale, so it is
+	// never handed to a later client without first revalidating (or, absent a
+	// usable validator, fully re-fetching) with the origin. See responseVaries.
 
 	// A Set-Cookie response is meant for a single client; a cached copy would be
 	// replayed to everyone who later requests the same URL. Polipo cached these,

@@ -233,6 +233,14 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 // has. A client-supplied validator is left alone - this only synthesises
 // one when the client didn't already send its own, since we have no way to
 // know whether the client's validator matches what's on disk here.
+//
+// A Vary'd entry (see responseVaries) is always stale, and is handled more
+// narrowly, matching client.c's conditional-request logic: only its ETag is
+// trusted - a bare Last-Modified is not, since it says nothing about which
+// negotiated variant it describes - and only when dontTrustVaryETag hasn't
+// disabled that trust (config.DontTrustVaryETag == 2, "true"). Without a
+// usable ETag there, no conditional headers are added at all, so the
+// request goes through as a full, unconditional fetch instead.
 func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 	if outReq.Header.Get("If-None-Match") != "" || outReq.Header.Get("If-Modified-Since") != "" {
 		return
@@ -249,7 +257,17 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 		// should reach the origin unconditionally rather than revalidate.
 		return
 	}
-	if etag := cached.Header.Get("ETag"); etag != "" {
+
+	etag := cached.Header.Get("ETag")
+	if responseVaries(cached) {
+		if etag == "" || ph.config.DontTrustVaryETag >= 2 {
+			return
+		}
+		outReq.Header.Set("If-None-Match", etag)
+		return
+	}
+
+	if etag != "" {
 		outReq.Header.Set("If-None-Match", etag)
 	}
 	if lm := cached.Header.Get("Last-Modified"); lm != "" {

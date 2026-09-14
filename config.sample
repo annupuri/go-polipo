@@ -74,9 +74,21 @@
 # the disk cache unless the response is explicitly shareable
 # (Cache-Control: public, s-maxage, or must-revalidate), per RFC 9111.
 #
-# Responses carrying a Vary header are not cached at all: the cache is keyed on
-# the URL alone and cannot choose between variants (gzip vs. plain, per-language,
-# ...).  They are forwarded normally, just not stored.
+# Responses carrying a Vary header are cached like any other, but the cache is
+# keyed on the URL alone and cannot choose between variants (gzip vs. plain,
+# per-language, ...) - so a Vary'd entry is never served fresh.  Every access
+# revalidates it with the origin (a conditional GET reusing the stored body on
+# a 304, or a full re-fetch when there is no usable validator), which is what
+# actually picks the right variant for the current request.
+
+# Whether a Vary'd entry's ETag may be trusted for that revalidation:
+#   false / maybe (default) - trust it; only a bare Last-Modified is never
+#                              trusted for a Vary'd entry, ETag or nothing.
+#   true                     - never trust it either; always do a full,
+#                              unconditional re-fetch for a Vary'd entry.
+# ("maybe" exists for Polipo config-file compatibility; go-polipo has no
+# behavioural difference from "false" - see PARITY_AUDIT §9.)
+# dontTrustVaryETag = maybe
 
 
 ### Behaviour when the origin can't be reached

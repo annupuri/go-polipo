@@ -387,29 +387,47 @@ func TestStoreSkipsSetCookie(t *testing.T) {
 	}
 }
 
-func TestStoreSkipsVary(t *testing.T) {
+func TestStoreCachesVaryButAlwaysStale(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 
-	// Every non-empty Vary is skipped: the URL-only cache key cannot pick the
-	// right variant for a later request.
+	// A non-empty Vary is written to disk like any other response (matching
+	// Polipo's mindlesslyCacheVary=false default: negotiated instances are
+	// still cached, just always revalidated), but must never come back from
+	// a fresh, no-round-trip Lookup - only LookupStale, and marked stale.
 	for _, vary := range []string{"Accept-Encoding", "Accept-Language", "*", "  User-Agent  "} {
 		url := "http://example.com/vary/" + strings.ReplaceAll(strings.TrimSpace(vary), " ", "_")
 		req := httptest.NewRequest(http.MethodGet, url, nil)
-		resp := mkResp("variant", "Cache-Control", "max-age=3600", "Vary", vary)
+		resp := mkResp("variant", "Cache-Control", "max-age=3600", "ETag", `"v1"`, "Vary", vary)
 		if err := cm.Store(req, resp); err != nil {
 			t.Fatalf("Store(Vary: %q): %v", vary, err)
 		}
 		if got, _ := io.ReadAll(resp.Body); string(got) != "variant" {
 			t.Errorf("Vary: %q: body not preserved, got %q", vary, got)
 		}
-		if fileExistsForURL(t, cm, url) {
-			t.Errorf("Vary: %q response should not be cached", vary)
+		if !fileExistsForURL(t, cm, url) {
+			t.Errorf("Vary: %q response should still be cached", vary)
+		}
+
+		lookupReq := httptest.NewRequest(http.MethodGet, url, nil)
+		if cachedResp := cm.Lookup(lookupReq); cachedResp != nil {
+			cachedResp.Body.Close()
+			t.Errorf("Vary: %q: Lookup should never report a Vary'd entry fresh", vary)
+		}
+		staleResp, stale := cm.LookupStale(lookupReq)
+		if staleResp == nil {
+			t.Errorf("Vary: %q: LookupStale should still find the entry", vary)
+		} else {
+			staleResp.Body.Close()
+		}
+		if !stale {
+			t.Errorf("Vary: %q: LookupStale should report the entry stale", vary)
 		}
 	}
 
-	// An empty Vary value is treated as absent: still cacheable.
+	// An empty Vary value is treated as absent: cached and servable fresh,
+	// same as a response with no Vary at all.
 	url := "http://example.com/vary/empty"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
 	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600", "Vary", "")); err != nil {
@@ -417,6 +435,12 @@ func TestStoreSkipsVary(t *testing.T) {
 	}
 	if !fileExistsForURL(t, cm, url) {
 		t.Error("a response with an empty Vary should still be cached")
+	}
+	lookupReq := httptest.NewRequest(http.MethodGet, url, nil)
+	if cachedResp := cm.Lookup(lookupReq); cachedResp == nil {
+		t.Error("a response with an empty Vary should be servable fresh")
+	} else {
+		cachedResp.Body.Close()
 	}
 }
 
