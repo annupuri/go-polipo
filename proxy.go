@@ -26,13 +26,15 @@ import (
 type ProxyHandler struct {
 	config       *Config
 	cacheManager *CacheManager
-	// forbidden and uncachable are swapped atomically by Reload, which runs
-	// concurrently with request-handling goroutines that read them via Load.
-	forbidden    atomic.Pointer[ForbiddenList]
-	uncachable   atomic.Pointer[ForbiddenList]
-	transport    *http.Transport
-	reverseProxy *httputil.ReverseProxy
-	semaphore    chan struct{}
+	// forbidden, uncachable and forbiddenTunnels are swapped atomically by
+	// Reload, which runs concurrently with request-handling goroutines that
+	// read them via Load.
+	forbidden        atomic.Pointer[ForbiddenList]
+	uncachable       atomic.Pointer[ForbiddenList]
+	forbiddenTunnels atomic.Pointer[ForbiddenList]
+	transport        *http.Transport
+	reverseProxy     *httputil.ReverseProxy
+	semaphore        chan struct{}
 
 	// Precomputed at construction so the request path stays allocation-free.
 	socksDialer proxy.Dialer // nil unless a SOCKS parent proxy is configured
@@ -42,13 +44,14 @@ type ProxyHandler struct {
 }
 
 // NewProxyHandler creates a new ProxyHandler.
-func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, uncachable *ForbiddenList) *ProxyHandler {
+func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, uncachable, forbiddenTunnels *ForbiddenList) *ProxyHandler {
 	ph := &ProxyHandler{
 		config:       config,
 		cacheManager: cacheManager,
 	}
 	ph.forbidden.Store(forbidden)
 	ph.uncachable.Store(uncachable)
+	ph.forbiddenTunnels.Store(forbiddenTunnels)
 	if config.MaxConcurrentRequests > 0 {
 		ph.semaphore = make(chan struct{}, config.MaxConcurrentRequests)
 	}
@@ -124,14 +127,14 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	return ph
 }
 
-// Reload re-reads forbiddenFile and uncachableFile from disk and atomically
-// swaps them in, so in-flight requests never observe a half-updated list.
-// This is go-polipo's equivalent of Polipo's initForbidden(), invoked there
-// on SIGUSR1/SIGUSR2 and from the /polipo/status?init-forbidden action; here
-// it is reachable the same way (see signal_unix.go) plus via POST
-// /polipo/reload, which also covers Windows, where SIGUSR1/SIGUSR2 do not
-// exist. A file that fails to load keeps the previously loaded list rather
-// than falling back to an empty one.
+// Reload re-reads forbiddenFile, uncachableFile and forbiddenTunnelsFile from
+// disk and atomically swaps them in, so in-flight requests never observe a
+// half-updated list. This is go-polipo's equivalent of Polipo's
+// initForbidden(), invoked there on SIGUSR1/SIGUSR2 and from the
+// /polipo/status?init-forbidden action; here it is reachable the same way
+// (see signal_unix.go) plus via POST /polipo/reload, which also covers
+// Windows, where SIGUSR1/SIGUSR2 do not exist. A file that fails to load
+// keeps the previously loaded list rather than falling back to an empty one.
 func (ph *ProxyHandler) Reload() error {
 	forbidden := NewForbiddenList()
 	if err := forbidden.Load(ph.config.ForbiddenFile); err != nil {
@@ -141,8 +144,13 @@ func (ph *ProxyHandler) Reload() error {
 	if err := uncachable.Load(ph.config.UncachableFile); err != nil {
 		return fmt.Errorf("reload uncachable file %q: %w", ph.config.UncachableFile, err)
 	}
+	forbiddenTunnels := NewForbiddenList()
+	if err := forbiddenTunnels.Load(ph.config.ForbiddenTunnelsFile); err != nil {
+		return fmt.Errorf("reload forbiddenTunnels file %q: %w", ph.config.ForbiddenTunnelsFile, err)
+	}
 	ph.forbidden.Store(forbidden)
 	ph.uncachable.Store(uncachable)
+	ph.forbiddenTunnels.Store(forbiddenTunnels)
 	return nil
 }
 
@@ -565,7 +573,7 @@ func requestPort(req *http.Request) int {
 
 func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) {
 	// CONNECT port verification
-	_, portStr, err := net.SplitHostPort(req.RequestURI)
+	host, portStr, err := net.SplitHostPort(req.RequestURI)
 	if err != nil {
 		log.Printf("CONNECT rejected: invalid host %q: %v", req.RequestURI, err)
 		http.Error(w, "Invalid CONNECT host", http.StatusBadRequest)
@@ -582,6 +590,20 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	if !ph.config.TunnelAllowedPorts.Contains(port) {
 		log.Printf("CONNECT rejected: port %d not allowed (target=%s)", port, req.RequestURI)
 		http.Error(w, "CONNECT port not allowed", http.StatusForbidden)
+		return
+	}
+
+	// forbiddenTunnelsFile: a per-host CONNECT blocklist, matched the way
+	// Polipo's tunnelIsMatched (tunnel.c) does - exact hostname match, no
+	// subdomain suffixing, and regexes tested against "host:port" rather
+	// than a URL. This is independent of the general forbidden list, which
+	// is also checked earlier in ServeHTTP for every request including
+	// CONNECT (see targetURL) - a go-polipo extension beyond Polipo, which
+	// never applies forbiddenFile to CONNECT at all (client.c dispatches to
+	// do_tunnel before ever calling urlForbidden).
+	if ph.forbiddenTunnels.Load().MatchTunnel(req.RequestURI, host) {
+		log.Printf("CONNECT rejected: %s is on forbiddenTunnelsFile", req.RequestURI)
+		http.Error(w, "Forbidden: tunnel target is blacklisted", http.StatusForbidden)
 		return
 	}
 

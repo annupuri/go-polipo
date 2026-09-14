@@ -70,6 +70,27 @@ func (f *ForbiddenList) Load(filePath string) error {
 	return scanner.Err()
 }
 
+// MatchTunnel reports whether hostPort ("host:port", as sent in a CONNECT
+// request's request-target) is forbidden as a tunnel target, using Polipo's
+// tunnelIsMatched semantics (tunnel.c). Unlike Match, the domain list
+// requires an exact match against host - no subdomain suffixing - and the
+// regex list is matched against the full "host:port" string rather than a
+// "http://"-prefixed URL, since a CONNECT target never carries a scheme.
+func (f *ForbiddenList) MatchTunnel(hostPort, host string) bool {
+	host = strings.ToLower(host)
+	for _, domain := range f.Domains {
+		if host == domain {
+			return true
+		}
+	}
+	for _, re := range f.Regexps {
+		if re.MatchString(hostPort) {
+			return true
+		}
+	}
+	return false
+}
+
 // Match returns true if the URL or host matches the forbidden list.
 func (f *ForbiddenList) Match(urlStr, host string) bool {
 	// Strip port from host if present

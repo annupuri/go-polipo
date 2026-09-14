@@ -16,6 +16,7 @@ type Config struct {
 	DiskCacheRoot         string
 	ForbiddenFile         string
 	UncachableFile        string
+	ForbiddenTunnelsFile  string
 	SocksParentProxy      string
 	SocksProxyType        string // always "socks5" (the only type implemented)
 	ParentProxy           string
@@ -102,6 +103,7 @@ func NewDefaultConfig() *Config {
 		DiskCacheRoot:         "/var/cache/polipo/",
 		ForbiddenFile:         "",
 		UncachableFile:        "",
+		ForbiddenTunnelsFile:  "",
 		SocksParentProxy:      "",
 		SocksProxyType:        "socks5",
 		ParentProxy:           "",
@@ -146,6 +148,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{"dontCacheCookies", strconv.FormatBool(c.DontCacheCookies)},
 		{"forbiddenFile", c.ForbiddenFile},
 		{"uncachableFile", c.UncachableFile},
+		{"forbiddenTunnelsFile", c.ForbiddenTunnelsFile},
 		{"socksParentProxy", c.SocksParentProxy},
 		{"socksProxyType", c.SocksProxyType},
 		{"parentProxy", c.ParentProxy},
@@ -350,6 +353,8 @@ func (c *Config) Set(key, val string) error {
 		c.ForbiddenFile = val
 	case "uncachableFile":
 		c.UncachableFile = val
+	case "forbiddenTunnelsFile":
+		c.ForbiddenTunnelsFile = val
 	case "socksParentProxy":
 		c.SocksParentProxy = val
 	case "socksProxyType":

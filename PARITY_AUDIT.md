@@ -59,7 +59,7 @@ at the end groups findings by how much they matter before a public release.
 | `uncachableFile` | `~/.polipo-uncachable` | ✅ | Same matcher; matched URLs are forwarded but not cached. |
 | `forbiddenUrl` | (null) | ❌ | Cannot redirect blocked requests to a notice page; always a bare `403`. |
 | `forbiddenRedirectCode` | `302` | ❌ | Same. |
-| `forbiddenTunnelsFile` | `~/.polipo-forbiddenTunnels` | ❌ | No per-host CONNECT blocklist. CONNECT is filtered by **port only** (`tunnelAllowedPorts`); any host is reachable on an allowed port. |
+| `forbiddenTunnelsFile` | `~/.polipo-forbiddenTunnels` | ✅ | **Done (2026-09-14):** ported, matched the way Polipo's `tunnelIsMatched` (`tunnel.c`) does it - an exact hostname match (no subdomain suffixing) plus a regex tested against the raw `host:port`, both independent of `forbiddenFile`'s suffix-matching logic (`ForbiddenList.MatchTunnel` in `forbidden.go`). Correction to this row's earlier claim: CONNECT was never port-only here - `forbidden.go`'s general list (suffix-matching) has applied to CONNECT targets since the original Go rewrite (`targetURL` in `proxy.go`), which is actually broader than Polipo, where `client.c` dispatches straight to `do_tunnel` and never calls `urlForbidden` for CONNECT at all. Kept intentionally as defense in depth alongside the new, Polipo-accurate `forbiddenTunnelsFile`. |
 | `redirector` / `redirectorRedirectCode` | (unset) | ❌ | No external Squid-style redirector hook. |
 | Runtime reload of these files | `SIGUSR1`/`SIGUSR2` | ✅ | **Done (2026-09-14):** `ProxyHandler.Reload` re-reads both files and atomically swaps them in (`sync/atomic.Pointer`), so in-flight requests never see a half-updated list. Reachable via `SIGUSR1`/`SIGUSR2` on Unix (`signal_unix.go`) or `POST /polipo/reload` on any platform, including Windows, where `syscall.SIGUSR1`/`SIGUSR2` don't exist (`signal_windows.go` is a no-op). See §15. |
 
@@ -281,7 +281,19 @@ at the end groups findings by how much they matter before a public release.
   the latter lives on a status page (RTT stats, cache-flush actions, `304`
   discard, etc.) that go-polipo doesn't have (§13), so reusing its exact
   path/shape wasn't a fit.
-- `forbiddenTunnelsFile` (§4) — per-host CONNECT blocklist.
+- ~~`forbiddenTunnelsFile` (§4) — per-host CONNECT blocklist.~~ **Done
+  (2026-09-14):** ported, sourced from the vendored C history (`tunnel.c`'s
+  `tunnelIsMatched`) rather than guessed. Domain entries require an exact
+  host match (no subdomain suffixing) and regexes are tested against the raw
+  `host:port`, both different from `forbiddenFile`'s suffix-based matching -
+  reusing `Match` here would have been wrong. Found along the way: the
+  general `forbidden` list already applied to CONNECT targets (via
+  `targetURL`), which this audit had recorded as "CONNECT is port-only" -
+  that was stale even before this change. Real Polipo never checks
+  `forbiddenFile` for CONNECT at all (`client.c` routes straight to
+  `do_tunnel`); go-polipo's broader behavior predates this item (present
+  since the original rewrite) and is kept as an intentional, documented
+  addition on top of the new `forbiddenTunnelsFile`, not replaced by it.
 - On-disk size cap `maxDiskCacheEntrySize` / truncation (§11) — unbounded growth
   between `-x` runs.
 - `Vary` matching, Polipo-style (§9) — A.3 made `Vary` responses safe by not
@@ -294,10 +306,24 @@ at the end groups findings by how much they matter before a public release.
   of scope — more bookkeeping and an on-disk format break.
 - `/polipo/status?` with a cache-flush action (§13) — cheap observability +
   operability win for a long-running proxy.
+- In-memory object cache (§10) — originally filed under tier C per
+  ARCHITECTURE.md's rationale ("Go's GC/standard library make Polipo's
+  hand-rolled allocator - `atom.c`/`chunk.c`/`object.c` - unnecessary"), but
+  that reasoning assumes an SSD-backed disk cache. The user pointed out
+  (2026-09-14) that machines still running on HDDs would see a real benefit,
+  so this is split out into its own item rather than staying a settled
+  tradeoff. Sketch of an approach the user proposed: (1) use an existing LRU
+  library such as `github.com/hashicorp/golang-lru` instead of hand-rolling
+  eviction, (2) have `CacheManager.Store` update/invalidate the matching
+  in-memory entry whenever it writes the disk copy, to avoid the
+  disk/memory inconsistency flagged as concern (2) in that discussion, (3)
+  lock contention is expected to be a non-issue in practice as long as
+  deadlocks are avoided. Not started - disk-only remains the confirmed
+  choice for now.
 
 ### C. Explicitly by-design (already in ARCHITECTURE.md; just needs a sentence)
 
-- In-memory cache, partial instillation, range assembly, PMM (§10).
+- Partial instillation, range assembly, PMM (§10).
 - All DNS knobs (§12), all connection-pool/pipelining knobs (§10).
 - `daemonise` / `pidFile` (§15).
 - `logLevel` granularity, syslog (§14).

@@ -28,7 +28,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
   ディレクトリを整理します。
 - **ローカル Web インターフェース**: `/polipo/config` で設定内容を確認でき、
   再起動不要のランタイム操作として `/polipo/reload`（`forbiddenFile` /
-  `uncachableFile` の再読み込み）を用意しています。
+  `uncachableFile` / `forbiddenTunnelsFile` の再読み込み）を用意しています。
 
 コマンドラインオプション
 ------------------------
@@ -56,6 +56,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `diskCacheUnlinkTime` | `32d` | 最終アクセスからこの期間を過ぎたキャッシュを `-x` で削除 |
 | `forbiddenFile` | (なし) | アクセス禁止リストのファイル |
 | `uncachableFile` | (なし) | キャッシュ対象外リストのファイル |
+| `forbiddenTunnelsFile` | (なし) | CONNECT (HTTPS トンネル) 用のホスト単位ブロックリスト。`forbiddenFile` とは別扱いで、こちらはサブドメインに広がらない完全一致のみ |
 | `socksParentProxy` | (なし) | 親 SOCKS プロキシ (`host:port`) |
 | `parentProxy` | (なし) | 親 HTTP プロキシ (`host:port`) |
 | `allowedClients` | `127.0.0.1, ::1` | 接続を許可するクライアント (IP / CIDR / `all`) |

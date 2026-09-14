@@ -1,5 +1,10 @@
 # Sample forbidden URLs file for go-polipo.  -*-sh-*-
 # Point the forbiddenFile (or uncachableFile) configuration variable at this.
+#
+# forbiddenTunnelsFile uses the same file format, but matches CONNECT
+# (HTTPS tunnel) targets differently: a domain line must match the host
+# exactly (no subdomains), and a regex is matched against the raw
+# "host:port" from the CONNECT request rather than a "http://" URL.
 
 # Forbid all hosts belonging to a given domain name:
 

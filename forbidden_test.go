@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -31,6 +32,35 @@ func TestForbiddenMatch(t *testing.T) {
 		got := fl.Match(tt.urlStr, tt.host)
 		if got != tt.expected {
 			t.Errorf("Match(%q, %q) = %t, expected %t", tt.urlStr, tt.host, got, tt.expected)
+		}
+	}
+}
+
+func TestForbiddenMatchTunnel(t *testing.T) {
+	fl := NewForbiddenList()
+	fl.Domains = append(fl.Domains, "example.com")
+	fl.Regexps = append(fl.Regexps, regexp.MustCompile(`:8080$`))
+
+	tests := []struct {
+		hostPort string
+		host     string
+		expected bool
+	}{
+		{"example.com:443", "example.com", true},
+		// Unlike Match, MatchTunnel requires an exact host match: no
+		// subdomain suffixing (Polipo's tunnelIsMatched, tunnel.c).
+		{"sub.example.com:443", "sub.example.com", false},
+		{"notexample.com:443", "notexample.com", false},
+		// The regex is tested against "host:port" as a whole, not against a
+		// "http://"-prefixed URL - a CONNECT target never carries a scheme.
+		{"other.com:8080", "other.com", true},
+		{"other.com:80", "other.com", false},
+	}
+
+	for _, tt := range tests {
+		got := fl.MatchTunnel(tt.hostPort, tt.host)
+		if got != tt.expected {
+			t.Errorf("MatchTunnel(%q, %q) = %t, expected %t", tt.hostPort, tt.host, got, tt.expected)
 		}
 	}
 }

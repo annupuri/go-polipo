@@ -202,6 +202,7 @@ func TestSetAllKeys(t *testing.T) {
 	ok("diskCacheRoot", "/tmp/cache") // trailing slash appended
 	ok("forbiddenFile", "/etc/polipo/forbidden")
 	ok("uncachableFile", "/etc/polipo/uncachable")
+	ok("forbiddenTunnelsFile", "/etc/polipo/forbiddenTunnels")
 	ok("socksParentProxy", "localhost:9050")
 	ok("socksProxyType", "SOCKS5") // lowercased
 	ok("parentProxy", "upstream:8080")

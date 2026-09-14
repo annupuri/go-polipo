@@ -85,6 +85,16 @@
 # forbiddenFile = "/etc/polipo/forbidden"     # URLs to reject with 403
 # uncachableFile = "/etc/polipo/uncachable"   # URLs to forward but never cache
 
+# Per-host blocklist for CONNECT (HTTPS tunnels). Independent of
+# forbiddenFile, which is also checked for CONNECT targets but matches
+# subdomains; entries here require an exact host match instead (see
+# forbidden.sample for the file format).
+# forbiddenTunnelsFile = "/etc/polipo/forbiddenTunnels"
+
+# Reload forbiddenFile, uncachableFile and forbiddenTunnelsFile without
+# restarting: send SIGUSR1 or SIGUSR2 (Unix only), or POST /polipo/reload
+# (any platform, including Windows).
+
 
 ### Outgoing connections
 

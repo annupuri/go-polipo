@@ -138,9 +138,13 @@ func serve(config *Config) int {
 	if err := uncachable.Load(config.UncachableFile); err != nil {
 		log.Printf("Warning: failed to load uncachable file %s: %v", config.UncachableFile, err)
 	}
+	forbiddenTunnels := NewForbiddenList()
+	if err := forbiddenTunnels.Load(config.ForbiddenTunnelsFile); err != nil {
+		log.Printf("Warning: failed to load forbiddenTunnels file %s: %v", config.ForbiddenTunnelsFile, err)
+	}
 
 	cacheMgr := NewCacheManager(config)
-	handler := NewProxyHandler(config, cacheMgr, forbidden, uncachable)
+	handler := NewProxyHandler(config, cacheMgr, forbidden, uncachable, forbiddenTunnels)
 	setupReloadSignals(handler.Reload)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))

@@ -59,7 +59,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `uncachableFile` | `~/.polipo-uncachable` | ✅ | 同じマッチャ。該当 URL は転送するがキャッシュしない。 |
 | `forbiddenUrl` | (null) | ❌ | ブロックしたリクエストを案内ページへリダイレクトできず、常に素の `403`。 |
 | `forbiddenRedirectCode` | `302` | ❌ | 同上。 |
-| `forbiddenTunnelsFile` | `~/.polipo-forbiddenTunnels` | ❌ | ホスト単位の CONNECT ブロックリストなし。CONNECT は**ポートのみ**（`tunnelAllowedPorts`）でフィルタされ、許可ポートなら任意のホストへ到達できる。 |
+| `forbiddenTunnelsFile` | `~/.polipo-forbiddenTunnels` | ✅ | **完了（2026-09-14）:** Polipo の `tunnelIsMatched`（`tunnel.c`）と同じ判定方式で移植した — ホスト名の完全一致（サブドメインには広がらない）と、生の `host:port` に対する正規表現マッチの2本立てで、`forbiddenFile` のサフィックスマッチとは独立（`forbidden.go` の `ForbiddenList.MatchTunnel`）。この行の従来の記載への訂正: go-polipo は元々 CONNECT を「ポートのみ」で判定してはいなかった — `forbidden.go` の一般的なリスト（サフィックスマッチ）は最初の Go 移植時（`proxy.go` の `targetURL`）から CONNECT にも適用されており、これは実は Polipo より広い挙動である。本家 Polipo の `client.c` は CONNECT を `do_tunnel` へ直接ディスパッチし `urlForbidden` を一切呼ばない。この既存の広い挙動は意図的に維持し、Polipo に忠実な新設の `forbiddenTunnelsFile` の上に多重防御として重ねている。 |
 | `redirector` / `redirectorRedirectCode` | (未設定) | ❌ | Squid 風の外部リダイレクタ連携なし。 |
 | これらファイルの実行時リロード | `SIGUSR1`/`SIGUSR2` | ✅ | **完了（2026-09-14）:** `ProxyHandler.Reload` が両ファイルを再読み込みし、`sync/atomic.Pointer` で原子的に差し替える — 処理中のリクエストが「半分だけ更新されたリスト」を見ることはない。Unix では `SIGUSR1`/`SIGUSR2`（`signal_unix.go`）、任意のプラットフォーム（Windows を含む）では `POST /polipo/reload` から到達可能。Windows には `syscall.SIGUSR1`/`SIGUSR2` 自体が存在しないため（`signal_windows.go` は何もしない）。§15 参照。 |
 
@@ -274,7 +274,19 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   本家の同アクションは RTT 統計・キャッシュフラッシュ・`304` 破棄なども
   持つ status ページの一部であり、go-polipo にはそのページ自体が無いため
   （§13）、パス／形式をそのまま踏襲するのは適切でないと判断した。
-- `forbiddenTunnelsFile`（§4） — ホスト単位の CONNECT ブロックリスト。
+- ~~`forbiddenTunnelsFile`（§4） — ホスト単位の CONNECT ブロックリスト。~~
+  **完了（2026-09-14）:** 推測ではなく、ベンダリングされた C 版の履歴
+  （`tunnel.c` の `tunnelIsMatched`）から確認して移植した。ドメイン欄は
+  ホスト名の完全一致（サブドメインには広がらない）、正規表現欄は生の
+  `host:port` に対して照合する — どちらも `forbiddenFile` のサフィックス
+  マッチとは異なるため、`Match` をそのまま流用するのは誤りだった。作業中に
+  判明したこと: 一般的な `forbidden` リストは（`targetURL` 経由で）既に
+  CONNECT にも適用されており、本監査が「CONNECT はポートのみ」と記録して
+  いたのは今回の変更以前から実態と食い違っていた。本家 Polipo は CONNECT に
+  対して `forbiddenFile` を一切見ない（`client.c` が `do_tunnel` へ直接
+  ディスパッチする）。go-polipo のこの広い挙動は最初の移植時からの既存仕様
+  であり、意図的な追加保護として維持し、新設の `forbiddenTunnelsFile` で
+  置き換えるのではなく併用することにした。
 - ディスクキャッシュのサイズ上限 `maxDiskCacheEntrySize` / 切り詰め（§11） —
   `-x` 実行間の無制限な肥大化。
 - Polipo 方式の `Vary` 照合（§9） — A.3 は `Vary` 応答を「キャッシュしない」ことで
@@ -286,10 +298,22 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   対象外（管理が増え、ディスク形式が非互換になる）。
 - キャッシュフラッシュ操作つきの `/polipo/status?`（§13） — 長時間稼働プロキシに
   とって安価な可観測性 + 運用性の向上。
+- インメモリオブジェクトキャッシュ（§10）— 当初は ARCHITECTURE.md の通り
+  「Go の GC / 標準ライブラリに任せれば手製アロケータ（`atom.c`/`chunk.c`/
+  `object.c`）は不要」という設計上の割り切りとして C 枠に分類していたが、
+  それは SSD 前提の判断であり、低速な HDD 上で運用するマシンには今でも
+  効くはずだとのユーザー指摘（2026-09-14）を受けて B 枠に切り出した。
+  ユーザーが挙げた実装方針の叩き台: (1) 自前 LRU ではなく
+  `github.com/hashicorp/golang-lru` 等の既製ライブラリでサイズ上限を管理、
+  (2) `CacheManager.Store` がディスクを更新するたびにメモリ側のエントリも
+  同時に更新／無効化する同期処理を入れ、ディスクとメモリの不整合
+  （本回答で挙げた懸念点 (2)）を防ぐ、(3) ロックはデッドロックさえ避ければ
+  実運用上はロック待ちがボトルネックになることは稀、という想定。現時点では
+  未着手 — ディスクキャッシュのみで運用継続を確認済み。
 
 ### C. 明確に設計上の割り切り（ARCHITECTURE.md に記載済み。一文添えるだけでよい）
 
-- インメモリキャッシュ、部分インスティレーション、レンジ組み立て、PMM（§10）。
+- 部分インスティレーション、レンジ組み立て、PMM（§10）。
 - すべての DNS ノブ（§12）、すべてのコネクションプール / パイプラインノブ（§10）。
 - `daemonise` / `pidFile`（§15）。
 - `logLevel` の粒度、syslog（§14）。

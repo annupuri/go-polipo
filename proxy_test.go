@@ -18,7 +18,7 @@ import (
 )
 
 func newTestHandler(cfg *Config) *ProxyHandler {
-	return NewProxyHandler(cfg, NewCacheManager(cfg), NewForbiddenList(), NewForbiddenList())
+	return NewProxyHandler(cfg, NewCacheManager(cfg), NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 }
 
 func TestProxyAllowedClients(t *testing.T) {
@@ -27,7 +27,7 @@ func TestProxyAllowedClients(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// Case 1: IP not allowed
 	req1 := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
@@ -61,7 +61,7 @@ func TestProxyLocalInterface(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// Access /polipo/
 	req := httptest.NewRequest(http.MethodGet, "http://localhost:8123/polipo/", nil)
@@ -110,7 +110,7 @@ func TestProxyForbiddenFiltering(t *testing.T) {
 	forbidden := NewForbiddenList()
 	forbidden.Domains = []string{"badsite.com"}
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	req := httptest.NewRequest(http.MethodGet, "http://badsite.com/index.html", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -126,13 +126,16 @@ func TestProxyReload(t *testing.T) {
 	dir := t.TempDir()
 	forbiddenPath := dir + "/forbidden"
 	uncachablePath := dir + "/uncachable"
+	forbiddenTunnelsPath := dir + "/forbiddenTunnels"
 
 	cfg := NewDefaultConfig()
 	cfg.ForbiddenFile = forbiddenPath
 	cfg.UncachableFile = uncachablePath
+	cfg.ForbiddenTunnelsFile = forbiddenTunnelsPath
 	ph := newTestHandler(cfg)
 
 	url, host := "http://badsite.com/", "badsite.com"
+	hostPort := "badsite.com:443"
 
 	// Neither file exists yet, so nothing is blocked or marked uncachable.
 	// Checked directly (not via ServeHTTP) so a false negative here doesn't
@@ -143,11 +146,17 @@ func TestProxyReload(t *testing.T) {
 	if ph.uncachable.Load().Match(url, host) {
 		t.Fatalf("badsite.com marked uncachable before uncachable file existed")
 	}
+	if ph.forbiddenTunnels.Load().MatchTunnel(hostPort, host) {
+		t.Fatalf("badsite.com forbidden tunnel before forbiddenTunnels file existed")
+	}
 
 	if err := os.WriteFile(forbiddenPath, []byte("badsite.com\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(uncachablePath, []byte("badsite.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(forbiddenTunnelsPath, []byte("badsite.com\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -169,6 +178,9 @@ func TestProxyReload(t *testing.T) {
 	}
 	if !ph.uncachable.Load().Match(url, host) {
 		t.Errorf("expected uncachable file to take effect after Reload")
+	}
+	if !ph.forbiddenTunnels.Load().MatchTunnel(hostPort, host) {
+		t.Errorf("expected forbiddenTunnels file to take effect after Reload")
 	}
 }
 
@@ -228,7 +240,7 @@ func TestProxyHandleForward(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// 3. Make request to mock backend through ProxyHandler
 	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
@@ -260,7 +272,7 @@ func TestProxyHandleConnectInvalidPort(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// Connect to non-allowed port (e.g., 80)
 	req := httptest.NewRequest(http.MethodConnect, "example.com:80", nil)
@@ -280,7 +292,7 @@ func TestProxyAllowedClientsCIDR(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// In CIDR range 1
 	if !ph.isClientAllowed("192.168.2.50:55555") {
@@ -310,7 +322,7 @@ func TestProxyConnectFailureCases(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// 1. Host with no port
 	reqNoPort := httptest.NewRequest(http.MethodConnect, "http://example.com:443", nil)
@@ -353,7 +365,7 @@ func TestProxyForbiddenConnect(t *testing.T) {
 	forbidden := NewForbiddenList()
 	forbidden.Domains = []string{"badsite.com"}
 	uncachable := NewForbiddenList()
-	ph := NewProxyHandler(cfg, cm, forbidden, uncachable)
+	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	req := httptest.NewRequest(http.MethodConnect, "badsite.com:443", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -363,6 +375,37 @@ func TestProxyForbiddenConnect(t *testing.T) {
 	ph.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 Forbidden, got %d", rr.Code)
+	}
+}
+
+func TestProxyForbiddenTunnelsFile(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.TunnelAllowedPorts = PortSet{{443, 443}}
+	cm := NewCacheManager(cfg)
+	forbiddenTunnels := NewForbiddenList()
+	forbiddenTunnels.Domains = []string{"tunnelsite.com"}
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), forbiddenTunnels)
+
+	// Blocked by forbiddenTunnelsFile itself.
+	req := httptest.NewRequest(http.MethodConnect, "tunnelsite.com:443", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.RequestURI = "tunnelsite.com:443"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for tunnelsite.com:443, got %d", rr.Code)
+	}
+
+	// forbiddenTunnelsFile requires an exact host match (Polipo's
+	// tunnelIsMatched, unlike the suffix matching the general forbidden list
+	// uses), so a subdomain is not blocked by the "tunnelsite.com" entry.
+	req2 := httptest.NewRequest(http.MethodConnect, "sub.tunnelsite.com:443", nil)
+	req2.RemoteAddr = "127.0.0.1:12345"
+	req2.RequestURI = "sub.tunnelsite.com:443"
+	rr2 := httptest.NewRecorder()
+	ph.ServeHTTP(rr2, req2)
+	if rr2.Code == http.StatusForbidden {
+		t.Errorf("expected sub.tunnelsite.com:443 not to be blocked by an exact-match entry, got %d", rr2.Code)
 	}
 }
 
@@ -641,7 +684,7 @@ func TestProxyServedFromCache(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := "http://cached.example.com/resource"
 	seedReq := httptest.NewRequest(http.MethodGet, target, nil)
@@ -721,7 +764,7 @@ func TestCensoredHeadersStrippedFromResponseAndCache(t *testing.T) {
 	cfg.DiskCacheRoot = tmpDir
 	cfg.CensoredHeaders = []string{"X-Secret"}
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -841,7 +884,7 @@ func TestProxyForwardUncachable(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	uncachable := NewForbiddenList()
 	uncachable.Domains = []string{"127.0.0.1"} // backend host
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), uncachable)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), uncachable, NewForbiddenList())
 
 	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -918,7 +961,7 @@ func TestProxyOfflineServesStaleFromCache(t *testing.T) {
 	cfg.DiskCacheRoot = tmpDir
 	cfg.ProxyOffline = true
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := "http://cached.example.com/resource"
 	seedCacheEntry(t, cm, target, "stale body", false)
@@ -945,7 +988,7 @@ func TestProxyOfflineServesFreshWithoutWarning(t *testing.T) {
 	cfg.DiskCacheRoot = tmpDir
 	cfg.ProxyOffline = true
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := "http://cached.example.com/fresh"
 	seedCacheEntry(t, cm, target, "fresh body", true)
@@ -1002,7 +1045,7 @@ func TestRelaxTransparencyMaybeServesStaleOnFailure(t *testing.T) {
 	cfg.DiskCacheRoot = tmpDir
 	cfg.RelaxTransparency = 1 // maybe
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	// Port 9999 is in the default allowedPorts range but nothing listens there,
 	// so the round trip fails the way an unreachable origin would.
@@ -1031,7 +1074,7 @@ func TestRelaxTransparencyFalseStillErrorsOnFailure(t *testing.T) {
 	cfg.DiskCacheRoot = tmpDir
 	// RelaxTransparency left at its default (0/"false").
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := "http://127.0.0.1:9999/resource"
 	seedCacheEntry(t, cm, target, "stale body", false)
@@ -1059,7 +1102,7 @@ func TestRelaxTransparencyTrueServesStaleWithoutContactingOrigin(t *testing.T) {
 	cfg.DiskCacheRoot = tmpDir
 	cfg.RelaxTransparency = 2 // true
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := backend.URL + "/resource"
 	seedCacheEntry(t, cm, target, "stale body", false)
@@ -1096,7 +1139,7 @@ func TestRelaxTransparencyMaybeStillContactsOriginWhenStale(t *testing.T) {
 	cfg.DiskCacheRoot = tmpDir
 	cfg.RelaxTransparency = 1 // maybe: only failures fall back to stale
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := backend.URL + "/resource"
 	seedCacheEntry(t, cm, target, "stale body", false)
@@ -1160,7 +1203,7 @@ func TestConditionalRevalidation304ServesCachedBodyAndRefreshes(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := backend.URL + "/resource"
 	seedStaleEntryWithValidators(t, cm, target, "cached body", `"v1"`, "")
@@ -1203,7 +1246,7 @@ func TestConditionalRevalidationSendsIfModifiedSince(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := backend.URL + "/resource"
 	seedStaleEntryWithValidators(t, cm, target, "cached body", "", lastModified)
@@ -1236,7 +1279,7 @@ func TestConditionalRevalidation200ReplacesCache(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := backend.URL + "/resource"
 	seedStaleEntryWithValidators(t, cm, target, "old body", `"v1"`, "")
@@ -1276,7 +1319,7 @@ func TestNoConditionalHeadersWithoutValidators(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := backend.URL + "/resource"
 	seedStaleEntryWithValidators(t, cm, target, "old body", "", "") // no validators
@@ -1303,7 +1346,7 @@ func TestClientConditionalHeaderNotOverridden(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
-	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList())
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	target := backend.URL + "/resource"
 	seedStaleEntryWithValidators(t, cm, target, "cached body", `"cached-etag"`, "")
