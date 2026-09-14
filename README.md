@@ -21,7 +21,7 @@ Features
 - **Cache Expiry**: `polipo -x` walks the on-disk cache and removes corrupt, stale
   (per HTTP freshness), and long-untouched entries (`diskCacheUnlinkTime`, default 32d),
   pruning emptied directories.
-- **Local Web Interface**: Dynamic configuration status inspection via local paths `/polipo/` and `/polipo/config`.
+- **Local Web Interface**: Configuration inspection at `/polipo/config`, plus a runtime operation at `/polipo/reload` (reload `forbiddenFile`/`uncachableFile`) without restarting.
 
 Command-line options
 --------------------

@@ -61,7 +61,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `forbiddenRedirectCode` | `302` | ❌ | 同上。 |
 | `forbiddenTunnelsFile` | `~/.polipo-forbiddenTunnels` | ❌ | ホスト単位の CONNECT ブロックリストなし。CONNECT は**ポートのみ**（`tunnelAllowedPorts`）でフィルタされ、許可ポートなら任意のホストへ到達できる。 |
 | `redirector` / `redirectorRedirectCode` | (未設定) | ❌ | Squid 風の外部リダイレクタ連携なし。 |
-| これらファイルの実行時リロード | `SIGUSR1`/`SIGUSR2` | ❌ | リストは起動時に一度読むだけ。再起動なしのリロード不可（§13 参照）。 |
+| これらファイルの実行時リロード | `SIGUSR1`/`SIGUSR2` | ✅ | **完了（2026-09-14）:** `ProxyHandler.Reload` が両ファイルを再読み込みし、`sync/atomic.Pointer` で原子的に差し替える — 処理中のリクエストが「半分だけ更新されたリスト」を見ることはない。Unix では `SIGUSR1`/`SIGUSR2`（`signal_unix.go`）、任意のプラットフォーム（Windows を含む）では `POST /polipo/reload` から到達可能。Windows には `syscall.SIGUSR1`/`SIGUSR2` 自体が存在しないため（`signal_windows.go` は何もしない）。§15 参照。 |
 
 ## 5. 親プロキシ
 
@@ -177,8 +177,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `daemonise`, `pidFile` | 🔷 | バックグラウンド化はサービスマネージャ / Windows インストーラ + タスクスケジューラ任せ。 |
 | `SIGTERM`, `SIGINT` | ✅ | `server.Close()` でグレースフル終了。 |
 | `SIGHUP` | ❌ | 設定リロードなし。 |
-| `SIGUSR1`（キャッシュ再検証 + `forbidden` 再読み込み） | ❌ | — |
-| `SIGUSR2`（メモリキャッシュ破棄 + `forbidden` 再読み込み） | ❌ | —（メモリキャッシュ自体が無い。forbidden 再読み込みも無い） |
+| `SIGUSR1`（インメモリデータの書き出し + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14）:** `forbidden`/`uncachable`（§4）を再読み込みする。Polipo の「書き出し」側（`writeoutObjects`）に相当する処理は無い — go-polipo のキャッシュはディスクのみで、メモリだけに保持されているデータが無いため。 |
+| `SIGUSR2`（メモリキャッシュ破棄 + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14）:** `SIGUSR1` と同じ再読み込み。go-polipo には破棄すべき独立したメモリキャッシュが無い（§10）ため、Polipo とは異なりこの2つのシグナルは同じ動作になる。 |
 
 ---
 
@@ -261,8 +261,19 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   対象（CONNECT は対象外、Polipo と同様）。見送った部分：Polipo 内部の
   `validate`/`objectMustRevalidate` の区別そのもの — 条件付き再検証（上記の
   `304` 項目）が無い go-polipo にはこれに相当する状態がない。
-- シグナルまたはエンドポイント経由の `forbidden`/`uncachable` 実行時リロード
-  （§4, §15）。
+- ~~シグナルまたはエンドポイント経由の `forbidden`/`uncachable` 実行時リロード
+  （§4, §15）。~~ **完了（2026-09-14）:** `ProxyHandler.Reload` が両ファイルを
+  再読み込みし、原子的に差し替える。Unix では `SIGUSR1`/`SIGUSR2`
+  （`signal_unix.go`）から起動でき、Polipo の「シグナルで `initForbidden()`」
+  という挙動に対応する — go-polipo には `SIGUSR2` が破棄すべき独立した
+  メモリキャッシュが無いため、両シグナルの動作は同じにした。Windows には
+  `SIGUSR1`/`SIGUSR2` 自体が存在しない（`syscall` パッケージに無い）ため、
+  `POST /polipo/reload` でこのプラットフォームをカバーする — こちらは
+  どの環境でも使える。これは Polipo の `/polipo/status?init-forbidden`
+  アクションの移植ではなく go-polipo 独自の新設エンドポイントである。
+  本家の同アクションは RTT 統計・キャッシュフラッシュ・`304` 破棄なども
+  持つ status ページの一部であり、go-polipo にはそのページ自体が無いため
+  （§13）、パス／形式をそのまま踏襲するのは適切でないと判断した。
 - `forbiddenTunnelsFile`（§4） — ホスト単位の CONNECT ブロックリスト。
 - ディスクキャッシュのサイズ上限 `maxDiskCacheEntrySize` / 切り詰め（§11） —
   `-x` 実行間の無制限な肥大化。

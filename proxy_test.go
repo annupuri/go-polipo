@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -118,6 +119,94 @@ func TestProxyForbiddenFiltering(t *testing.T) {
 	ph.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403, got %d", rr.Code)
+	}
+}
+
+func TestProxyReload(t *testing.T) {
+	dir := t.TempDir()
+	forbiddenPath := dir + "/forbidden"
+	uncachablePath := dir + "/uncachable"
+
+	cfg := NewDefaultConfig()
+	cfg.ForbiddenFile = forbiddenPath
+	cfg.UncachableFile = uncachablePath
+	ph := newTestHandler(cfg)
+
+	url, host := "http://badsite.com/", "badsite.com"
+
+	// Neither file exists yet, so nothing is blocked or marked uncachable.
+	// Checked directly (not via ServeHTTP) so a false negative here doesn't
+	// send a real request to badsite.com over the network.
+	if ph.forbidden.Load().Match(url, host) {
+		t.Fatalf("badsite.com forbidden before forbidden file existed")
+	}
+	if ph.uncachable.Load().Match(url, host) {
+		t.Fatalf("badsite.com marked uncachable before uncachable file existed")
+	}
+
+	if err := os.WriteFile(forbiddenPath, []byte("badsite.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(uncachablePath, []byte("badsite.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The old (empty) lists are still in effect until Reload runs.
+	if ph.forbidden.Load().Match(url, host) {
+		t.Fatalf("badsite.com forbidden before Reload was called")
+	}
+
+	if err := ph.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 after Reload picked up forbidden file, got %d", rr.Code)
+	}
+	if !ph.uncachable.Load().Match(url, host) {
+		t.Errorf("expected uncachable file to take effect after Reload")
+	}
+}
+
+func TestProxyReloadEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	forbiddenPath := dir + "/forbidden"
+
+	cfg := NewDefaultConfig()
+	cfg.ForbiddenFile = forbiddenPath
+	ph := newTestHandler(cfg)
+
+	// GET must not trigger a reload (avoids prefetch/crawler side effects).
+	getReq := httptest.NewRequest(http.MethodGet, "http://localhost:8123/polipo/reload", nil)
+	getReq.RemoteAddr = "127.0.0.1:12345"
+	getRR := httptest.NewRecorder()
+	ph.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET /polipo/reload: expected 405, got %d", getRR.Code)
+	}
+
+	if err := os.WriteFile(forbiddenPath, []byte("badsite.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/reload", nil)
+	postReq.RemoteAddr = "127.0.0.1:12345"
+	postRR := httptest.NewRecorder()
+	ph.ServeHTTP(postRR, postReq)
+	if postRR.Code != http.StatusSeeOther {
+		t.Errorf("POST /polipo/reload: expected 303, got %d", postRR.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://badsite.com/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 after POST /polipo/reload, got %d", rr.Code)
 	}
 }
 

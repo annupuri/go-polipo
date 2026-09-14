@@ -61,7 +61,7 @@ at the end groups findings by how much they matter before a public release.
 | `forbiddenRedirectCode` | `302` | ❌ | Same. |
 | `forbiddenTunnelsFile` | `~/.polipo-forbiddenTunnels` | ❌ | No per-host CONNECT blocklist. CONNECT is filtered by **port only** (`tunnelAllowedPorts`); any host is reachable on an allowed port. |
 | `redirector` / `redirectorRedirectCode` | (unset) | ❌ | No external Squid-style redirector hook. |
-| Runtime reload of these files | `SIGUSR1`/`SIGUSR2` | ❌ | Lists load once at startup; no reload without a restart (see §13). |
+| Runtime reload of these files | `SIGUSR1`/`SIGUSR2` | ✅ | **Done (2026-09-14):** `ProxyHandler.Reload` re-reads both files and atomically swaps them in (`sync/atomic.Pointer`), so in-flight requests never see a half-updated list. Reachable via `SIGUSR1`/`SIGUSR2` on Unix (`signal_unix.go`) or `POST /polipo/reload` on any platform, including Windows, where `syscall.SIGUSR1`/`SIGUSR2` don't exist (`signal_windows.go` is a no-op). See §15. |
 
 ## 5. Parent proxies
 
@@ -177,8 +177,8 @@ at the end groups findings by how much they matter before a public release.
 | `daemonise`, `pidFile` | 🔷 | Backgrounding left to the service manager / the Windows installer + Task Scheduler. |
 | `SIGTERM`, `SIGINT` | ✅ | Graceful `server.Close()`. |
 | `SIGHUP` | ❌ | No config reload. |
-| `SIGUSR1` (revalidate cache + reload `forbidden`) | ❌ | — |
-| `SIGUSR2` (drop memory cache + reload `forbidden`) | ❌ | — (no memory cache; forbidden reload still absent) |
+| `SIGUSR1` (write out cache + reload `forbidden`) | ✅ | **Done (2026-09-14):** reloads `forbidden`/`uncachable` (§4). Polipo's `writeoutObjects` half has no equivalent here - go-polipo's cache is disk-only, so there is nothing held only in memory to flush. |
+| `SIGUSR2` (drop memory cache + reload `forbidden`) | ✅ | **Done (2026-09-14):** same reload as `SIGUSR1`. go-polipo has no separate in-memory cache to drop (§10), so the two signals are equivalent here, unlike in Polipo. |
 
 ---
 
@@ -269,7 +269,18 @@ at the end groups findings by how much they matter before a public release.
   matching Polipo). Not attempted: Polipo's internal `validate`/
   `objectMustRevalidate` distinction, which has no equivalent here without
   conditional revalidation (the `304` item above).
-- Runtime reload of `forbidden`/`uncachable` via signal or endpoint (§4, §15).
+- ~~Runtime reload of `forbidden`/`uncachable` via signal or endpoint (§4,
+  §15).~~ **Done (2026-09-14):** `ProxyHandler.Reload` re-reads both files
+  and atomically swaps them in. On Unix, `SIGUSR1`/`SIGUSR2` trigger it
+  (`signal_unix.go`), matching Polipo's `initForbidden()`-on-signal behaviour;
+  both signals do the same thing here since go-polipo has no separate
+  in-memory cache for `SIGUSR2` to drop. Windows has no `SIGUSR1`/`SIGUSR2`
+  (`syscall` doesn't define them there), so `POST /polipo/reload` covers that
+  platform - and works everywhere else too. This is a new go-polipo-only
+  endpoint, not a port of Polipo's `/polipo/status?init-forbidden` action;
+  the latter lives on a status page (RTT stats, cache-flush actions, `304`
+  discard, etc.) that go-polipo doesn't have (§13), so reusing its exact
+  path/shape wasn't a fit.
 - `forbiddenTunnelsFile` (§4) — per-host CONNECT blocklist.
 - On-disk size cap `maxDiskCacheEntrySize` / truncation (§11) — unbounded growth
   between `-x` runs.

@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -25,8 +26,10 @@ import (
 type ProxyHandler struct {
 	config       *Config
 	cacheManager *CacheManager
-	forbidden    *ForbiddenList
-	uncachable   *ForbiddenList
+	// forbidden and uncachable are swapped atomically by Reload, which runs
+	// concurrently with request-handling goroutines that read them via Load.
+	forbidden    atomic.Pointer[ForbiddenList]
+	uncachable   atomic.Pointer[ForbiddenList]
 	transport    *http.Transport
 	reverseProxy *httputil.ReverseProxy
 	semaphore    chan struct{}
@@ -43,9 +46,9 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	ph := &ProxyHandler{
 		config:       config,
 		cacheManager: cacheManager,
-		forbidden:    forbidden,
-		uncachable:   uncachable,
 	}
+	ph.forbidden.Store(forbidden)
+	ph.uncachable.Store(uncachable)
 	if config.MaxConcurrentRequests > 0 {
 		ph.semaphore = make(chan struct{}, config.MaxConcurrentRequests)
 	}
@@ -121,6 +124,28 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	return ph
 }
 
+// Reload re-reads forbiddenFile and uncachableFile from disk and atomically
+// swaps them in, so in-flight requests never observe a half-updated list.
+// This is go-polipo's equivalent of Polipo's initForbidden(), invoked there
+// on SIGUSR1/SIGUSR2 and from the /polipo/status?init-forbidden action; here
+// it is reachable the same way (see signal_unix.go) plus via POST
+// /polipo/reload, which also covers Windows, where SIGUSR1/SIGUSR2 do not
+// exist. A file that fails to load keeps the previously loaded list rather
+// than falling back to an empty one.
+func (ph *ProxyHandler) Reload() error {
+	forbidden := NewForbiddenList()
+	if err := forbidden.Load(ph.config.ForbiddenFile); err != nil {
+		return fmt.Errorf("reload forbidden file %q: %w", ph.config.ForbiddenFile, err)
+	}
+	uncachable := NewForbiddenList()
+	if err := uncachable.Load(ph.config.UncachableFile); err != nil {
+		return fmt.Errorf("reload uncachable file %q: %w", ph.config.UncachableFile, err)
+	}
+	ph.forbidden.Store(forbidden)
+	ph.uncachable.Store(uncachable)
+	return nil
+}
+
 // cacheResponse is the ReverseProxy ModifyResponse hook: it turns a 304 Not
 // Modified from a conditional revalidation (see addConditionalHeaders) back
 // into the full cached representation, strips censoredHeaders (applied
@@ -139,7 +164,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 		resp.Header.Del(h)
 	}
 	req := resp.Request
-	if ph.uncachable.Match(req.URL.String(), req.URL.Host) {
+	if ph.uncachable.Load().Match(req.URL.String(), req.URL.Host) {
 		return nil
 	}
 	if err := ph.cacheManager.Store(req, resp); err != nil {
@@ -353,7 +378,7 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 2. Forbidden URL verification
-	if url := targetURL(req); ph.forbidden.Match(url, req.Host) {
+	if url := targetURL(req); ph.forbidden.Load().Match(url, req.Host) {
 		log.Printf("Denied: %s is blacklisted", url)
 		http.Error(w, "Forbidden: URL is blacklisted", http.StatusForbidden)
 		return
@@ -401,7 +426,26 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 <ul>
 <li><a href="/polipo/config">Configuration variables</a></li>
 </ul>
+<form method="post" action="/polipo/reload">
+<button type="submit">Reload forbidden/uncachable lists</button>
+</form>
 </body></html>`, Version)
+		return
+	}
+
+	if path == "/polipo/reload" {
+		if req.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := ph.Reload(); err != nil {
+			log.Printf("Reload failed: %v", err)
+			http.Error(w, fmt.Sprintf("Reload failed: %v", err), http.StatusInternalServerError)
+			return
+		}
+		log.Printf("Reloaded forbidden/uncachable lists")
+		http.Redirect(w, req, "/polipo/", http.StatusSeeOther)
 		return
 	}
 
