@@ -87,6 +87,8 @@ WSL 上で `make build` を実行するとネイティブの Linux 用 `polipo` 
 6. Windows 起動時に go-polipo を自動実行する
 ----------------------------------------------
 
+**スマートアプリコントロールが「オン」の場合、現状は非推奨です。** Windows 11のスマートアプリコントロールは、一度「オン」に固定される(「評価」の選択肢が選べなくなる)と、未署名の自前ビルドバイナリ(`polipo.exe`など)の実行を「アプリケーション制御ポリシーによってこのファイルがブロックされました」というエラーで一律ブロックします。これをWindowsのクリーンインストール以外の方法で「オフ」に戻す公式な手段はなく、自己署名証明書での回避もできません。該当する場合は、このセクションを飛ばしてセクション8(WSL上での実行)に進んでください。本セクションは、スマートアプリコントロールが「オフ」または「評価中」の環境、あるいはバイナリに正式なコード署名がある場合向けに残しています。
+
 推奨レイアウト(1 ユーザー単位。ファイル自体の配置に管理者権限は不要):
 
     %LOCALAPPDATA%\Programs\go-polipo\polipo.exe    実行ファイル
@@ -177,4 +179,90 @@ Inno Setupを一度インストールした上で、リポジトリのルート�
 
 インストーラーを(コード変更後の再ビルドなどで)再度実行すると、上書きの前に稼働中のタスク/プロセスを自動的に停止してからバイナリを入れ替えます。手動更新時の`Stop-ScheduledTask`/`Stop-Process`と同じ処理を自動化しているだけです。アンインストール(「アプリと機能」またはインストール先の`unins000.exe`から)では、タスクスケジューラの登録解除とバイナリの削除のみを行い、設定ファイル・ディスクキャッシュ・ログファイルはそのまま残します。
 
-このインストーラー経由の手順は任意のもので、`windows/polipo.iss`のソースレビュー以上の動作確認は行っていません。うまく動かない場合はセクション4・6の手動手順が引き続き正式な手段です。
+このインストーラー経由の手順は任意のもので、`windows/polipo.iss`のソースレビュー以上の動作確認は行っていません。うまく動かない場合はセクション4・6の手動手順が引き続き正式な手段です。セクション6と同様、このインストーラーが配置するのも同じ未署名の`polipo.exe`なので、上記のスマートアプリコントロールに関する注記が当てはまります。
+
+8. WSL上でgo-polipoを実行する(スマートアプリコントロールの回避策)
+--------------------------------------------------------------------
+
+自前ビルドの`polipo.exe`がWindows側で一律ブロックされてしまう場合(セクション6のスマートアプリコントロールに関する注記を参照)、WSL2上でネイティブのLinux版バイナリを動かすことで、コード署名の取得やWindowsの再インストールを待たずにgo-polipoをプロキシとして使い続けられます。WSL2は既定で`127.0.0.1`をWindowsとLinux VM間で転送するため、Windows側のアプリケーションは今まで通り`http://127.0.0.1:8123/`を指すだけで済みます。
+
+WSL上でネイティブのLinuxバイナリをビルドします:
+
+    $ make build
+
+(WSL上での既定の`make build`はそのままLinux用バイナリを生成します。`GOOS`指定や`build-windows`は不要です。セクション5参照。)
+
+設定・キャッシュ・ログはWSLのファイルシステム内に置きます(例: `~/.polipo`):
+
+    proxyAddress = 127.0.0.1
+    proxyPort = 8123
+    diskCacheRoot = /home/<you>/.cache/go-polipo/cache
+    logFile = /home/<you>/.cache/go-polipo/polipo.log
+
+Windowsの場合と同様、`diskCacheRoot`はgo-polipoが初回利用時に自動作成しますが、`logFile`の親フォルダは自動作成しないので、あらかじめ作成してください:
+
+    $ mkdir -p ~/.cache/go-polipo
+
+### systemdサービスとして実行する
+
+最近のWSL2ディストリビューションの多くは既定でsystemdが有効です。次のコマンドで確認できます:
+
+    $ ps -p 1 -o comm=
+
+`systemd`と表示されれば、ユニットファイル(例: `~/go-polipo.service`)を作成します:
+
+    [Unit]
+    Description=go-polipo caching proxy
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    Type=simple
+    User=<you>
+    ExecStart=/path/to/go-polipo/polipo -c /home/<you>/.polipo
+    Restart=on-failure
+
+    [Install]
+    WantedBy=multi-user.target
+
+配置して有効化します:
+
+    $ sudo cp ~/go-polipo.service /etc/systemd/system/go-polipo.service
+    $ sudo systemctl daemon-reload
+    $ sudo systemctl enable --now go-polipo
+    $ sudo systemctl status go-polipo --no-pager
+
+### WSL2 VM(とサービス)を落とさないようにする
+
+WSL2は既定で、最後のWSLターミナル/ウィンドウを閉じてからしばらくするとバックグラウンドVM自体を終了させ、systemdごとgo-polipoも道連れに停止します。**Windows側**の`%UserProfile%\.wslconfig`に以下を追記してこれを無効化してください:
+
+    [wsl2]
+    vmIdleTimeout=-1
+
+### Windowsログオン時にWSLを自動起動する
+
+WSL2のVMはWindowsログオン時に自動では起動しないため、Microsoft署名済み(スマートアプリコントロールの対象外)の`wsl.exe`を呼び出すスタートアップフォルダのショートカットで一度起こしてやる必要があります。これによりsystemd経由でgo-polipoも起動します。**Windows PowerShell**で:
+
+    $startup = [Environment]::GetFolderPath('Startup')
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut("$startup\go-polipo-wsl.lnk")
+    $sc.TargetPath  = "$env:WINDIR\System32\wsl.exe"
+    $sc.Arguments   = "-d <ディストリビューション名> -u <you> -- true"
+    $sc.WindowStyle = 7
+    $sc.Save()
+
+Windows再起動後に確認:
+
+    Test-NetConnection 127.0.0.1 -Port 8123
+
+### バイナリの更新
+
+Windowsと異なり、WSL/Linuxは実行中のファイルをロックしないため、上書き前に停止する手順は不要です:
+
+    $ git pull
+    $ make build
+    $ sudo systemctl restart go-polipo
+
+WSLに切り替える前にセクション6のタスクスケジューラ登録やスタートアップフォルダのショートカットを作成していた場合は、ポート8123を取り合わないよう無効化または削除してください:
+
+    Disable-ScheduledTask -TaskName "go-polipo"   # 管理者権限で実行

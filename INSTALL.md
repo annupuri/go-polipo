@@ -98,6 +98,17 @@ full, tested procedure.
 6. Running go-polipo at Windows startup
 ----------------------------------------
 
+**Not currently recommended if Smart App Control is On.** Windows 11's
+Smart App Control, once it locks into the "On" state (the "Evaluation"
+toggle becomes unselectable), blocks execution of unsigned, self-built
+binaries like `polipo.exe` outright ("This app has been blocked by your
+system administrator" / an application-control-policy error), with no
+supported way back to "Off" short of a clean Windows reinstall, and no
+self-signing workaround. If that's your situation, skip ahead to section 8
+(running go-polipo inside WSL) instead. This section remains for machines
+where Smart App Control is Off or still evaluating, or once the binary has
+proper code signing.
+
 Recommended layout (per-user; no admin rights needed for the files
 themselves):
 
@@ -222,4 +233,107 @@ config, disk cache, and log file are left in place.
 
 This installer path is optional and untested by the maintainers beyond a
 source review of `windows/polipo.iss` - the fully manual steps in sections 4
-and 6 remain the documented fallback if it misbehaves on your machine.
+and 6 remain the documented fallback if it misbehaves on your machine. Like
+section 6, it is subject to the Smart App Control caveat above - the
+installer deploys the same unsigned `polipo.exe`.
+
+8. Running go-polipo inside WSL (Smart App Control workaround)
+----------------------------------------------------------------
+
+If Windows blocks execution of the self-built `polipo.exe` outright (see
+the Smart App Control note in section 6), running the native Linux build
+inside WSL2 keeps go-polipo usable as a proxy from Windows without waiting
+on code signing or a Windows reinstall. WSL2 forwards `127.0.0.1` between
+Windows and the Linux VM by default, so Windows applications keep pointing
+at `http://127.0.0.1:8123/` exactly as before.
+
+Build the native Linux binary from inside WSL:
+
+    $ make build
+
+(WSL's default `make build` already produces the Linux binary - no
+`GOOS`/`build-windows` needed, see section 5.)
+
+Config, cache and log live inside the WSL filesystem, e.g. `~/.polipo`:
+
+    proxyAddress = 127.0.0.1
+    proxyPort = 8123
+    diskCacheRoot = /home/<you>/.cache/go-polipo/cache
+    logFile = /home/<you>/.cache/go-polipo/polipo.log
+
+As on Windows, go-polipo creates `diskCacheRoot` itself but not `logFile`'s
+parent directory:
+
+    $ mkdir -p ~/.cache/go-polipo
+
+### Run as a systemd service
+
+Most current WSL2 distros have systemd enabled by default; check with:
+
+    $ ps -p 1 -o comm=
+
+If it prints `systemd`, create a unit file, e.g. `~/go-polipo.service`:
+
+    [Unit]
+    Description=go-polipo caching proxy
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    Type=simple
+    User=<you>
+    ExecStart=/path/to/go-polipo/polipo -c /home/<you>/.polipo
+    Restart=on-failure
+
+    [Install]
+    WantedBy=multi-user.target
+
+Install and enable it:
+
+    $ sudo cp ~/go-polipo.service /etc/systemd/system/go-polipo.service
+    $ sudo systemctl daemon-reload
+    $ sudo systemctl enable --now go-polipo
+    $ sudo systemctl status go-polipo --no-pager
+
+### Keep the WSL2 VM (and the service) alive
+
+By default WSL2 shuts its background VM down shortly after the last WSL
+terminal/window closes, taking systemd and go-polipo down with it. Add this
+to `%UserProfile%\.wslconfig` on the **Windows** side to disable that:
+
+    [wsl2]
+    vmIdleTimeout=-1
+
+### Start WSL automatically at Windows logon
+
+The WSL2 VM does not start on its own at Windows logon; a Startup-folder
+shortcut that runs the Microsoft-signed (and thus Smart-App-Control-exempt)
+`wsl.exe` wakes it, which lets systemd start go-polipo in turn. In
+**Windows PowerShell**:
+
+    $startup = [Environment]::GetFolderPath('Startup')
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut("$startup\go-polipo-wsl.lnk")
+    $sc.TargetPath  = "$env:WINDIR\System32\wsl.exe"
+    $sc.Arguments   = "-d <YourDistroName> -u <you> -- true"
+    $sc.WindowStyle = 7
+    $sc.Save()
+
+Verify after a Windows restart:
+
+    Test-NetConnection 127.0.0.1 -Port 8123
+
+### Updating the binary
+
+Unlike Windows, WSL/Linux does not lock a running executable, so no
+stop-before-copy dance is needed:
+
+    $ git pull
+    $ make build
+    $ sudo systemctl restart go-polipo
+
+If you had registered the Windows Task Scheduler task or Startup-folder
+shortcut from section 6 before switching to WSL, disable or remove it so
+the two don't fight over port 8123:
+
+    Disable-ScheduledTask -TaskName "go-polipo"   # run as Administrator
