@@ -298,17 +298,25 @@ func TestProxyFlushEndpoint(t *testing.T) {
 	}
 
 	// disableLocalInterface must still gate /polipo/flush like every other
-	// local page.
+	// local page: the request falls through to ordinary forwarding instead
+	// of being handled locally. Forward to a real backend (rather than
+	// asserting "not 200" against an arbitrary host) so the test isn't
+	// fooled by something else happening to listen on that host/port.
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer backend.Close()
+
 	cfg2 := NewDefaultConfig()
 	cfg2.DiskCacheRoot = t.TempDir()
 	cfg2.DisableLocalInterface = true
 	ph2 := newTestHandler(cfg2)
-	disabledReq := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/flush", nil)
+	disabledReq := httptest.NewRequest(http.MethodPost, backend.URL+"/polipo/flush", nil)
 	disabledReq.RemoteAddr = "127.0.0.1:12345"
 	disabledRR := httptest.NewRecorder()
 	ph2.ServeHTTP(disabledRR, disabledReq)
-	if disabledRR.Code == http.StatusOK {
-		t.Error("expected /polipo/flush to be unreachable with disableLocalInterface=true")
+	if disabledRR.Code != http.StatusTeapot {
+		t.Errorf("expected /polipo/flush to be forwarded to the backend, got %d", disabledRR.Code)
 	}
 }
 
