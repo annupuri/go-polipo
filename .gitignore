@@ -8,4 +8,6 @@ coverage.out
 # Inno Setup output (built locally, see windows/polipo.iss).
 windows/dist/
 
+# Local scratch space for ad-hoc notes/files while working in this repo;
+# not part of the project, never committed.
 tmp
