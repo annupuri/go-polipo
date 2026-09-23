@@ -35,14 +35,14 @@ SolidCompression=yes
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
-Source: "..\polipo.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\bin\polipo.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\config.sample"; DestDir: "{app}"; Flags: ignoreversion
 Source: "register-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "unregister-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 ; Parent folder for logFile; go-polipo does not create it itself (it does
-; create diskCacheRoot on first use). See INSTALL.md section 6.
+; create diskCacheRoot on first use). See docs/INSTALL.md section 6.
 Name: "{localappdata}\go-polipo"
 
 [Run]
@@ -59,7 +59,7 @@ end;
 
 // Re-running this installer over an existing install (to update the binary)
 // would otherwise fail to overwrite a running, locked polipo.exe. Stop it
-// first, same as the manual "Updating the binary" steps in INSTALL.md.
+// first, same as the manual "Updating the binary" steps in docs/INSTALL.md.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;

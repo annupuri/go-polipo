@@ -17,7 +17,7 @@ You can build the binary using the provided Makefile:
 
     $ make build
 
-By default, this will compile the binary named `polipo` (or `polipo.exe` on Windows).
+By default, this writes the binary to `bin/polipo` (or `bin/polipo.exe` on Windows).
 
 To install the binary to `/usr/local/bin` (on POSIX systems):
 
@@ -25,7 +25,7 @@ To install the binary to `/usr/local/bin` (on POSIX systems):
 
 To run the proxy:
 
-    $ ./polipo
+    $ ./bin/polipo
 
 By default, the proxy runs in the foreground and listens on http://127.0.0.1:8123/.
 
@@ -51,10 +51,10 @@ Configuration files can be placed in standard locations:
 
 You can also specify a custom configuration file path using the `-c` flag:
 
-    $ ./polipo -c /path/to/config
+    $ ./bin/polipo -c /path/to/config
 
 `config.sample` lists the supported variables with their defaults. You can
-also see the effective configuration with `./polipo -v`, or open the local
+also see the effective configuration with `./bin/polipo -v`, or open the local
 configuration page at `http://127.0.0.1:8123/polipo/config` while the proxy
 is running.
 
@@ -70,20 +70,20 @@ Native build (PowerShell or Command Prompt, with Go installed):
 
 or, without `make`:
 
-    > go build -o polipo.exe .
+    > go build -o bin\polipo.exe .
 
 Cross-compiling for Windows from Unix/Linux/macOS/WSL:
 
-    $ make build-windows                  # -> polipo.exe (amd64)
-    $ make build-windows WINARCH=arm64    # -> polipo.exe (arm64)
+    $ make build-windows                  # -> bin/polipo.exe (amd64)
+    $ make build-windows WINARCH=arm64    # -> bin/polipo.exe (arm64)
     $ make build-windows WINGUI=1         # no console window on launch
 
 or without `make`:
 
-    $ GOOS=windows GOARCH=amd64 go build -o polipo.exe .
+    $ GOOS=windows GOARCH=amd64 go build -o bin/polipo.exe .
 
-`make build` on WSL produces the native Linux `polipo`; use `build-windows`
-(or set `GOOS=windows`) to get `polipo.exe`.
+`make build` on WSL produces the native Linux `bin/polipo`; use
+`build-windows` (or set `GOOS=windows`) to get `bin/polipo.exe`.
 
 Paths: unlike the C version, go-polipo follows the host's path conventions
 automatically. Make sure `diskCacheRoot` and any other paths in your
@@ -129,7 +129,7 @@ Example `%USERPROFILE%\.polipo`:
     diskCacheRoot = C:/Users/<you>/AppData/Local/go-polipo/cache
     logFile = C:/Users/<you>/AppData/Local/go-polipo/polipo.log
 
-Build a console-free binary (see section 5) and copy it to
+Build a console-free binary (see section 5) and copy `bin\polipo.exe` to
 `%LOCALAPPDATA%\Programs\go-polipo\polipo.exe`:
 
     $ make build-windows WINGUI=1
@@ -191,7 +191,7 @@ overwriting it:
 
     Stop-ScheduledTask -TaskName "go-polipo"
     Get-Process polipo -ErrorAction SilentlyContinue | Stop-Process -Force
-    # copy the newly built polipo.exe into place, then:
+    # copy the newly built bin\polipo.exe into place, then:
     Start-ScheduledTask -TaskName "go-polipo"
 
 If a console window pops up when the task starts, the binary you just built
@@ -282,7 +282,7 @@ If it prints `systemd`, create a unit file, e.g. `~/go-polipo.service`:
     [Service]
     Type=simple
     User=<you>
-    ExecStart=/path/to/go-polipo/polipo -c /home/<you>/.polipo
+    ExecStart=/path/to/go-polipo/bin/polipo -c /home/<you>/.polipo
     Restart=on-failure
 
     [Install]

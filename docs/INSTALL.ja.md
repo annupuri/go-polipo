@@ -17,7 +17,7 @@ go-polipo のビルドには Go(バージョン 1.26.8 以降)が必要です。
 
     $ make build
 
-既定では `polipo`(Windows では `polipo.exe`)という名前のバイナリが生成されます。
+既定では `bin/polipo`(Windows では `bin/polipo.exe`)にバイナリが生成されます。
 
 `/usr/local/bin` にインストールする場合(POSIX システム):
 
@@ -25,7 +25,7 @@ go-polipo のビルドには Go(バージョン 1.26.8 以降)が必要です。
 
 プロキシを起動:
 
-    $ ./polipo
+    $ ./bin/polipo
 
 既定ではフォアグラウンドで動作し、`http://127.0.0.1:8123/` で待ち受けます。
 
@@ -51,9 +51,9 @@ Web ブラウザのプロキシ設定を `http://localhost:8123/` に向けて�
 
 `-c` フラグで任意の設定ファイルパスを指定することもできます:
 
-    $ ./polipo -c /path/to/config
+    $ ./bin/polipo -c /path/to/config
 
-サポートされている変数とその既定値は `config.sample` を参照してください。実際に反映されている設定は `./polipo -v` で、またはプロキシ実行中に `http://127.0.0.1:8123/polipo/config` のローカル設定ページでも確認できます。
+サポートされている変数とその既定値は `config.sample` を参照してください。実際に反映されている設定は `./bin/polipo -v` で、またはプロキシ実行中に `http://127.0.0.1:8123/polipo/config` のローカル設定ページでも確認できます。
 
 5. Windows でのビルド
 ----------------------
@@ -66,19 +66,19 @@ Go は追加のツールなしで Windows バイナリをビルドできます�
 
 `make` を使わない場合:
 
-    > go build -o polipo.exe .
+    > go build -o bin\polipo.exe .
 
 Unix/Linux/macOS/WSL から Windows 向けにクロスコンパイル:
 
-    $ make build-windows                  # -> polipo.exe (amd64)
-    $ make build-windows WINARCH=arm64    # -> polipo.exe (arm64)
+    $ make build-windows                  # -> bin/polipo.exe (amd64)
+    $ make build-windows WINARCH=arm64    # -> bin/polipo.exe (arm64)
     $ make build-windows WINGUI=1         # 起動時にコンソール窓を出さない
 
 `make` を使わない場合:
 
-    $ GOOS=windows GOARCH=amd64 go build -o polipo.exe .
+    $ GOOS=windows GOARCH=amd64 go build -o bin/polipo.exe .
 
-WSL 上で `make build` を実行するとネイティブの Linux 用 `polipo` が生成されます。`polipo.exe` が欲しい場合は `build-windows` を使うか `GOOS=windows` を指定してください。
+WSL 上で `make build` を実行するとネイティブの Linux 用 `bin/polipo` が生成されます。`bin/polipo.exe` が欲しい場合は `build-windows` を使うか `GOOS=windows` を指定してください。
 
 パスについて: C 言語版と異なり、go-polipo は実行環境のパス表記を自動的に扱います。設定ファイル内の `diskCacheRoot` など各種パスは、有効な Windows パス(例: `C:\var\cache\polipo\`)にしてください。
 
@@ -107,7 +107,7 @@ WSL 上で `make build` を実行するとネイティブの Linux 用 `polipo` 
     diskCacheRoot = C:/Users/<you>/AppData/Local/go-polipo/cache
     logFile = C:/Users/<you>/AppData/Local/go-polipo/polipo.log
 
-コンソール窓の出ないバイナリをビルド(セクション 5 参照)し、`%LOCALAPPDATA%\Programs\go-polipo\polipo.exe` に配置します:
+コンソール窓の出ないバイナリをビルド(セクション 5 参照)し、生成された `bin\polipo.exe` を `%LOCALAPPDATA%\Programs\go-polipo\polipo.exe` に配置します:
 
     $ make build-windows WINGUI=1
 
@@ -156,7 +156,7 @@ Windows は実行中の実行ファイルをロックするため、上書きす
 
     Stop-ScheduledTask -TaskName "go-polipo"
     Get-Process polipo -ErrorAction SilentlyContinue | Stop-Process -Force
-    # 新しくビルドした polipo.exe を配置場所に上書きコピーしてから:
+    # 新しくビルドした bin\polipo.exe を配置場所に上書きコピーしてから:
     Start-ScheduledTask -TaskName "go-polipo"
 
 タスク開始時にコンソール窓が表示される場合、配置した polipo.exe に `WINGUI=1` を付け忘れてビルドした、通常のコンソール版になっています。その窓を閉じると、閉じた通知を受けて go-polipo 自体も道連れで終了してしまい、ログにエラーは残らないまま「プロキシが突然使えなくなる」症状として現れます。セクション 5 の `WINGUI=1` でビルドし直し、上記の手順で入れ替えてください。
@@ -219,7 +219,7 @@ Windowsの場合と同様、`diskCacheRoot`はgo-polipoが初回利用時に自�
     [Service]
     Type=simple
     User=<you>
-    ExecStart=/path/to/go-polipo/polipo -c /home/<you>/.polipo
+    ExecStart=/path/to/go-polipo/bin/polipo -c /home/<you>/.polipo
     Restart=on-failure
 
     [Install]

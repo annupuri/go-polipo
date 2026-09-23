@@ -71,9 +71,9 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 ドキュメント
 ------------
 
-- ビルドとインストール手順は `INSTALL.ja.md` を参照してください(「Windows
+- ビルドとインストール手順は `docs/INSTALL.ja.md` を参照してください(「Windows
   でのビルド」「Windows 起動時の自動実行」節を含みます)。
-- アーキテクチャの詳細と C から Go へのファイル対応表は `ARCHITECTURE.ja.md`
+- アーキテクチャの詳細と C から Go へのファイル対応表は `docs/ARCHITECTURE.ja.md`
   を参照してください。
 
 謝辞とライセンス

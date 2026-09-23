@@ -1,6 +1,9 @@
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
+# Local build output directory.
+OUTDIR = bin
+
 # Binary name (polipo.exe on Windows).
 BINARY = polipo
 ifeq ($(OS),Windows_NT)
@@ -28,11 +31,11 @@ endif
 all: build
 
 build:
-	$(GO) build -o $(BINARY) .
+	$(GO) build -o $(OUTDIR)/$(BINARY) .
 
 # Cross-compile a Windows executable from any host (e.g. WSL or Linux CI).
 build-windows:
-	GOOS=windows GOARCH=$(WINARCH) $(GO) build $(WINLDFLAGS) -o polipo.exe .
+	GOOS=windows GOARCH=$(WINARCH) $(GO) build $(WINLDFLAGS) -o $(OUTDIR)/polipo.exe .
 
 # Build the Windows installer (windows/dist/go-polipo-setup.exe). Requires
 # Inno Setup's `iscc` on PATH; see windows/polipo.iss. Windows-only (or WSL
@@ -58,8 +61,8 @@ vulncheck:
 	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 clean:
-	rm -f polipo polipo.exe coverage.out
+	rm -rf $(OUTDIR) coverage.out
 
 install: build
 	mkdir -p $(DESTDIR)$(BINDIR)
-	cp -f $(BINARY) $(DESTDIR)$(BINDIR)/
+	cp -f $(OUTDIR)/$(BINARY) $(DESTDIR)$(BINDIR)/

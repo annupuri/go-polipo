@@ -1,7 +1,7 @@
-# build output: `make build` produces polipo/polipo.exe; a bare `go build`
-# produces one named after the module directory (go-polipo).
-polipo
-polipo.exe
+# build output: `make build`/`make build-windows` write to bin/; a bare
+# `go build` (no -o) still produces one named after the module directory
+# (go-polipo) at the repo root.
+/bin/
 go-polipo
 coverage.out
 
