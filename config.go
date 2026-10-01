@@ -128,6 +128,13 @@ type Config struct {
 	DontTrustVaryETag int
 }
 
+// defaultTunnelAllowedPorts is Polipo's default tunnelAllowedPorts (http.c):
+// ssh, HTTP, POP2/3, IMAP, HTTPS, rsync, IMAPS, POP3S, CVS, Jabber, Git.
+var defaultTunnelAllowedPorts = PortSet{
+	{22, 22}, {80, 80}, {109, 110}, {143, 143}, {443, 443}, {873, 873},
+	{993, 993}, {995, 995}, {2401, 2401}, {5222, 5223}, {9418, 9418},
+}
+
 // NewDefaultConfig creates a Config with Polipo's default values.
 func NewDefaultConfig() *Config {
 	return &Config{
@@ -141,7 +148,7 @@ func NewDefaultConfig() *Config {
 		SocksProxyType:        "socks5",
 		ParentProxy:           "",
 		AllowedClients:        []string{"127.0.0.1", "::1"},
-		TunnelAllowedPorts:    PortSet{{443, 443}, {563, 563}},
+		TunnelAllowedPorts:    defaultTunnelAllowedPorts,
 		AllowedPorts:          PortSet{{80, 100}, {1024, 65535}}, // Polipo's default: HTTP ports + all unprivileged ports
 		LogLevel:              0x07,                              // Default log level
 		DisableLocalInterface: false,

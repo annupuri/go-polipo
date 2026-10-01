@@ -77,7 +77,7 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable / feature | Polipo default | Status | Note |
 | :--- | :--- | :--: | :--- |
-| `tunnelAllowedPorts` | SSH/HTTP/HTTPS/rsync/IMAP/POP/Jabber/CVS/Git | ✅ | Enforced in `handleConnect`. go-polipo default is `443, 563` only — narrower than Polipo. |
+| `tunnelAllowedPorts` | SSH/HTTP/HTTPS/rsync/IMAP/POP/Jabber/CVS/Git | ✅ | Enforced in `handleConnect`. **Default matches Polipo (resolved 2026-10-02):** `22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418`. It used to be `443, 563` only — narrower than Polipo, so e.g. a CONNECT to port 80 was refused. |
 | Bidirectional half-close tunnelling | — | ✅ | `tunnel()` waits for both directions; handles HTTP/2-over-CONNECT. |
 | CONNECT vs. request-concurrency limit | — | ✅ | CONNECT deliberately excluded from `maxConcurrentRequests` (recent fix). |
 

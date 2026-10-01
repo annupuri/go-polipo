@@ -163,7 +163,7 @@
 
 # Ports the proxy may open for CONNECT tunnels.  Checked instead of, not in
 # addition to, allowedPorts.  Same "lo-hi" range syntax.
-# tunnelAllowedPorts = 443, 563
+# tunnelAllowedPorts = 22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418
 
 
 ### Misc

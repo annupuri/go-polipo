@@ -77,7 +77,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 | 変数 / 機能 | Polipo 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
-| `tunnelAllowedPorts` | SSH/HTTP/HTTPS/rsync/IMAP/POP/Jabber/CVS/Git | ✅ | `handleConnect` で強制。go-polipo 既定は `443, 563` のみで Polipo より狭い。 |
+| `tunnelAllowedPorts` | SSH/HTTP/HTTPS/rsync/IMAP/POP/Jabber/CVS/Git | ✅ | `handleConnect` で強制。**既定を Polipo と同じにした（2026-10-02 解決）:** `22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418`。以前は `443, 563` のみで Polipo より狭く、例えばポート 80 への CONNECT が拒否されていた。 |
 | 双方向ハーフクローズのトンネル | — | ✅ | `tunnel()` が両方向の終了を待つ。CONNECT 上の HTTP/2 に対応。 |
 | CONNECT とリクエスト同時実行数制限 | — | ✅ | CONNECT を `maxConcurrentRequests` から意図的に除外（最近の修正）。 |
 

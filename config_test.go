@@ -507,6 +507,18 @@ func TestDefaultAllowedPorts(t *testing.T) {
 	}
 }
 
+func TestDefaultTunnelAllowedPorts(t *testing.T) {
+	c := NewDefaultConfig()
+	if got, want := c.TunnelAllowedPorts.String(), "22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418"; got != want {
+		t.Errorf("default tunnelAllowedPorts = %q, want Polipo's %q", got, want)
+	}
+	for _, p := range []int{21, 25, 563, 8080} {
+		if c.TunnelAllowedPorts.Contains(p) {
+			t.Errorf("default tunnelAllowedPorts should not contain %d", p)
+		}
+	}
+}
+
 func TestLoadConfig(t *testing.T) {
 	// 1. Non-existent file (should not error)
 	c := NewDefaultConfig()
