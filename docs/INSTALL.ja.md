@@ -38,6 +38,16 @@ Web ブラウザのプロキシ設定を `http://localhost:8123/` に向けて�
     $ export http_proxy=http://127.0.0.1:8123
     $ export https_proxy=http://127.0.0.1:8123
 
+### Windows: Microsoft Store などのストアアプリ
+
+Windows のシステムプロキシを `127.0.0.1:8123` に向けると、Microsoft Store(や他のパッケージ化された UWP アプリ)がエラーになることがあります。プロキシをオフにすると正常に動きます。これは go-polipo の問題ではなく、元の Polipo でも、go-polipo をネイティブで動かしても WSL 内で動かしても同じように起きます。これらのアプリは AppContainer というサンドボックス内で動いており、Windows は既定で AppContainer からループバックアドレスへの接続を禁止しているため、リクエストがプロキシまで届きません(プロキシのログにも何も出ません)。
+
+**管理者権限の**プロンプトで、そのアプリをループバック分離の対象外にします:
+
+    CheckNetIsolation LoopbackExempt -a '-n=Microsoft.WindowsStore_8wekyb3d8bbwe'
+
+PowerShell では引用符を外さないでください。引用符が無いと PowerShell が引数を `.` の位置で分割してしまい、CheckNetIsolation が「パラメーターが無効です」で失敗します。cmd.exe では引用符は不要です。再起動は不要で、アプリを開き直すだけで反映されます。`CheckNetIsolation LoopbackExempt -s` で対象外リストを表示でき、`-a` の代わりに `-d` を使うと削除できます。他のストアアプリの場合は、`Get-AppxPackage <名前> | Select-Object PackageFamilyName` でパッケージファミリ名を調べてください。
+
 4. go-polipo の設定
 --------------------
 

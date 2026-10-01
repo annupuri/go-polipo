@@ -38,6 +38,27 @@ You can also set the proxy via environment variables:
     $ export http_proxy=http://127.0.0.1:8123
     $ export https_proxy=http://127.0.0.1:8123
 
+### Windows: Microsoft Store and other Store apps
+
+If Windows' system proxy points at `127.0.0.1:8123`, Microsoft Store (and
+other packaged/UWP apps) may show an error, while working fine with the
+proxy turned off. This is not a go-polipo problem - original Polipo is
+affected the same way, as is go-polipo running natively or inside WSL.
+These apps run in an AppContainer sandbox, which Windows by default forbids
+from connecting to loopback addresses, so the requests never reach the
+proxy (and nothing shows up in its log).
+
+Exempt the app from loopback isolation, from an **elevated** prompt:
+
+    CheckNetIsolation LoopbackExempt -a '-n=Microsoft.WindowsStore_8wekyb3d8bbwe'
+
+Keep the quotes in PowerShell: unquoted, PowerShell splits the argument at
+the `.` and CheckNetIsolation fails with "The parameter is incorrect". In
+cmd.exe they are not needed. No restart is required - just reopen the app.
+`CheckNetIsolation LoopbackExempt -s` lists the exemptions; `-d` instead of
+`-a` removes one. For another Store app, find its package family name with
+`Get-AppxPackage <name> | Select-Object PackageFamilyName`.
+
 4. Configuring go-polipo
 ------------------------
 
