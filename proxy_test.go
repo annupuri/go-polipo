@@ -1646,6 +1646,36 @@ func TestClientConditionalHeaderNotOverridden(t *testing.T) {
 	if gotINM != `"client-etag"` {
 		t.Errorf("If-None-Match sent = %q, want the client's own %q", gotINM, `"client-etag"`)
 	}
+	// The 304 vouches for the client's "client-etag" copy, not the cached
+	// "cached-etag" one, so it must reach the client rather than be revived.
+	if rr.Code != http.StatusNotModified {
+		t.Errorf("status = %d, want 304 passed through to the client", rr.Code)
+	}
+	if rr.Body.Len() != 0 {
+		t.Errorf("body = %q, want empty (cached body must not be served)", rr.Body.String())
+	}
+}
+
+func TestClient304PassesThroughWithoutCachedEntry(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	tmpDir := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = tmpDir
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, backend.URL+"/never-cached", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("If-Modified-Since", timeHeader(-time.Hour))
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotModified {
+		t.Errorf("status = %d, want 304 passed through (the client's own conditional request)", rr.Code)
+	}
 }
 
 func TestRevalidation304WithoutCachedEntryIsAnError(t *testing.T) {

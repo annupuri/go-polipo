@@ -103,6 +103,9 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 				outReq.Header.Del(h)
 			}
 			ph.censorReferer(outReq)
+			if hasConditionalHeaders(outReq) {
+				*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), clientConditionalKey{}, true))
+			}
 			ph.addConditionalHeaders(outReq)
 		},
 		ModifyResponse: ph.cacheResponse,
@@ -162,7 +165,10 @@ func (ph *ProxyHandler) Reload() error {
 // first fetched or last revalidated, so a later cache hit never needs to
 // re-censor or re-merge.
 func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
-	if resp.StatusCode == http.StatusNotModified {
+	// A 304 for a request the client made conditional itself answers the
+	// client's validators, not ours (addConditionalHeaders leaves those
+	// requests alone), so it goes back to the client as-is; Store ignores it.
+	if resp.StatusCode == http.StatusNotModified && resp.Request.Context().Value(clientConditionalKey{}) == nil {
 		if err := ph.reviveFromCache(resp); err != nil {
 			return err
 		}
@@ -225,6 +231,17 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 	return nil
 }
 
+// clientConditionalKey marks, on the outgoing request's context, that the
+// client itself sent If-None-Match or If-Modified-Since (set in the Director
+// before addConditionalHeaders runs, read by cacheResponse).
+type clientConditionalKey struct{}
+
+// hasConditionalHeaders reports whether req carries a validator, i.e.
+// whether the origin may answer it with a 304.
+func hasConditionalHeaders(req *http.Request) bool {
+	return req.Header.Get("If-None-Match") != "" || req.Header.Get("If-Modified-Since") != ""
+}
+
 // addConditionalHeaders is part of the Director: when there is a stale cache
 // entry for outReq with a validator (ETag and/or Last-Modified), it turns
 // the forwarded request into a conditional one, so the origin can answer
@@ -241,7 +258,7 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 // usable ETag there, no conditional headers are added at all, so the
 // request goes through as a full, unconditional fetch instead.
 func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
-	if outReq.Header.Get("If-None-Match") != "" || outReq.Header.Get("If-Modified-Since") != "" {
+	if hasConditionalHeaders(outReq) {
 		return
 	}
 	cached, stale := ph.cacheManager.LookupStale(outReq)
