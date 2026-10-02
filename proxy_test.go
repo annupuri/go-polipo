@@ -1866,3 +1866,261 @@ func TestProxyConnectDialFailure(t *testing.T) {
 		t.Fatalf("status line = %q, err = %v; want 502", statusLine, err)
 	}
 }
+
+func TestParseByteRange(t *testing.T) {
+	tests := []struct {
+		header     string
+		size       int64
+		result     rangeResult
+		start, end int64
+	}{
+		{"bytes=0-4", 10, rangeSatisfiable, 0, 4},
+		{"bytes=5-", 10, rangeSatisfiable, 5, 9},
+		{"bytes=-3", 10, rangeSatisfiable, 7, 9},
+		{"bytes=-100", 10, rangeSatisfiable, 0, 9},  // suffix longer than resource: all of it
+		{"bytes=0-100", 10, rangeSatisfiable, 0, 9}, // end clamped to the last byte
+		{"bytes=0-0", 10, rangeSatisfiable, 0, 0},
+		{"bytes=9-9", 10, rangeSatisfiable, 9, 9},
+		{"bytes=10-20", 10, rangeUnsatisfiable, 0, 0}, // first >= size
+		{"bytes=-0", 10, rangeUnsatisfiable, 0, 0},    // zero-length suffix
+		{"bytes=0-", 0, rangeUnsatisfiable, 0, 0},     // empty resource
+		{"bytes=-5", 0, rangeUnsatisfiable, 0, 0},
+		{"bytes=5-2", 10, rangeNotApplicable, 0, 0}, // last < first
+		{"bytes=abc-5", 10, rangeNotApplicable, 0, 0},
+		{"bytes=0-abc", 10, rangeNotApplicable, 0, 0},
+		{"bytes=-abc", 10, rangeNotApplicable, 0, 0},
+		{"items=0-5", 10, rangeNotApplicable, 0, 0},     // wrong unit
+		{"bytes=0-1,3-4", 10, rangeNotApplicable, 0, 0}, // multi-range: unsupported
+		{"bytes=", 10, rangeNotApplicable, 0, 0},
+		{"garbage", 10, rangeNotApplicable, 0, 0},
+	}
+	for _, tt := range tests {
+		start, end, result := parseByteRange(tt.header, tt.size)
+		if result != tt.result {
+			t.Errorf("parseByteRange(%q, %d) result = %v, want %v", tt.header, tt.size, result, tt.result)
+			continue
+		}
+		if result == rangeSatisfiable && (start != tt.start || end != tt.end) {
+			t.Errorf("parseByteRange(%q, %d) = (%d, %d), want (%d, %d)", tt.header, tt.size, start, end, tt.start, tt.end)
+		}
+	}
+}
+
+func TestIfRangeMatches(t *testing.T) {
+	const date = "Wed, 21 Oct 2026 07:28:00 GMT"
+	const otherDate = "Wed, 21 Oct 2026 08:00:00 GMT"
+
+	tests := []struct {
+		name    string
+		ifRange string
+		header  http.Header
+		want    bool
+	}{
+		{"matching strong etag", `"abc"`, http.Header{"Etag": {`"abc"`}}, true},
+		{"mismatched etag", `"abc"`, http.Header{"Etag": {`"def"`}}, false},
+		{"weak validator in If-Range never matches", `W/"abc"`, http.Header{"Etag": {`"abc"`}}, false},
+		{"weak validator on the entity never matches", `"abc"`, http.Header{"Etag": {`W/"abc"`}}, false},
+		{"no etag on entity", `"abc"`, http.Header{}, false},
+		{"matching date", date, http.Header{"Last-Modified": {date}}, true},
+		{"mismatched date", date, http.Header{"Last-Modified": {otherDate}}, false},
+		{"date with no Last-Modified on entity", date, http.Header{}, false},
+		{"unparsable value", "not-a-date-or-etag", http.Header{"Last-Modified": {date}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ifRangeMatches(tt.ifRange, tt.header); got != tt.want {
+				t.Errorf("ifRangeMatches(%q, %v) = %v, want %v", tt.ifRange, tt.header, got, tt.want)
+			}
+		})
+	}
+}
+
+// seedRangeTestCache stores a cacheable response with body, an ETag and a
+// Last-Modified date, returning a ProxyHandler ready to serve it from cache
+// (no backend is reachable for the target host, so any non-cache response
+// would fail the test).
+func seedRangeTestCache(t *testing.T, body string) (ph *ProxyHandler, target string) {
+	t.Helper()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph = NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target = "http://cached.example.com/range-resource"
+	seedReq := httptest.NewRequest(http.MethodGet, target, nil)
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        http.Header{},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+	resp.Header.Set("Cache-Control", "max-age=3600")
+	resp.Header.Set("Date", timeHeader(0))
+	resp.Header.Set("ETag", `"range-etag"`)
+	resp.Header.Set("Last-Modified", timeHeader(-time.Hour))
+	if err := cm.Store(seedReq, resp); err != nil {
+		t.Fatalf("seed Store failed: %v", err)
+	}
+	return ph, target
+}
+
+func rangeRequest(target, rangeHeader, ifRangeHeader string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	if rangeHeader != "" {
+		req.Header.Set("Range", rangeHeader)
+	}
+	if ifRangeHeader != "" {
+		req.Header.Set("If-Range", ifRangeHeader)
+	}
+	return req
+}
+
+func TestRangeServedFromCache(t *testing.T) {
+	const body = "0123456789"
+	ph, target := seedRangeTestCache(t, body)
+
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, rangeRequest(target, "bytes=2-4", ""))
+
+	if rr.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusPartialContent)
+	}
+	if got, want := rr.Body.String(), "234"; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+	if got, want := rr.Header().Get("Content-Range"), "bytes 2-4/10"; got != want {
+		t.Errorf("Content-Range = %q, want %q", got, want)
+	}
+	if got, want := rr.Header().Get("Content-Length"), "3"; got != want {
+		t.Errorf("Content-Length = %q, want %q", got, want)
+	}
+	if got, want := rr.Header().Get("Accept-Ranges"), "bytes"; got != want {
+		t.Errorf("Accept-Ranges = %q, want %q", got, want)
+	}
+}
+
+func TestRangeUnsatisfiableFromCache(t *testing.T) {
+	const body = "0123456789"
+	ph, target := seedRangeTestCache(t, body)
+
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, rangeRequest(target, "bytes=100-200", ""))
+
+	if rr.Code != http.StatusRequestedRangeNotSatisfiable {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusRequestedRangeNotSatisfiable)
+	}
+	if got, want := rr.Header().Get("Content-Range"), "bytes */10"; got != want {
+		t.Errorf("Content-Range = %q, want %q", got, want)
+	}
+}
+
+func TestRangeIgnoredWhenNotApplicable(t *testing.T) {
+	const body = "0123456789"
+
+	for _, tc := range []struct {
+		name   string
+		range_ string
+	}{
+		{"multi-range", "bytes=0-1,3-4"},
+		{"wrong unit", "items=0-5"},
+		{"unparsable", "garbage"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ph, target := seedRangeTestCache(t, body)
+			rr := httptest.NewRecorder()
+			ph.ServeHTTP(rr, rangeRequest(target, tc.range_, ""))
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (whole entity)", rr.Code)
+			}
+			if got := rr.Body.String(); got != body {
+				t.Errorf("body = %q, want the whole entity %q", got, body)
+			}
+		})
+	}
+}
+
+func TestRangeIfRangeMismatchServesWhole(t *testing.T) {
+	const body = "0123456789"
+	ph, target := seedRangeTestCache(t, body)
+
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, rangeRequest(target, "bytes=2-4", `"stale-etag"`))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (If-Range mismatch ignores Range)", rr.Code)
+	}
+	if got := rr.Body.String(); got != body {
+		t.Errorf("body = %q, want the whole entity %q", got, body)
+	}
+}
+
+func TestRangeIfRangeMatchServesPartial(t *testing.T) {
+	const body = "0123456789"
+	ph, target := seedRangeTestCache(t, body)
+
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, rangeRequest(target, "bytes=2-4", `"range-etag"`))
+
+	if rr.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want %d (If-Range matches)", rr.Code, http.StatusPartialContent)
+	}
+	if got, want := rr.Body.String(), "234"; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func TestRangeIgnoredForHead(t *testing.T) {
+	const body = "0123456789"
+	ph, target := seedRangeTestCache(t, body)
+
+	req := httptest.NewRequest(http.MethodHead, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Range", "bytes=2-4")
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (Range is not honored for HEAD)", rr.Code)
+	}
+}
+
+func TestRangeServedViaProxyOffline(t *testing.T) {
+	const body = "0123456789"
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cfg.ProxyOffline = true
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := "http://cached.example.com/range-resource"
+	seedReq := httptest.NewRequest(http.MethodGet, target, nil)
+	resp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        http.Header{},
+		Body:          io.NopCloser(strings.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
+	resp.Header.Set("Cache-Control", "max-age=3600")
+	resp.Header.Set("Date", timeHeader(0))
+	if err := cm.Store(seedReq, resp); err != nil {
+		t.Fatalf("seed Store failed: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, rangeRequest(target, "bytes=2-4", ""))
+
+	if rr.Code != http.StatusPartialContent {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusPartialContent)
+	}
+	if got, want := rr.Body.String(), "234"; got != want {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}

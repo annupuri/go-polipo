@@ -124,7 +124,7 @@ at the end groups findings by how much they matter before a public release.
 | :--- | :--: | :--- |
 | In-memory object cache (LRU, hash table, `chunkHighMark`/`objectHighMark`/…) | ✅ | **Done (2026-10-02):** `CacheManager` keeps an LRU of recently-served responses (`memCache`, `github.com/hashicorp/golang-lru/v2` - go-polipo's first actual use of generics) in front of the disk cache. Two new variables: `memoryCacheEntries` (capacity, default 1024) and `memoryCacheMaxEntrySize` (per-entry admission ceiling, default 1MB). `lookupEntry` checks memory first and falls back to disk; a hit is run through the exact same `isExpired`/`responseVaries` logic as a disk hit (same function, not a parallel copy), so freshness and Vary handling cannot drift between the two paths. `Store` writes to whichever cache(s) currently want the response off a single shared body read - `maxDiskCacheEntrySize` and `memoryCacheMaxEntrySize` are independent ceilings, so a response can be too big for one destination and still fit the other. Deliberately not what Polipo did: `chunkHighMark`/`objectHighMark` cap *total bytes* across the process and evict LRU regardless of per-object size; go-polipo caps by *entry count* instead (the library's native model, and simpler - no byte accounting), with `memoryCacheMaxEntrySize` as a separate, independent guard against a handful of large responses crowding out many small, more reusable ones - see the shortlist entry for why this was chosen over a true byte-budget cache. Independent of `noDiskCache`/an empty `diskCacheRoot` by design (a deliberate deviation from Polipo, where the on-disk and in-memory representations of an `Object` are tied together) - the memory cache works the same with the disk cache off. Not persisted across restarts, closer to Polipo's always-on in-memory cache than to its on-disk one. Not touched by `-x`/`Expire`/`/polipo/flush`: those reclaim disk space, which a memory-resident entry does not consume, and a stale entry already can never be served fresh regardless of what is sitting in the LRU (checked live on every hit). Not attempted: promoting a disk hit into the memory cache - only a fresh `Store` populates it, so after a restart the memory cache only ever holds what this running process has itself fetched since. |
 | Partial instillation (store the byte ranges you have, fill gaps later) | ❌ | `Store` caches only whole `200 OK` bodies; `206 Partial Content` is never cached. |
-| Range-request assembly / serving ranges from cache | ❌ | Client `Range` requests pass straight through; the cache neither satisfies nor records them. |
+| Range-request assembly / serving ranges from cache | ⚠️ | **Done for complete entries only (2026-10-02):** `ProxyHandler.serveCached` satisfies a single-range `Range` request (`bytes=start-end`, `bytes=start-`, or a suffix `bytes=-n`) against a cache hit with a `206 Partial Content`/`Content-Range`, or a `416 Range Not Satisfiable` if the range doesn't fit; `If-Range` is honoured (RFC 9110 section 13.1.5: a strong-comparison-only match against the entity's current ETag/Last-Modified, falling back to the whole entity otherwise). `Accept-Ranges: bytes` is set on every cache-hit response. Deliberately out of scope, and the reason this isn't a plain ✅: a multi-range request (`bytes=0-1,3-4`) falls back to serving the whole entity rather than a `multipart/byteranges` response, and - the bigger limitation - this only ever slices an entity go-polipo already has complete, because that is the only kind it ever stores (see the row below); there is no notion of a partially-cached entity with a gap to fetch from the origin to satisfy a range that reaches past what is cached. Applied uniformly to all three places a cached entity is served to a client (a fresh hit, `relaxTransparency`'s stale serving, and `proxyOffline`), not just the common fresh-hit path. |
 | Poor Man's Multiplexing (`pmmSize`, `pmmFirstSize`) | ❌ | No segmented fetching of large objects. |
 | Pipelining / server-capability probing (`serverSlots*`, `smallRequestTime`, `replyUnpipeline*`, `maxPipelineTrain`, `maxSideBuffering`, `serverExpireTime`) | 🔷 | Connection reuse and multiplexing owned by `http.Transport` (fixed `MaxIdleConns:100`, `IdleConnTimeout:90s`). Not tunable via config. |
 
@@ -386,9 +386,25 @@ at the end groups findings by how much they matter before a public release.
   multi-file scheme (no chunk manifest, no merge-on-read logic) - and either
   way the hard part is the same regardless of on-disk layout: parsing a
   client's `Range` request, serving what is cached, and fetching only the
-  missing span from the origin to fill the rest. Not started; PMM (splitting
-  a *live* fetch across multiple upstream connections) is a related but
-  separate mechanism, not needed to get plain range-serving working.
+  missing span from the origin to fill the rest.
+
+  ~~Not started.~~ **Range-request half done (2026-10-02), scoped down to
+  the easier of the two on the user's own instruction:** when first asked to
+  pick up this item, the user realised their own instruction was ambiguous
+  and explicitly narrowed it to "Range access against a cache entry that is
+  already complete" first, deferring the harder half - a request reaching
+  past what is cached, which would need partial instantiation to satisfy
+  without a full re-fetch - to be reconsidered later only if it turns out to
+  matter in practice. See §10's Range-request assembly row for what this
+  covers (single-range only, `If-Range` honoured, all three cache-serving
+  paths). **Still not started:** partial instantiation itself (storing an
+  incomplete download with a marker of how far it goes) and, as a direct
+  consequence, serving a `Range` that reaches past what is cached, or
+  truncating an oversized entry in place instead of deleting it outright
+  (§11's `diskCacheTruncateTime`/`diskCacheTruncateSize` item - the original
+  motivation for filing this item at all). PMM (splitting a *live* fetch
+  across multiple upstream connections) remains a related but separate
+  mechanism, not needed for either half of this item.
 
 ### C. Explicitly by-design (already in ARCHITECTURE.md; just needs a sentence)
 

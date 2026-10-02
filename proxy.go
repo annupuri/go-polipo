@@ -757,9 +757,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// A fresh cache hit is served straight from disk.
 	if cachedResp := ph.cacheManager.Lookup(req); cachedResp != nil {
 		defer cachedResp.Body.Close()
-		copyHeader(w.Header(), cachedResp.Header)
-		w.WriteHeader(cachedResp.StatusCode)
-		io.Copy(w, cachedResp.Body)
+		ph.serveCached(w, req, cachedResp)
 		return
 	}
 
@@ -772,9 +770,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 			if stale {
 				w.Header().Set("Warning", `110 go-polipo "Object is stale"`)
 			}
-			copyHeader(w.Header(), staleResp.Header)
-			w.WriteHeader(staleResp.StatusCode)
-			io.Copy(w, staleResp.Body)
+			ph.serveCached(w, req, staleResp)
 			return
 		}
 	}
@@ -799,9 +795,7 @@ func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 	if stale {
 		w.Header().Set("Warning", `112 go-polipo "Disconnected operation"`)
 	}
-	copyHeader(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	ph.serveCached(w, req, resp)
 }
 
 // copyHeader appends every value of src into dst.
@@ -810,5 +804,172 @@ func copyHeader(dst, src http.Header) {
 		for _, v := range vv {
 			dst.Add(k, v)
 		}
+	}
+}
+
+// serveCached writes a cached (complete) entity to w, honoring a client
+// Range/If-Range request against it. go-polipo only ever stores a whole
+// response body - there is no partial instantiation (PARITY_AUDIT.md §10) -
+// so satisfying a Range request from the cache always means slicing an
+// already fully-present entity, never filling a gap from the origin.
+// Accept-Ranges is set unconditionally: every cached hit this proxy serves,
+// whether sliced by this request or not, is this same complete entity, so
+// the client may always follow up with a Range request against it.
+func (ph *ProxyHandler) serveCached(w http.ResponseWriter, req *http.Request, resp *http.Response) {
+	copyHeader(w.Header(), resp.Header)
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	if ph.writeRange(w, req, resp) {
+		return
+	}
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+// writeRange attempts to satisfy req as a single-range byte-range request
+// against resp, writing a 206 Partial Content or 416 Range Not Satisfiable
+// response and reporting true if it did. It reports false - leaving w
+// untouched and resp.Body intact for the caller's normal-path fallback - for
+// anything it does not handle: no Range header, a non-GET method, multiple
+// ranges, a unit other than "bytes", an unparsable Range, or an If-Range
+// precondition that does not match resp's current validator (RFC 9110
+// section 13.1.5), in which case the Range header must be ignored and the
+// whole entity served instead.
+func (ph *ProxyHandler) writeRange(w http.ResponseWriter, req *http.Request, resp *http.Response) bool {
+	if req.Method != http.MethodGet {
+		return false // HEAD+Range and others are left to the normal path
+	}
+	rangeHeader := req.Header.Get("Range")
+	if rangeHeader == "" {
+		return false
+	}
+	if ifRange := req.Header.Get("If-Range"); ifRange != "" && !ifRangeMatches(ifRange, resp.Header) {
+		return false
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+	// Restore resp.Body so the normal-path fallback (any return false below)
+	// can still read it from the start, exactly as if writeRange had never
+	// been called.
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+
+	start, end, result := parseByteRange(rangeHeader, int64(len(body)))
+	switch result {
+	case rangeNotApplicable:
+		return false
+	case rangeUnsatisfiable:
+		w.Header().Del("Content-Length")
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", len(body)))
+		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+		return true
+	default: // rangeSatisfiable
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(body)))
+		w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write(body[start : end+1])
+		return true
+	}
+}
+
+// rangeResult reports how parseByteRange's input relates to the resource.
+type rangeResult int
+
+const (
+	// rangeNotApplicable means the Range header should be ignored and the
+	// whole entity served as a normal 200 - a header this project does not
+	// attempt to satisfy from the cache (multiple ranges, a unit other than
+	// "bytes", or unparsable syntax), not an invalid one.
+	rangeNotApplicable rangeResult = iota
+	rangeSatisfiable
+	// rangeUnsatisfiable means the header was a well-formed single
+	// byte-range-spec, but names a span the resource cannot satisfy (RFC
+	// 9110 section 14.2's 416 case).
+	rangeUnsatisfiable
+)
+
+// parseByteRange parses a single-range "bytes=" Range header value (RFC 9110
+// section 14.1.2: byte-range-spec or suffix-byte-range-spec) against a
+// resource of the given size, returning inclusive start/end offsets. A
+// multi-range request (comma-separated) is deliberately treated as
+// rangeNotApplicable rather than satisfying only the first range or rejecting
+// the request outright: go-polipo does not support the multipart/byteranges
+// response a real multi-range reply would require.
+func parseByteRange(header string, size int64) (start, end int64, result rangeResult) {
+	const prefix = "bytes="
+	if !strings.HasPrefix(header, prefix) {
+		return 0, 0, rangeNotApplicable
+	}
+	spec := strings.TrimSpace(strings.TrimPrefix(header, prefix))
+	if strings.Contains(spec, ",") {
+		return 0, 0, rangeNotApplicable
+	}
+
+	dash := strings.IndexByte(spec, '-')
+	if dash < 0 {
+		return 0, 0, rangeNotApplicable
+	}
+	firstStr, lastStr := spec[:dash], spec[dash+1:]
+
+	if firstStr == "" {
+		// suffix-byte-range-spec: the final n bytes of the resource.
+		n, err := strconv.ParseInt(lastStr, 10, 64)
+		if err != nil || n < 0 {
+			return 0, 0, rangeNotApplicable
+		}
+		if n == 0 || size == 0 {
+			return 0, 0, rangeUnsatisfiable
+		}
+		if n > size {
+			n = size // RFC 9110 14.1.2: a suffix longer than the resource means all of it
+		}
+		return size - n, size - 1, rangeSatisfiable
+	}
+
+	first, err := strconv.ParseInt(firstStr, 10, 64)
+	if err != nil || first < 0 {
+		return 0, 0, rangeNotApplicable
+	}
+	if first >= size {
+		return 0, 0, rangeUnsatisfiable
+	}
+	if lastStr == "" {
+		return first, size - 1, rangeSatisfiable
+	}
+	last, err := strconv.ParseInt(lastStr, 10, 64)
+	if err != nil || last < first {
+		return 0, 0, rangeNotApplicable
+	}
+	if last >= size {
+		last = size - 1
+	}
+	return first, last, rangeSatisfiable
+}
+
+// ifRangeMatches reports whether an If-Range validator matches header's
+// current ETag/Last-Modified, per RFC 9110 section 13.1.5: a strong
+// comparison only - a weak ETag ("W/...") on either side never matches, and
+// an If-Range date is compared against Last-Modified for exact equality.
+func ifRangeMatches(ifRange string, header http.Header) bool {
+	ifRange = strings.TrimSpace(ifRange)
+	switch {
+	case strings.HasPrefix(ifRange, "W/"):
+		return false // weak validators never satisfy If-Range
+	case strings.HasPrefix(ifRange, `"`):
+		etag := header.Get("ETag")
+		return etag != "" && !strings.HasPrefix(etag, "W/") && etag == ifRange
+	default:
+		t, err := http.ParseTime(ifRange)
+		if err != nil {
+			return false
+		}
+		lm, err := http.ParseTime(header.Get("Last-Modified"))
+		if err != nil {
+			return false
+		}
+		return t.Equal(lm)
 	}
 }
