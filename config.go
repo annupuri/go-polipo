@@ -60,6 +60,24 @@ type Config struct {
 	// An empty DiskCacheRoot has the same effect.
 	NoDiskCache bool
 
+	// MemoryCacheEntries caps the number of responses kept in the in-process
+	// memory cache (an LRU, evicting the least recently used entry once full).
+	// 0 disables the memory cache entirely. It is independent of
+	// NoDiskCache/DiskCacheRoot: the memory cache works the same whether or
+	// not the disk cache is enabled, and a memory hit never touches disk.
+	// Unlike the disk cache, it does not persist across restarts - closer to
+	// Polipo's own always-on in-memory object cache than to its on-disk one.
+	MemoryCacheEntries int
+
+	// MemoryCacheMaxEntrySize caps how large a single response body may be
+	// before it is kept out of the memory cache (it may still go to disk,
+	// subject to MaxDiskCacheEntrySize independently). This exists because the
+	// memory cache is sized in *entries*, not bytes: without a per-entry
+	// ceiling, a handful of large responses could crowd out many small, more
+	// reusable ones, or push memory use well past what MemoryCacheEntries
+	// alone suggests. -1 means no per-entry limit.
+	MemoryCacheMaxEntrySize int64
+
 	// DontCacheCookies, true by default, keeps responses carrying a Set-Cookie
 	// header out of the disk cache. Polipo cached them; a cached Set-Cookie is
 	// replayed to every later requester of the same URL.
@@ -138,37 +156,39 @@ var defaultTunnelAllowedPorts = PortSet{
 // NewDefaultConfig creates a Config with Polipo's default values.
 func NewDefaultConfig() *Config {
 	return &Config{
-		ProxyAddress:          "127.0.0.1",
-		ProxyPort:             8123,
-		DiskCacheRoot:         "/var/cache/polipo/",
-		ForbiddenFile:         "",
-		UncachableFile:        "",
-		ForbiddenTunnelsFile:  "",
-		SocksParentProxy:      "",
-		SocksProxyType:        "socks5",
-		ParentProxy:           "",
-		AllowedClients:        []string{"127.0.0.1", "::1"},
-		TunnelAllowedPorts:    defaultTunnelAllowedPorts,
-		AllowedPorts:          PortSet{{80, 100}, {1024, 65535}}, // Polipo's default: HTTP ports + all unprivileged ports
-		LogLevel:              0x07,                              // Default log level
-		DisableLocalInterface: false,
-		MaxConcurrentRequests: 100,
-		LogFile:               "",
-		DiskCacheUnlinkTime:   32 * 24 * time.Hour,
-		MaxDiskCacheEntrySize: -1,
-		DiskCacheTruncateTime: 108 * time.Hour, // 4.5 days, matching Polipo
-		DiskCacheTruncateSize: 1024 * 1024,
-		NoDiskCache:           false,
-		DontCacheCookies:      true,
-		AuthCredentials:       "",
-		AuthRealm:             "Polipo",
-		ParentAuthCredentials: "",
-		SocksAuthCredentials:  "",
-		CensoredHeaders:       nil,
-		CensorReferer:         0,
-		ProxyOffline:          false,
-		RelaxTransparency:     0,
-		DontTrustVaryETag:     1,
+		ProxyAddress:            "127.0.0.1",
+		ProxyPort:               8123,
+		DiskCacheRoot:           "/var/cache/polipo/",
+		ForbiddenFile:           "",
+		UncachableFile:          "",
+		ForbiddenTunnelsFile:    "",
+		SocksParentProxy:        "",
+		SocksProxyType:          "socks5",
+		ParentProxy:             "",
+		AllowedClients:          []string{"127.0.0.1", "::1"},
+		TunnelAllowedPorts:      defaultTunnelAllowedPorts,
+		AllowedPorts:            PortSet{{80, 100}, {1024, 65535}}, // Polipo's default: HTTP ports + all unprivileged ports
+		LogLevel:                0x07,                              // Default log level
+		DisableLocalInterface:   false,
+		MaxConcurrentRequests:   100,
+		LogFile:                 "",
+		DiskCacheUnlinkTime:     32 * 24 * time.Hour,
+		MaxDiskCacheEntrySize:   -1,
+		DiskCacheTruncateTime:   108 * time.Hour, // 4.5 days, matching Polipo
+		DiskCacheTruncateSize:   1024 * 1024,
+		NoDiskCache:             false,
+		MemoryCacheEntries:      1024,
+		MemoryCacheMaxEntrySize: 1024 * 1024, // 1MB/entry * 1024 entries = 1GiB worst case
+		DontCacheCookies:        true,
+		AuthCredentials:         "",
+		AuthRealm:               "Polipo",
+		ParentAuthCredentials:   "",
+		SocksAuthCredentials:    "",
+		CensoredHeaders:         nil,
+		CensorReferer:           0,
+		ProxyOffline:            false,
+		RelaxTransparency:       0,
+		DontTrustVaryETag:       1,
 	}
 }
 
@@ -192,6 +212,8 @@ func (c *Config) Entries() []ConfigEntry {
 		{"maxDiskCacheEntrySize", strconv.FormatInt(c.MaxDiskCacheEntrySize, 10)},
 		{"diskCacheTruncateTime", c.DiskCacheTruncateTime.String()},
 		{"diskCacheTruncateSize", strconv.FormatInt(c.DiskCacheTruncateSize, 10)},
+		{"memoryCacheEntries", strconv.Itoa(c.MemoryCacheEntries)},
+		{"memoryCacheMaxEntrySize", strconv.FormatInt(c.MemoryCacheMaxEntrySize, 10)},
 		{"dontCacheCookies", strconv.FormatBool(c.DontCacheCookies)},
 		{"forbiddenFile", c.ForbiddenFile},
 		{"uncachableFile", c.UncachableFile},
@@ -505,6 +527,18 @@ func (c *Config) Set(key, val string) error {
 			return fmt.Errorf("invalid diskCacheTruncateSize '%s': %w", val, err)
 		}
 		c.DiskCacheTruncateSize = size
+	case "memoryCacheEntries":
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid memoryCacheEntries '%s': %w", val, err)
+		}
+		c.MemoryCacheEntries = n
+	case "memoryCacheMaxEntrySize":
+		size, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid memoryCacheMaxEntrySize '%s': %w", val, err)
+		}
+		c.MemoryCacheMaxEntrySize = size
 	default:
 		// Not fatal - Polipo itself only logs and moves on for an unknown
 		// variable (config.c's parseConfigLine) - but silent is wrong: a

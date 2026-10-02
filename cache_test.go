@@ -570,13 +570,20 @@ func TestStoreSkipsOversizedEntries(t *testing.T) {
 	})
 }
 
+// TestDiskCacheDisabled covers both halves of MemoryCacheEntries's
+// independence from the disk cache (see Config.MemoryCacheEntries): turning
+// off disk caching alone still lets the memory cache serve a hit, and only
+// turning off both yields a true miss.
 func TestDiskCacheDisabled(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		tune func(*Config)
+		name    string
+		tune    func(*Config)
+		wantHit bool
 	}{
-		{"noDiskCache", func(c *Config) { c.NoDiskCache = true }},
-		{"emptyRoot", func(c *Config) { c.DiskCacheRoot = "" }},
+		{"noDiskCache", func(c *Config) { c.NoDiskCache = true; c.MemoryCacheEntries = 0 }, false},
+		{"emptyRoot", func(c *Config) { c.DiskCacheRoot = ""; c.MemoryCacheEntries = 0 }, false},
+		{"noDiskCacheMemoryStillServes", func(c *Config) { c.NoDiskCache = true }, true},
+		{"emptyRootMemoryStillServes", func(c *Config) { c.DiskCacheRoot = "" }, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := NewDefaultConfig()
@@ -593,8 +600,9 @@ func TestDiskCacheDisabled(t *testing.T) {
 			if got, _ := io.ReadAll(resp.Body); string(got) != "body" {
 				t.Errorf("body not preserved, got %q", got)
 			}
-			if cm.Lookup(req) != nil {
-				t.Error("Lookup should return nil when the disk cache is disabled")
+			hit := cm.Lookup(req) != nil
+			if hit != tc.wantHit {
+				t.Errorf("Lookup hit = %v, want %v (memoryCacheEntries=%d)", hit, tc.wantHit, cfg.MemoryCacheEntries)
 			}
 		})
 	}
@@ -864,4 +872,230 @@ func TestExpireErrors(t *testing.T) {
 	if _, err := NewCacheManager(cfg2).Expire(); err == nil {
 		t.Error("expected error when diskCacheRoot is a file")
 	}
+}
+
+// TestMemoryCacheServesWithoutDisk proves a hit actually comes from the
+// memory cache, not disk: the on-disk copy is deleted before the Lookup that
+// is expected to still succeed.
+func TestMemoryCacheServesWithoutDisk(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+
+	url := "http://example.com/memhit"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	resp := mkResp("memory body", "Cache-Control", "max-age=3600")
+	if err := cm.Store(req, resp); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	path, err := cm.GetCachePath(url)
+	if err != nil {
+		t.Fatalf("GetCachePath: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("removing disk copy: %v", err)
+	}
+
+	got := cm.Lookup(req)
+	if got == nil {
+		t.Fatal("Lookup returned nil; memory cache did not serve the hit")
+	}
+	defer got.Body.Close()
+	body, _ := io.ReadAll(got.Body)
+	if string(body) != "memory body" {
+		t.Errorf("body = %q, want %q", body, "memory body")
+	}
+}
+
+// TestMemoryCacheIndependentOfNoDiskCache locks in the design decision that
+// MemoryCacheEntries works whether or not the disk cache is enabled.
+func TestMemoryCacheIndependentOfNoDiskCache(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tune func(*Config)
+	}{
+		{"noDiskCache", func(c *Config) { c.NoDiskCache = true }},
+		{"emptyDiskCacheRoot", func(c *Config) { c.DiskCacheRoot = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := NewDefaultConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			tc.tune(cfg)
+			cm := NewCacheManager(cfg)
+
+			url := "http://example.com/x"
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+				t.Fatalf("Store: %v", err)
+			}
+			if !cm.memCache.Contains(url) {
+				t.Fatal("response was not admitted to the memory cache")
+			}
+			if got := cm.Lookup(req); got == nil {
+				t.Error("Lookup returned nil; memory cache should serve regardless of the disk cache setting")
+			} else {
+				got.Body.Close()
+			}
+		})
+	}
+}
+
+// TestMemoryCacheMaxEntrySize checks that memoryCacheMaxEntrySize and
+// maxDiskCacheEntrySize gate their respective destinations independently: a
+// response can be too big for one and still fit the other.
+func TestMemoryCacheMaxEntrySize(t *testing.T) {
+	body := strings.Repeat("x", 100)
+
+	t.Run("too big for memory, fits disk", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cfg.MemoryCacheMaxEntrySize = 10
+		cfg.MaxDiskCacheEntrySize = -1
+		cm := NewCacheManager(cfg)
+
+		url := "http://example.com/toobig-for-mem"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		if err := cm.Store(req, mkResp(body, "Cache-Control", "max-age=3600")); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if cm.memCache.Contains(url) {
+			t.Error("response over memoryCacheMaxEntrySize was admitted to the memory cache")
+		}
+		if !fileExistsForURL(t, cm, url) {
+			t.Error("response should still have been written to disk")
+		}
+	})
+
+	t.Run("fits memory, too big for disk", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cfg.MemoryCacheMaxEntrySize = 1024 * 1024
+		cfg.MaxDiskCacheEntrySize = 10
+		cm := NewCacheManager(cfg)
+
+		url := "http://example.com/toobig-for-disk"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		if err := cm.Store(req, mkResp(body, "Cache-Control", "max-age=3600")); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if !cm.memCache.Contains(url) {
+			t.Error("response within memoryCacheMaxEntrySize was not admitted to the memory cache")
+		}
+		if fileExistsForURL(t, cm, url) {
+			t.Error("response over maxDiskCacheEntrySize should not have been written to disk")
+		}
+	})
+}
+
+// TestMemoryCacheEntriesEviction checks that the memory cache evicts the
+// least recently used entry once MemoryCacheEntries is exceeded.
+func TestMemoryCacheEntriesEviction(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cfg.MemoryCacheEntries = 2
+	cm := NewCacheManager(cfg)
+
+	store := func(path string) {
+		url := "http://example.com/" + path
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+			t.Fatalf("Store(%s): %v", path, err)
+		}
+	}
+
+	store("a")
+	store("b")
+	// Touch "a" so "b" becomes the least recently used.
+	cm.Lookup(httptest.NewRequest(http.MethodGet, "http://example.com/a", nil))
+	store("c")
+
+	if cm.memCache.Contains("http://example.com/b") {
+		t.Error("least recently used entry (b) should have been evicted")
+	}
+	if !cm.memCache.Contains("http://example.com/a") {
+		t.Error("recently used entry (a) should still be cached")
+	}
+	if !cm.memCache.Contains("http://example.com/c") {
+		t.Error("newly stored entry (c) should be cached")
+	}
+	if cm.memCache.Len() != 2 {
+		t.Errorf("memCache.Len() = %d, want 2", cm.memCache.Len())
+	}
+}
+
+// TestMemoryCacheRespectsFreshnessAndVary checks that a memory-cache hit goes
+// through the same isExpired/responseVaries logic as a disk hit, rather than
+// a separate copy of the rules that could drift from it.
+func TestMemoryCacheRespectsFreshnessAndVary(t *testing.T) {
+	t.Run("stale entry is a Lookup miss but a LookupStale hit", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+
+		url := "http://example.com/stale"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		resp := mkResp("body", "Cache-Control", "max-age=0", "Date", time.Now().UTC().Format(http.TimeFormat))
+		if err := cm.Store(req, resp); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if !cm.memCache.Contains(url) {
+			t.Fatal("entry was not admitted to the memory cache")
+		}
+		if got := cm.Lookup(req); got != nil {
+			got.Body.Close()
+			t.Error("Lookup should report a stale memory entry as a miss")
+		}
+		stale, isStale := cm.LookupStale(req)
+		if stale == nil || !isStale {
+			t.Error("LookupStale should return the stale memory entry with stale=true")
+		}
+		if stale != nil {
+			stale.Body.Close()
+		}
+	})
+
+	t.Run("Vary entry is never served fresh from memory", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+
+		url := "http://example.com/vary"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		resp := mkResp("body", "Cache-Control", "max-age=3600", "Vary", "Accept-Encoding")
+		if err := cm.Store(req, resp); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		if got := cm.Lookup(req); got != nil {
+			got.Body.Close()
+			t.Error("a Vary'd response must never be served as a fresh hit, even from memory")
+		}
+	})
+}
+
+// TestMemoryCacheDisabled checks that MemoryCacheEntries=0 turns the memory
+// cache off entirely without affecting the disk cache.
+func TestMemoryCacheDisabled(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cfg.MemoryCacheEntries = 0
+	cm := NewCacheManager(cfg)
+
+	if cm.memCache != nil {
+		t.Fatal("memCache should be nil when MemoryCacheEntries is 0")
+	}
+
+	url := "http://example.com/diskonly"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if !fileExistsForURL(t, cm, url) {
+		t.Error("disk cache should still work with the memory cache disabled")
+	}
+	got := cm.Lookup(req)
+	if got == nil {
+		t.Fatal("Lookup should still hit the disk cache")
+	}
+	got.Body.Close()
 }

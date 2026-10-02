@@ -27,6 +27,12 @@ func TestNewDefaultConfig(t *testing.T) {
 	if c.NoDiskCache != false {
 		t.Errorf("expected NoDiskCache false, got %t", c.NoDiskCache)
 	}
+	if c.MemoryCacheEntries != 1024 {
+		t.Errorf("expected MemoryCacheEntries 1024, got %d", c.MemoryCacheEntries)
+	}
+	if c.MemoryCacheMaxEntrySize != 1024*1024 {
+		t.Errorf("expected MemoryCacheMaxEntrySize 1MB, got %d", c.MemoryCacheMaxEntrySize)
+	}
 	if c.DontCacheCookies != true {
 		t.Errorf("expected DontCacheCookies true, got %t", c.DontCacheCookies)
 	}
@@ -223,6 +229,8 @@ func TestSetAllKeys(t *testing.T) {
 	ok("maxDiskCacheEntrySize", "5000000")
 	ok("diskCacheTruncateTime", "2d")
 	ok("diskCacheTruncateSize", "2097152")
+	ok("memoryCacheEntries", "512")
+	ok("memoryCacheMaxEntrySize", "2097152")
 	ok("noDiskCache", "true")
 	ok("dontCacheCookies", "false")
 	ok("proxyOffline", "true")
@@ -259,6 +267,12 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.DiskCacheTruncateSize != 2097152 {
 		t.Errorf("diskCacheTruncateSize = %d, want 2097152", c.DiskCacheTruncateSize)
+	}
+	if c.MemoryCacheEntries != 512 {
+		t.Errorf("memoryCacheEntries = %d, want 512", c.MemoryCacheEntries)
+	}
+	if c.MemoryCacheMaxEntrySize != 2097152 {
+		t.Errorf("memoryCacheMaxEntrySize = %d, want 2097152", c.MemoryCacheMaxEntrySize)
 	}
 	if !c.NoDiskCache {
 		t.Error(`noDiskCache "true" should be truthy`)
@@ -313,6 +327,8 @@ func TestSetAllKeys(t *testing.T) {
 	fails("maxDiskCacheEntrySize", "big")
 	fails("diskCacheTruncateTime", "5w")
 	fails("diskCacheTruncateSize", "big")
+	fails("memoryCacheEntries", "lots")
+	fails("memoryCacheMaxEntrySize", "big")
 	fails("socksProxyType", "socks4a") // Polipo accepted it; go-polipo only does SOCKS5
 	fails("socksProxyType", "socks4")
 	fails("socksProxyType", "http")

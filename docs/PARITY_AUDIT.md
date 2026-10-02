@@ -122,7 +122,7 @@ at the end groups findings by how much they matter before a public release.
 
 | Feature | Status | Note |
 | :--- | :--: | :--- |
-| In-memory object cache (LRU, hash table, `chunkHighMark`/`objectHighMark`/…) | ❌ | **No in-memory cache at all.** `CacheManager` reads every hit from disk and writes every store to disk. The `chunk*` / `object*` / `idleTime` / `maxObjectsWhenIdle` knobs have no counterpart. |
+| In-memory object cache (LRU, hash table, `chunkHighMark`/`objectHighMark`/…) | ✅ | **Done (2026-10-02):** `CacheManager` keeps an LRU of recently-served responses (`memCache`, `github.com/hashicorp/golang-lru/v2` - go-polipo's first actual use of generics) in front of the disk cache. Two new variables: `memoryCacheEntries` (capacity, default 1024) and `memoryCacheMaxEntrySize` (per-entry admission ceiling, default 1MB). `lookupEntry` checks memory first and falls back to disk; a hit is run through the exact same `isExpired`/`responseVaries` logic as a disk hit (same function, not a parallel copy), so freshness and Vary handling cannot drift between the two paths. `Store` writes to whichever cache(s) currently want the response off a single shared body read - `maxDiskCacheEntrySize` and `memoryCacheMaxEntrySize` are independent ceilings, so a response can be too big for one destination and still fit the other. Deliberately not what Polipo did: `chunkHighMark`/`objectHighMark` cap *total bytes* across the process and evict LRU regardless of per-object size; go-polipo caps by *entry count* instead (the library's native model, and simpler - no byte accounting), with `memoryCacheMaxEntrySize` as a separate, independent guard against a handful of large responses crowding out many small, more reusable ones - see the shortlist entry for why this was chosen over a true byte-budget cache. Independent of `noDiskCache`/an empty `diskCacheRoot` by design (a deliberate deviation from Polipo, where the on-disk and in-memory representations of an `Object` are tied together) - the memory cache works the same with the disk cache off. Not persisted across restarts, closer to Polipo's always-on in-memory cache than to its on-disk one. Not touched by `-x`/`Expire`/`/polipo/flush`: those reclaim disk space, which a memory-resident entry does not consume, and a stale entry already can never be served fresh regardless of what is sitting in the LRU (checked live on every hit). Not attempted: promoting a disk hit into the memory cache - only a fresh `Store` populates it, so after a restart the memory cache only ever holds what this running process has itself fetched since. |
 | Partial instillation (store the byte ranges you have, fill gaps later) | ❌ | `Store` caches only whole `200 OK` bodies; `206 Partial Content` is never cached. |
 | Range-request assembly / serving ranges from cache | ❌ | Client `Range` requests pass straight through; the cache neither satisfies nor records them. |
 | Poor Man's Multiplexing (`pmmSize`, `pmmFirstSize`) | ❌ | No segmented fetching of large objects. |
@@ -340,20 +340,40 @@ at the end groups findings by how much they matter before a public release.
   `-x` from (see §15). Gated by `disableLocalInterface` and `authCredentials`
   like every other local page, and POST-only like `/polipo/reload` to avoid
   a GET-triggered purge from a prefetcher or crawler.
-- In-memory object cache (§10) — originally filed under tier C per
+- ~~In-memory object cache (§10) — originally filed under tier C per
   ARCHITECTURE.md's rationale ("Go's GC/standard library make Polipo's
   hand-rolled allocator - `atom.c`/`chunk.c`/`object.c` - unnecessary"), but
   that reasoning assumes an SSD-backed disk cache. The user pointed out
   (2026-09-14) that machines still running on HDDs would see a real benefit,
   so this is split out into its own item rather than staying a settled
-  tradeoff. Sketch of an approach the user proposed: (1) use an existing LRU
-  library such as `github.com/hashicorp/golang-lru` instead of hand-rolling
-  eviction, (2) have `CacheManager.Store` update/invalidate the matching
-  in-memory entry whenever it writes the disk copy, to avoid the
-  disk/memory inconsistency flagged as concern (2) in that discussion, (3)
-  lock contention is expected to be a non-issue in practice as long as
-  deadlocks are avoided. Not started - disk-only remains the confirmed
-  choice for now.
+  tradeoff.~~ **Done (2026-10-02):** built close to the user's own sketch -
+  `github.com/hashicorp/golang-lru/v2` (generic; go-polipo's first actual use
+  of generics) for the LRU instead of hand-rolling eviction, matching
+  suggestion (1); `CacheManager.Store` writes the disk and memory copies off
+  one shared body read, so there is nothing to keep in sync after the fact -
+  sidestepping suggestion (2)'s "update/invalidate memory whenever Store
+  writes disk" concern entirely, rather than solving it as a separate step;
+  lock contention (3) was a non-issue in practice, as expected - the memory
+  cache is self-synchronized by the library and never takes `CacheManager`'s
+  own disk-I/O mutex at all. One question the sketch had left open surfaced
+  during implementation: how to size the cache. Decided with the user as
+  count-based (`memoryCacheEntries`, matching `golang-lru`'s own native
+  capacity model - it has no byte-budget mode) plus an independent per-entry
+  size ceiling (`memoryCacheMaxEntrySize`, default 1MB) as a guard against a
+  handful of large responses crowding out many small, more reusable ones;
+  the user explicitly chose this over a true byte-budget cache (which
+  `golang-lru` does not provide and would need hand-rolled accounting to
+  add) for a simpler v1, accepting the reduced precision - worst-case memory
+  use is bounded (`memoryCacheMaxEntrySize` × `memoryCacheEntries`) but not
+  exact. Defaults (1MB × 1024 entries = 1GiB worst case) are the user's own
+  revision upward from an initial 256MB suggestion. Also decided along the
+  way, not a side-effect: the memory cache is independent of
+  `noDiskCache`/an empty `diskCacheRoot`, unlike Polipo's on-disk and
+  in-memory representations of an `Object`, which are tied together. Not
+  attempted: promoting a disk hit into the memory cache - only a fresh
+  `Store` populates it, so a cold-started process only ever holds in memory
+  what it has itself fetched since starting; a reasonable follow-up if a
+  cold start's unwarmed memory cache turns out to matter in practice.
 - Partial instantiation / range assembly (§10) - originally filed under
   tier C as settled-by-design, but resurfaced (2026-09-14) while explaining
   why `diskCacheTruncateTime`/`diskCacheTruncateSize` deletes rather than

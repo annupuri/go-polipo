@@ -17,20 +17,76 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 var b64fss = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-").WithPadding(base64.StdPadding)
 
 // CacheManager manages memory and disk caches for go-polipo.
 type CacheManager struct {
-	config *Config
-	mu     sync.RWMutex
+	config   *Config
+	mu       sync.RWMutex // guards disk cache file I/O only; memCache is self-synchronized
+	memCache *lru.Cache[string, *memEntry]
 }
 
 // NewCacheManager creates a CacheManager instance.
 func NewCacheManager(config *Config) *CacheManager {
-	return &CacheManager{
-		config: config,
+	cm := &CacheManager{config: config}
+	if config.MemoryCacheEntries > 0 {
+		// New only errors for a non-positive size, already excluded above.
+		cm.memCache, _ = lru.New[string, *memEntry](config.MemoryCacheEntries)
+	}
+	return cm
+}
+
+// memEntry is a single in-memory cache entry: a self-contained snapshot of a
+// cacheable response. Unlike the disk format it has no body-offset gap and no
+// X-Polipo-* metadata - none of that is needed here. There is no hash
+// collision to guard against (the map key is the request URL itself, not a
+// hash of it), and "last access" bookkeeping is unnecessary: the LRU tracks
+// recency internally, and the entry never outlives the process anyway.
+type memEntry struct {
+	status     string
+	statusCode int
+	proto      string
+	protoMajor int
+	protoMinor int
+	header     http.Header
+	body       []byte
+}
+
+// newMemEntry snapshots resp (whose body has already been read into
+// bodyBytes) for storage in the memory cache.
+func newMemEntry(resp *http.Response, bodyBytes []byte) *memEntry {
+	return &memEntry{
+		status:     resp.Status,
+		statusCode: resp.StatusCode,
+		proto:      resp.Proto,
+		protoMajor: resp.ProtoMajor,
+		protoMinor: resp.ProtoMinor,
+		header:     resp.Header.Clone(),
+		body:       bodyBytes,
+	}
+}
+
+// response reconstructs an *http.Response from e. The header is cloned on
+// every call: callers (censoredHeaders stripping, the X-Polipo header
+// cleanup in lookupEntry, and so on) routinely mutate the header map of
+// whatever Lookup/LookupStale hands back, and the same *memEntry is reused
+// for every future hit until it is evicted. The body bytes themselves are
+// never mutated by a reader, so they are shared as-is, with no copy.
+func (e *memEntry) response(req *http.Request) *http.Response {
+	return &http.Response{
+		Status:        e.status,
+		StatusCode:    e.statusCode,
+		Proto:         e.proto,
+		ProtoMajor:    e.protoMajor,
+		ProtoMinor:    e.protoMinor,
+		Header:        e.header.Clone(),
+		Body:          io.NopCloser(bytes.NewReader(e.body)),
+		ContentLength: int64(len(e.body)),
+		Request:       req,
 	}
 }
 
@@ -160,11 +216,9 @@ func (cm *CacheManager) LookupStale(req *http.Request) (resp *http.Response, sta
 	return cm.lookupEntry(req)
 }
 
-// lookupEntry does the actual disk read shared by Lookup and LookupStale.
+// lookupEntry does the actual cache read shared by Lookup and LookupStale: the
+// memory cache first, then disk.
 func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, stale bool) {
-	if cm.diskCacheDisabled() {
-		return nil, false
-	}
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
 		return nil, false
 	}
@@ -175,7 +229,22 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 		return nil, false
 	}
 
-	path, err := cm.GetCachePath(req.URL.String())
+	key := req.URL.String()
+
+	// Checked first, and independently of diskCacheDisabled: MemoryCacheEntries
+	// is meant to work the same whether or not the disk cache is enabled.
+	if cm.memCache != nil {
+		if entry, ok := cm.memCache.Get(key); ok {
+			resp := entry.response(req)
+			return resp, cm.isExpired(resp) || responseVaries(resp)
+		}
+	}
+
+	if cm.diskCacheDisabled() {
+		return nil, false
+	}
+
+	path, err := cm.GetCachePath(key)
 	if err != nil {
 		return nil, false
 	}
@@ -331,9 +400,6 @@ func (cm *CacheManager) isExpired(resp *http.Response) bool {
 // stream the response afterwards. Non-cacheable responses are left untouched.
 // An error is returned only when the response body cannot be read.
 func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
-	if cm.diskCacheDisabled() {
-		return nil
-	}
 	if req.Method != http.MethodGet || resp.StatusCode != http.StatusOK {
 		return nil
 	}
@@ -364,17 +430,29 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 		return nil
 	}
 
-	// maxDiskCacheEntrySize: reject known-oversized responses before ever
-	// reading the body into memory - matching Polipo's makeDiskEntry, which
-	// makes this same check against the declared Content-Length (its
-	// object->length) before deciding to store. The response is still
-	// forwarded to the client untouched; only caching is skipped.
-	maxSize := cm.config.MaxDiskCacheEntrySize
-	if maxSize >= 0 && resp.ContentLength >= 0 && resp.ContentLength > maxSize {
+	diskEnabled := !cm.diskCacheDisabled()
+	memEnabled := cm.memCache != nil
+	if !diskEnabled && !memEnabled {
 		return nil
 	}
 
-	// Read the body into memory so it can be both written to disk and replayed.
+	// maxDiskCacheEntrySize / memoryCacheMaxEntrySize: reject known-oversized
+	// responses before ever reading the body into memory - matching Polipo's
+	// makeDiskEntry, which makes this same check against the declared
+	// Content-Length (its object->length) before deciding to store. The
+	// response is still forwarded to the client untouched either way; only
+	// caching is skipped. The two destinations have independent ceilings, so
+	// a response can be too big for one and still fit the other.
+	maxDiskSize := cm.config.MaxDiskCacheEntrySize
+	diskWants := diskEnabled && (maxDiskSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxDiskSize)
+	maxMemSize := cm.config.MemoryCacheMaxEntrySize
+	memWants := memEnabled && (maxMemSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxMemSize)
+	if !diskWants && !memWants {
+		return nil
+	}
+
+	// Read the body into memory so it can be written to disk and/or kept in
+	// the memory cache, and replayed to the client either way.
 	bodyBytes, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if err != nil {
@@ -387,14 +465,34 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	// Fallback for when Content-Length was absent or understated (chunked
 	// transfer, or a lying origin): the fast path above only catches a
 	// declared size, so re-check against what was actually read.
-	if maxSize >= 0 && int64(len(bodyBytes)) > maxSize {
-		return nil
+	size := int64(len(bodyBytes))
+	if diskWants && maxDiskSize >= 0 && size > maxDiskSize {
+		diskWants = false
+	}
+	if memWants && maxMemSize >= 0 && size > maxMemSize {
+		memWants = false
 	}
 
+	if diskWants {
+		cm.storeDisk(req, resp, bodyBytes)
+	}
+	if memWants {
+		cm.memCache.Add(req.URL.String(), newMemEntry(resp, bodyBytes))
+	}
+
+	return nil
+}
+
+// storeDisk writes resp (whose body has already been read into bodyBytes) to
+// the disk cache. Failures are logged rather than returned: a disk I/O
+// problem should not turn into a client-visible error for what is otherwise a
+// normal response (the caller already has its own replayable copy of the body
+// regardless of whether this succeeds).
+func (cm *CacheManager) storeDisk(req *http.Request, resp *http.Response, bodyBytes []byte) {
 	path, err := cm.GetCachePath(req.URL.String())
 	if err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
-		return nil
+		return
 	}
 
 	cm.mu.Lock()
@@ -404,13 +502,13 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't create cache directory %s: %v", req.URL, dir, err)
-		return nil
+		return
 	}
 
 	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't open cache file %s: %v", req.URL, path, err)
-		return nil
+		return
 	}
 	defer file.Close()
 
@@ -429,8 +527,6 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't write cache file %s: %v", req.URL, path, err)
 		os.Remove(path) // Delete incomplete cache file
 	}
-
-	return nil
 }
 
 // ExpireStats reports the outcome of an Expire run.
