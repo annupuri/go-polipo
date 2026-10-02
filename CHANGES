@@ -1,55 +1,122 @@
 4 September 2026: go-polipo 2.0.0:
 
-  * Complete rewrite in Go (requires Go 1.26.8 or later), forked from
+  * Complete rewrite in Go (requires Go 1.27.1 or later), forked from
     Polipo 1.1.1.  The single-threaded select/poll event loop is replaced
     by goroutines and the net/http server; DNS, socket I/O, memory
     management and the atom table are delegated to the Go runtime and
-    standard library.  See ARCHITECTURE.md for the C-to-Go file mapping.
+    standard library.  See docs/ARCHITECTURE.md for the C-to-Go file
+    mapping, and docs/PARITY_AUDIT.md for a full accounting of what
+    carried over, what changed, and what was deliberately left out.
   * The on-disk cache format is unchanged: the directory layout and the
     MD5 + custom-base64 file names are compatible with Polipo 1.x, so an
     existing cache can be reused.
-  * "polipo -x" now performs disk cache expiry: it removes corrupt files,
-    entries that are stale by HTTP freshness rules, and entries not
-    accessed within diskCacheUnlinkTime (new configuration variable,
-    default 32 days), then prunes emptied directories.
-  * Freshness now follows RFC 9111 more closely.  s-maxage is honoured and
-    takes precedence over max-age for this (shared) cache, and an invalid
-    Expires value such as "0" is treated as already expired.  A 200 with
-    no Expires, max-age or s-maxage is given a heuristic lifetime --
-    min(10% of the time since Last-Modified, 24h), or a flat 24h with no
-    Last-Modified -- instead of being served as fresh until
-    diskCacheUnlinkTime.  This matches Polipo's default maxAgeFraction and
-    maxAge, which were config variables in Polipo but are hard-coded here
-    on purpose (see the comment in cache.go): they act as RFC constants,
-    and a permissive value would re-open the over-serving.  Polipo's
-    maxExpiresAge and maxNoModifiedAge are not carried over.
-  * The disk cache write policy is stricter than Polipo's.  Responses that
-    carry a Set-Cookie header are no longer written to disk by default;
-    set the new dontCacheCookies variable to false for the old behaviour.
-    Responses to requests carrying an Authorization header
-    are not cached unless the response is explicitly shareable
+  * An in-memory LRU cache (memoryCacheEntries, default 1024 entries;
+    memoryCacheMaxEntrySize, default 1MB) now sits in front of the disk
+    cache, independent of noDiskCache/diskCacheRoot -- it works the same
+    with the disk cache off.  A hit goes through the exact same
+    freshness/Vary rules as a disk hit.  It is not persisted across
+    restarts and is not touched by -x or /polipo/flush, which reclaim
+    disk space that a memory-resident entry doesn't occupy.
+  * A single-range Range request (bytes=start-end, bytes=start-, or a
+    suffix bytes=-n) against a cached entry is served as a 206 Partial
+    Content (or 416 if it doesn't fit), honouring If-Range (RFC 9110
+    section 13.1.5: a strong-comparison-only match, falling back to the
+    whole entity otherwise).  This only ever slices an entry the cache
+    already has in full: there is no partial instantiation, so a range
+    reaching past what is cached, or a multi-range request, falls through
+    to the origin unchanged and uncached, like any other cache miss.
+  * "polipo -x" performs disk cache expiry: it removes corrupt files,
+    entries that are stale by HTTP freshness rules, entries not accessed
+    within diskCacheUnlinkTime (default 32 days), and large entries that
+    have gone unused past diskCacheTruncateTime/diskCacheTruncateSize
+    (default 4.5 days / 1MB) -- deleted outright rather than truncated in
+    place, since without partial instantiation a truncated entry could
+    not be safely completed on a later request -- then prunes emptied
+    directories.  The same pass is available on a running server without
+    a restart via POST /polipo/flush.
+  * Freshness follows RFC 9111 more closely than Polipo did.  s-maxage is
+    honoured and takes precedence over max-age for this (shared) cache,
+    and an invalid Expires value such as "0" is treated as already
+    expired.  A 200 with no Expires, max-age or s-maxage is given a
+    heuristic lifetime -- min(10% of the time since Last-Modified, 24h),
+    or a flat 24h with no Last-Modified -- instead of being served as
+    fresh until diskCacheUnlinkTime.  This matches Polipo's default
+    maxAgeFraction and maxAge, which were config variables in Polipo but
+    are hard-coded here on purpose (see the comment in cache.go): they
+    act as RFC constants, and a permissive value would re-open the
+    over-serving.  Polipo's maxExpiresAge and maxNoModifiedAge are not
+    carried over.
+  * A stale entry with a validator (ETag and/or Last-Modified) is
+    revalidated with a conditional request to the origin instead of being
+    re-fetched in full; a 304 is merged into the stored entry (RFC 9111
+    section 4.3.4) and re-stored, so the refreshed freshness lifetime
+    takes effect immediately.  This is origin-facing only -- go-polipo
+    does not itself satisfy a client's own conditional request from the
+    cache (RFC 9111 section 4.3.5).  A client-sent If-None-Match or
+    If-Modified-Since rides along to the origin untouched, and a 304
+    answering it is passed back to the client as-is rather than merged
+    into the cache.
+  * A response with a Vary header is still cached (matching Polipo), but
+    is never served as a fresh hit: the cache key is the URL alone, so it
+    cannot select between variants, and only a round-trip to the origin
+    (a conditional revalidation, or a full re-fetch lacking a usable
+    validator) settles which variant is correct.  dontTrustVaryETag
+    (default "maybe", matching Polipo) controls whether such an entry's
+    ETag is trusted for that revalidation.
+  * The disk cache write policy is stricter than Polipo's in a few ways.
+    Responses that carry a Set-Cookie header are no longer written to
+    disk by default; set the new dontCacheCookies variable to false for
+    the old behaviour.  Responses to requests carrying an Authorization
+    header are not cached unless the response is explicitly shareable
     (Cache-Control: public, s-maxage, or must-revalidate), per RFC 9111
-    section 3.5.  Responses that carry a Vary header are not cached at all
-    (and any such entry in an inherited cache tree is ignored): the cache
-    is keyed on the URL alone and cannot select between variants, so this
-    avoids serving the wrong one.  The disk cache can be disabled entirely
-    with the new noDiskCache variable, or by setting diskCacheRoot to the
-    empty string (which previously misbehaved).
+    section 3.5.  The disk cache can be disabled entirely with the new
+    noDiskCache variable, or by setting diskCacheRoot to the empty string
+    (which previously misbehaved).  maxDiskCacheEntrySize caps how large
+    a response may be before it is written to disk at all (default -1,
+    unlimited, matching Polipo).
   * HTTP forwarding is built on net/http/httputil.ReverseProxy; hop-by-hop
     headers are handled per RFC 7230.  CONNECT tunnelling and the
-    tunnelAllowedPorts filter are retained.
+    tunnelAllowedPorts filter are retained; the default
+    (22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418)
+    matches Polipo's (ssh, HTTP, POP, IMAP, HTTPS, rsync, IMAPS, POP3S,
+    CVS, Jabber, Git).
   * The allowedPorts filter is now enforced on plain-HTTP forwarding, not
     merely parsed: a request whose target port is not in allowedPorts is
     rejected with 403.  The default is Polipo's (80-100 and 1024-65535), so
     privileged service ports such as 25, 110, 119 and 143 can no longer be
-    reached through the proxy.  Both allowedPorts and tunnelAllowedPorts now
-    accept Polipo's "lo-hi" range syntax.  The tunnelAllowedPorts default is
-    Polipo's as well (ssh, HTTP, POP, IMAP, HTTPS, rsync, CVS, Jabber, Git).
+    reached through the proxy this way (CONNECT is filtered by
+    tunnelAllowedPorts instead, as in Polipo -- the two lists are not
+    combined).  Both lists accept Polipo's "lo-hi" range syntax, including
+    an open end ("-100", "1024-").
+  * A per-host forbiddenTunnelsFile blocks CONNECT targets independently
+    of forbiddenFile, matching Polipo's tunnelIsMatched (an exact hostname
+    match, or a regex against the raw host:port).  forbiddenFile's own
+    suffix-matching also applies to CONNECT targets -- broader than
+    Polipo, whose client.c never consults it for CONNECT at all -- and is
+    kept as deliberate defense in depth alongside the new file.  Both
+    forbidden/uncachable lists, plus forbiddenTunnelsFile, can be reloaded
+    on a running server via SIGUSR1/SIGUSR2 (Unix) or POST /polipo/reload
+    (every platform, including Windows, which has neither signal).
+  * censoredHeaders strips a configured list of header names from both
+    the outgoing request and the incoming response.  censorReferer
+    (false/maybe/true) controls whether Referer is forwarded unchanged,
+    dropped only when the request crosses origins, or always dropped.
+  * relaxTransparency (false/maybe/true) and proxyOffline (boolean)
+    control what happens when the origin can't be reached, or shouldn't
+    be contacted at all.  "maybe" falls back to a stale cache entry
+    (Warning: 111 "Revalidation failed") when a round trip fails; "true"
+    serves any cached entry, fresh or stale (Warning: 110 "Object is
+    stale"), without even attempting the network.  proxyOffline never
+    dials the origin for a forwarded request, serving whatever is cached
+    (Warning: 112 "Disconnected operation" if stale) or a 502
+    "Disconnected operation and object not in cache" on a true miss.
+    Both are scoped to GET/HEAD; CONNECT is unaffected, matching Polipo.
   * Parent proxies: HTTP via parentProxy, SOCKS5 via socksParentProxy
-    (golang.org/x/net/proxy).  socksProxyType accepts only "socks5"; a
-    "socks4a" value (which Polipo allowed, and which earlier go-polipo
-    stored but then ignored, dialing SOCKS5 anyway) is now a configuration
-    error.
+    (golang.org/x/net/proxy), each with its own optional credentials
+    (parentAuthCredentials, socksAuthCredentials).  socksProxyType
+    accepts only "socks5"; a "socks4a" value (which Polipo allowed, and
+    which earlier go-polipo stored but then ignored, dialing SOCKS5
+    anyway) is now a configuration error.
   * Client access control (allowedClients) accepts bare IPs, CIDR ranges
     and "all"; the check uses the real TCP peer address and ignores
     forwarding headers.
@@ -63,19 +130,28 @@
     being hop-by-hop rather than forwarded to the origin, does not mark a
     response as request-specific for cache-safety purposes; only
     Authorization does (matching Polipo's own CACHE_AUTHORIZATION flag,
-    which is never set for Proxy-Authorization).
+    which is never set for Proxy-Authorization).  authCredentials,
+    parentAuthCredentials and socksAuthCredentials never show their
+    actual value on -v or /polipo/config, only "(hidden)", matching
+    Polipo's CONFIG_PASSWORD variables.
+  * logLevel is a bitmask of independent message categories, as in
+    Polipo, not an ordered severity threshold; the default (0x07) omits
+    LogForbidden/LogTunnel, matching Polipo's LOGGING_DEFAULT exactly.
   * Incompatible changes from Polipo 1.x:
       - Build system is "go build" / the provided Makefile; the autoconf
         style options and PLATFORM_DEFINES are gone.
-      - Documentation is Markdown (README.md, README.ja.md, INSTALL.md);
+      - Documentation is Markdown (README.md, README.ja.md, docs/*.md);
         the texinfo manual and generated HTML docs are removed.
       - The Squid-style redirector, syslog logging, and the asynchronous
         DNS resolver with its dnsNameServer* / dnsUseGethostbyname
         tuning variables are removed.
-      - The local web interface is reduced to /polipo/ and /polipo/config.
+      - The local web interface is reduced to /polipo/, /polipo/config
+        (read-only), and the two new POST-only endpoints above; there is
+        no cache-index browsing or server-statistics page.
       - Many low-level tuning variables from Polipo 1.x (chunk/object
         high marks, server slot counts, and similar) are no longer
-        recognised; unknown variables are ignored.
+        recognised; unknown variables are ignored (and now logged as a
+        warning, rather than silently dropped).
 
 Polipo 1.1.2 (unreleased):
 
