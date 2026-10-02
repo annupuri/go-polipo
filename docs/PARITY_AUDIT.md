@@ -11,6 +11,9 @@ in PARITY_AUDIT.ja.md)
 **Scope:** what the original exposed to users (config variables, CLI, signals,
 local pages, documented behaviours) vs. what the Go rewrite currently does.
 Runtime internals that Go's standard library subsumes are listed only to say so.
+**Naming:** the built binary is `polipo` either way, so the tables below say
+"v1.1.x" for the original C implementation and "v2.0.x" for this rewrite
+wherever the two are being compared, rather than "Polipo"/"go-polipo".
 
 This document is an inventory for triage. It proposes nothing; the "Shortlist"
 at the end groups findings by how much they matter before a public release.
@@ -35,7 +38,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 2. Listening socket & client access
 
-| Variable | Polipo default | Status | Note |
+| Variable | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `proxyAddress` | `127.0.0.1` | ✅ | |
 | `proxyPort` | `8123` | ✅ | |
@@ -45,7 +48,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 3. Outgoing connections
 
-| Variable | Polipo default | Status | Note |
+| Variable | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `proxyOutgoingAddress` | OS default | ❌ | Cannot bind the upstream socket to a chosen source address (multi-homed hosts). |
 | `useTemporarySourceAddress` | `maybe` | 🔷 | RFC 3041 temp IPv6 source selection — left to the OS. |
@@ -53,7 +56,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 4. URL filtering & redirection
 
-| Variable / feature | Polipo default | Status | Note |
+| Variable / feature | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `forbiddenFile` | `~/.polipo-forbidden` | ✅ | Domain-suffix + POSIX-ish regex → `403`. (`forbidden.go`) |
 | `uncachableFile` | `~/.polipo-uncachable` | ✅ | Same matcher; matched URLs are forwarded but not cached. |
@@ -65,7 +68,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 5. Parent proxies
 
-| Variable | Polipo default | Status | Note |
+| Variable | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `parentProxy` | (unset) | ✅ | HTTP parent via `http.Transport.Proxy`. |
 | `parentAuthCredentials` | (unset) | ✅ | **Implemented (resolved 2026-09-13).** A `"user:password"` string is base64-encoded as-is and sent as `Proxy-Authorization: Basic ...` on every request forwarded through `parentProxy`, matching Polipo's `buildServerAuthHeaders` (`auth.c`) exactly - confirmed from the vendored C history, not guessed. Added via a wrapping `http.RoundTripper` rather than `ReverseProxy`'s `Director`, since `Director`-set headers are discarded: `ReverseProxy` strips hop-by-hop headers (`Proxy-Authorization` included) immediately after `Director` returns. |
@@ -75,7 +78,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 6. Tunnelling (CONNECT)
 
-| Variable / feature | Polipo default | Status | Note |
+| Variable / feature | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `tunnelAllowedPorts` | SSH/HTTP/HTTPS/rsync/IMAP/POP/Jabber/CVS/Git | ✅ | Enforced in `handleConnect`. **Default matches Polipo (resolved 2026-10-02):** `22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418`. It used to be `443, 563` only — narrower than Polipo, so e.g. a CONNECT to port 80 was refused. |
 | Bidirectional half-close tunnelling | — | ✅ | `tunnel()` waits for both directions; handles HTTP/2-over-CONNECT. |
@@ -83,7 +86,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 7. HTTP header handling & privacy
 
-| Variable / feature | Polipo default | Status | Note |
+| Variable / feature | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `censoredHeaders` | (empty) | ✅ | **Implemented (resolved 2026-09-13).** A list of header names, stripped from both the outgoing request (`Director`) and the incoming response (`cacheResponse`, before it is cached or returned) — the same list checked in both directions, matching Polipo's single header-copy filter (`http_parse.c`) rather than two separate lists. Applied once per response, at fetch time, so a later cache hit is already clean; matches Polipo's parse-time-once model. |
 | `censorReferer` | `false` | ⚠️ | **Implemented (resolved 2026-09-13).** Polipo's three levels, confirmed from the vendored C history (`http_parse.c`) rather than guessed: `false` (default) forwards `Referer` unchanged; `maybe` drops it only when it names a different host than the request's own target; `true` drops it unconditionally. The cross-origin check goes through `net/url` rather than replicating Polipo's `urlSameHost` — an ASCII prefix compare that only recognises a literal `http://` scheme and so never treats *any* `https://` referrer as same-host — a deliberate, documented improvement over the letter of the C source. |
@@ -96,7 +99,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 8. Cache — freshness & validation
 
-| Variable / feature | Polipo default | Status | Note |
+| Variable / feature | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `Expires` / `Cache-Control: max-age` | — | ✅ | Honoured in `isExpired`. `s-maxage` now honoured too and takes precedence for this (shared) cache; an invalid `Expires` (e.g. `0`) counts as already expired (RFC 9111 §5.3). |
 | Request `Cache-Control: no-cache`/`no-store` | — | ✅ | Skips lookup. |
@@ -110,7 +113,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 9. Cache — Vary & content negotiation
 
-| Variable / feature | Polipo default | Status | Note |
+| Variable / feature | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `Vary` handling | — | ✅ | **Polipo-accurate as of 2026-09-14** (superseding the 2026-09-11 minimal fix below). Cache key is still the URL alone (`md5(url)`), so there is still no variant *matching* - but that turns out not to be how Polipo itself handles `Vary` either (guessed, then corrected against the vendored C history: `http_parse.c`, `object.c`, `client.c`). Polipo has no per-variant storage at all; a `Vary`'d response is simply never served as a fresh hit - `objectMustRevalidate` forces a round-trip to the origin on every access, which is what actually resolves the variant, via a conditional GET (reusing the stored body on `304`) or, lacking a usable validator, a full re-fetch. go-polipo's `lookupEntry` now does the same: any response with a non-empty `Vary` is written to disk normally, but always reported stale regardless of its computed HTTP freshness. *2026-09-11 history:* the minimal fix at the time was simpler and more conservative - skip storing/serving `Vary`'d responses outright - because go-polipo had no conditional-revalidation machinery yet to force a safe round-trip through. That machinery landed 2026-09-13, which is what unlocked this follow-up. |
 | `mindlesslyCacheVary` | `false` | ❌ | Not added: it is the *opt out* of the behaviour above (serve a `Vary`'d hit without revalidating, accepting the wrong-variant risk `dontTrustVaryETag` and forced revalidation exist to avoid). Straightforward to add later - `lookupEntry` would skip the forced-stale override - but out of scope here since it re-opens the exact risk this item closes. |
@@ -130,7 +133,7 @@ at the end groups findings by how much they matter before a public release.
 
 ## 11. On-disk cache
 
-| Variable | Polipo default | Status | Note |
+| Variable | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `diskCacheRoot` | `/var/cache/polipo/` | ✅ | Same layout & MD5+base64 filenames; a Polipo cache tree is reusable. Empty value now disables the cache (disk-cache hardening; previously normalised to `/`). |
 | `noDiskCache` | — (go-polipo only) | ✅ | New; disables lookups and writes. |
@@ -167,7 +170,7 @@ at the end groups findings by how much they matter before a public release.
 | :--- | :--: | :--- |
 | `logLevel` | ✅ | **Done (2026-09-14):** enforced. `logLevel` is a bitmask of independent message categories (`log.h`'s `L_ERROR`/`L_WARN`/`L_INFO`/`L_FORBIDDEN`/`L_TUNNEL`/...), not an ordered severity threshold - `logging.go`'s `logf` gates each existing call site on the one category it belongs to, same as Polipo's own `do_log` call sites (`if (type & LOGGING_MAX & logLevel) ...`). Default `0x07` (`LogError\|LogWarn\|LogInfo`) matches Polipo's `LOGGING_DEFAULT` exactly. Behavioural note: this default does *not* include `LogForbidden`/`LogTunnel`, so the "Denied: ..." access-denial lines added throughout this audit are opt-in from here on, not unconditional - matching Polipo, but a real change from how go-polipo behaved a moment earlier in this same audit. `LogUncacheable`/`LogSuperseded`/`LogVary` are defined for bitmask parity but have no go-polipo call site yet (Polipo itself barely uses `L_FORBIDDEN` either). |
 | `logFile` | ✅ | Redirects `log` output; append mode. |
-| `logFilePermissions` | ⚠️ | Hard-coded `0644` (Polipo default is `0640`). |
+| `logFilePermissions` | ⚠️ | Hard-coded `0644` (v1.1.x default is `0640`). |
 | `logSyslog`, `logFacility` | ❌ | No syslog sink. |
 | `scrubLogs` | ❌ | No log scrubbing of private data. |
 
@@ -397,14 +400,43 @@ at the end groups findings by how much they matter before a public release.
   without a full re-fetch - to be reconsidered later only if it turns out to
   matter in practice. See §10's Range-request assembly row for what this
   covers (single-range only, `If-Range` honoured, all three cache-serving
-  paths). **Still not started:** partial instantiation itself (storing an
-  incomplete download with a marker of how far it goes) and, as a direct
-  consequence, serving a `Range` that reaches past what is cached, or
-  truncating an oversized entry in place instead of deleting it outright
-  (§11's `diskCacheTruncateTime`/`diskCacheTruncateSize` item - the original
-  motivation for filing this item at all). PMM (splitting a *live* fetch
-  across multiple upstream connections) remains a related but separate
-  mechanism, not needed for either half of this item.
+  paths).
+
+  **Partial instantiation itself: decided against (2026-10-02), not just
+  deferred.** Before committing to a design, the user asked what it would
+  actually buy them, having noticed the motivating case (repeated/
+  overlapping Range requests against the same large file - video seeking)
+  is personal and usage-dependent. Working through a concrete design -
+  prefix-only storage (no scattered-range manifest), a new on-disk marker
+  for the real total length when it is known from the origin, serving a
+  request that stays within the cached prefix the same way the existing
+  `writeRange` does, and - the hard part - issuing go-polipo's own Range
+  request to the origin, appending, and extending the stored prefix for
+  anything beyond it - surfaced a cost disproportionate to a mostly-personal
+  benefit, chiefly a locking redesign: `CacheManager`'s single mutex would
+  otherwise serialize every cache operation behind a possibly-slow origin
+  fetch, so this would need per-key locking to avoid becoming a real
+  bottleneck. That alone would have been a judgment call on cost vs. benefit.
+  What actually closed it: video - the user's own example of repeated-range
+  usage - is overwhelmingly served over HTTPS today, and go-polipo (like
+  Polipo) never terminates TLS; `handleConnect` only ever relays opaque
+  bytes between client and origin through a `CONNECT` tunnel (confirmed from
+  `proxy.go`: no header, method, or cache-related logic touches a tunnelled
+  connection at all, only `tunnelAllowedPorts`/`forbiddenTunnelsFile`
+  filtering before the tunnel is established). Neither the disk cache, the
+  memory cache, nor Range-request assembly above ever sees HTTPS traffic in
+  the first place, with or without partial instantiation - so for the
+  motivating case specifically, this item was never going to help. Plain
+  `http://` resources (large downloads, self-hosted media without TLS) are
+  the only case it could still matter for, and are not what prompted this
+  item. Closing it as a deliberate "not worth it for the actual use case",
+  not as "someday" - revisit only if a concrete plain-HTTP, large-file,
+  overlapping-Range workload turns up. §11's
+  `diskCacheTruncateTime`/`diskCacheTruncateSize` truncation-vs-deletion
+  tradeoff (the original motivation for filing this item at all) stays as
+  deletion for the same reason. PMM (splitting a *live* fetch across
+  multiple upstream connections) remains a related but separate mechanism,
+  moot here for the same reason.
 
 ### C. Explicitly by-design (already in ARCHITECTURE.md; just needs a sentence)
 
