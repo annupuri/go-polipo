@@ -48,6 +48,12 @@ Windows のシステムプロキシを `127.0.0.1:8123` に向けると、Micros
 
 PowerShell では引用符を外さないでください。引用符が無いと PowerShell が引数を `.` の位置で分割してしまい、CheckNetIsolation が「パラメーターが無効です」で失敗します。cmd.exe では引用符は不要です。再起動は不要で、アプリを開き直すだけで反映されます。`CheckNetIsolation LoopbackExempt -s` で対象外リストを表示でき、`-a` の代わりに `-d` を使うと削除できます。他のストアアプリの場合は、`Get-AppxPackage <名前> | Select-Object PackageFamilyName` でパッケージファミリ名を調べてください。
 
+**go-polipo をミラーモードの WSL 内で動かしている場合**(セクション8): この構成では 127.0.0.1:8123 で待ち受けているのは Windows のプロセスではなく WSL VM 内の go-polipo で、ループバック分離の除外がこの経路には効かないことがあります。Windows 11 26H2(ビルド 26300)へのアップデート後に、次の状態が確認されました: 除外は一覧に残っており、削除して登録し直しても改善せず、Store は「Microsoft Store は接続を完了できませんでした」で失敗し(イベントログ Microsoft-Windows-Store/Operational に `0x80072EFD`)、Store のプロセス(`WinStore.App`)はプロキシへの接続を一切開いていませんでした。この場合は Store の通信をプロキシから外します。設定 > ネットワークとインターネット > プロキシ > 「プロキシ サーバーを使う」の「編集」で、「次のエントリで始まるアドレス以外にプロキシ サーバーを使います」の欄に次を追加します:
+
+    *.microsoft.com;*.s-microsoft.com;*.xboxservices.com;*.xboxlive.com
+
+これで、Store が1週間の間に接続したすべてのホスト(`microsoft.com` 配下の `storeedge`・`licensing.mp`・`displaycatalog`・`sfdataservice`・`login` など、および `da.xboxservices.com`・`images-eds-ssl.xboxlive.com`)をカバーできます。Store の通信は CONNECT 経由の HTTPS で、go-polipo はもともとキャッシュしないため、プロキシを外しても失うものはありません。なお、他のアプリケーションもこれらのドメインへは直接接続するようになります。設定後も失敗し続けた Store の通信は広告のトラッキング(Microsoft Advertising の Universal Event Tracking。イベントログ上は「UET」)の送信だけで、害はありません。広告の表示やクリックを広告主に報告するためのものです。UET の送信先は通常 `bat.bing.com` なので、これも通したい場合は一覧に `*.bing.com` も追加すれば通るはずです。
+
 4. go-polipo の設定
 --------------------
 
@@ -280,6 +286,7 @@ WSLの既定のNATモードでは、Windows側にIPv6接続があってもLinux 
 
 - **WindowsとWSLでポート番号の空間を共有します。** Windows側のプロセスが127.0.0.1:8123で待ち受けていると、go-polipoは起動できません(ログに`bind: address already in use`)。セクション6のタスクやショートカットが無効になっていることを確認してください。
 - **Windows側でTIME_WAIT状態のポートも使用中とみなされます。** NATモードでは、Windows側からポート8123への接続をWSLのlocalhost転送(`wslrelay.exe`)が受けています。`wsl --shutdown`の後、それらの接続はWindowsの既定で最大2分間TIME_WAITとして残ります。このため、NATモードからミラーモードに切り替えた直後や、その後WSLを再起動した直後は、最大2分ほどgo-polipoが待ち受けを開始できません。その間、systemdが再試行を続けるため`systemctl is-active go-polipo`は`activating`と表示され、その後`active`になります(ユニットファイルに前述の`RestartSec`/`StartLimitIntervalSec`がある場合)。Windowsの起動直後には起きません。
+- **Microsoft Storeの通信をプロキシから外す必要があることがあります。** セクション3のループバック分離の除外だけでは足りない場合があります。セクション3の末尾を参照してください。
 - **IPv4とIPv6の両方を持つホストではIPv6が優先されることがあります。** go-polipo(Goのダイヤラー)は両方を試して先に繋がった方を使うため、ログに出る接続先がIPv6アドレスになることがあります。
 
 切り替え手順(**Windows PowerShell**で):

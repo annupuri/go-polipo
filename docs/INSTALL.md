@@ -59,6 +59,31 @@ cmd.exe they are not needed. No restart is required - just reopen the app.
 `-a` removes one. For another Store app, find its package family name with
 `Get-AppxPackage <name> | Select-Object PackageFamilyName`.
 
+**go-polipo inside WSL in mirrored networking mode** (section 8): there,
+127.0.0.1:8123 is served by go-polipo inside the WSL VM, not by a Windows
+process, and the loopback exemption may not cover that path. This was seen
+after upgrading to Windows 11 26H2 (build 26300): the exemption was still
+listed, removing and re-adding it did not help, the Store failed with
+"Microsoft Store couldn't complete the connection" (`0x80072EFD` in the
+Microsoft-Windows-Store/Operational event log) and its process
+(`WinStore.App`) never opened a connection to the proxy. Let the Store
+bypass the proxy instead: in Settings > Network & internet > Proxy > Use a
+proxy server > Edit, add to "Use the proxy server except for addresses that
+start with the following entries":
+
+    *.microsoft.com;*.s-microsoft.com;*.xboxservices.com;*.xboxlive.com
+
+This covers every host the Store contacted over a week (`storeedge`,
+`licensing.mp`, `displaycatalog`, `sfdataservice`, `login`, ... under
+`microsoft.com`, plus `da.xboxservices.com` and `images-eds-ssl.xboxlive.com`).
+Store traffic is HTTPS through CONNECT, which go-polipo never caches, so
+nothing is lost by bypassing it; other applications will also reach these
+domains directly. The only Store requests still failing afterwards were its
+ad-tracking events (Microsoft Advertising's Universal Event Tracking, "UET"
+in the event log), which are harmless: they only report ad impressions and
+clicks back to advertisers. UET normally reports to `bat.bing.com`, so adding
+`*.bing.com` to the list should let them through as well.
+
 4. Configuring go-polipo
 ------------------------
 
@@ -386,6 +411,9 @@ Things that change in mirrored mode:
   while systemd keeps retrying, then `active`, provided the unit file has
   the `RestartSec`/`StartLimitIntervalSec` settings above. This does not
   happen at Windows startup.
+- **Microsoft Store may need to bypass the proxy**, as the loopback
+  exemption from section 3 may no longer be enough - see the end of that
+  section.
 - **IPv6 is preferred when a host has both address families.** go-polipo
   (Go's dialer) tries both and uses whichever connects first, so upstream
   addresses in the log may now be IPv6.
