@@ -1,0 +1,26 @@
+# Sample systemd unit for running go-polipo as a service on Linux,
+# including inside WSL2 (see docs/INSTALL.md, section 8).
+#
+# Replace <you> and /path/to/go-polipo, then:
+#
+#   $ sudo cp systemd/go-polipo.service /etc/systemd/system/go-polipo.service
+#   $ sudo systemctl daemon-reload
+#   $ sudo systemctl enable --now go-polipo
+
+[Unit]
+Description=go-polipo caching proxy
+After=network-online.target
+Wants=network-online.target
+# Never give up restarting: under WSL mirrored networking, port 8123 can stay
+# in use for up to two minutes after a WSL restart (Windows-side TIME_WAIT).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=<you>
+ExecStart=/path/to/go-polipo/bin/polipo -c /home/<you>/.polipo
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

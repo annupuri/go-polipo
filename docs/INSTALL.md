@@ -293,21 +293,18 @@ Most current WSL2 distros have systemd enabled by default; check with:
 
     $ ps -p 1 -o comm=
 
-If it prints `systemd`, create a unit file, e.g. `~/go-polipo.service`:
+If it prints `systemd`, copy the sample unit file `systemd/go-polipo.service`
+and replace `<you>` and `/path/to/go-polipo` in it:
 
-    [Unit]
-    Description=go-polipo caching proxy
-    After=network-online.target
-    Wants=network-online.target
+    $ cp systemd/go-polipo.service ~/go-polipo.service
+    $ sed -i "s|<you>|$USER|g; s|/path/to/go-polipo|$PWD|" ~/go-polipo.service
 
-    [Service]
-    Type=simple
-    User=<you>
-    ExecStart=/path/to/go-polipo/bin/polipo -c /home/<you>/.polipo
-    Restart=on-failure
-
-    [Install]
-    WantedBy=multi-user.target
+Its `RestartSec=5` and `StartLimitIntervalSec=0` keep systemd retrying while
+port 8123 is still held by something else - which happens for up to two
+minutes after a WSL restart in mirrored networking mode (see "IPv6 and
+mirrored networking" below). Without them, systemd's defaults (retry after
+100 ms, give up after 5 starts within 10 s) stop the service for good within
+a second.
 
 Install and enable it:
 
@@ -322,8 +319,18 @@ By default WSL2 shuts its background VM down shortly after the last WSL
 terminal/window closes, taking systemd and go-polipo down with it. Add this
 to `%UserProfile%\.wslconfig` on the **Windows** side to disable that:
 
+    [general]
+    instanceIdleTimeout=-1
+
     [wsl2]
     vmIdleTimeout=-1
+
+`vmIdleTimeout` keeps the VM up; `instanceIdleTimeout` keeps the distro
+itself from being shut down once no WSL session is attached. In the default
+NAT mode the distro happens to stay up without it (WSL's localhost relay
+keeps it busy), but in mirrored mode it is required: without it the distro,
+and go-polipo with it, powers off about 15 seconds after the logon shortcut
+below has run.
 
 ### Start WSL automatically at Windows logon
 
@@ -343,6 +350,58 @@ shortcut that runs the Microsoft-signed (and thus Smart-App-Control-exempt)
 Verify after a Windows restart:
 
     Test-NetConnection 127.0.0.1 -Port 8123
+
+### IPv6 and mirrored networking
+
+In WSL's default NAT networking mode the Linux VM has no IPv6
+connectivity, even when Windows has. go-polipo then cannot reach hosts that
+publish only an IPv6 (AAAA) address; the log shows e.g.
+
+    CONNECT failed: dial example.com:443: dial tcp [2606:...]:443: connect: network is unreachable
+
+while the same host works from Windows with the proxy off. Mirrored mode
+gives WSL the same IPv4 and IPv6 addresses as Windows. It needs Windows 11
+22H2 or later. Add it to `%UserProfile%\.wslconfig`, together with the
+`instanceIdleTimeout` setting above:
+
+    [general]
+    instanceIdleTimeout=-1
+
+    [wsl2]
+    vmIdleTimeout=-1
+    networkingMode=mirrored
+
+Things that change in mirrored mode:
+
+- **Windows and WSL share one port space.** A Windows process listening on
+  127.0.0.1:8123 keeps go-polipo from starting (`bind: address already in
+  use` in the log). Make sure the Windows task or shortcut from section 6 is
+  disabled.
+- **Ports in TIME_WAIT on Windows count as in use.** In NAT mode, WSL's
+  localhost relay (`wslrelay.exe`) accepts the Windows-side connections to
+  port 8123; after `wsl --shutdown` those linger in TIME_WAIT for up to two
+  minutes (the Windows default). Right after switching from NAT to mirrored
+  mode, or after any later WSL restart, go-polipo may therefore fail to bind
+  for up to two minutes. `systemctl is-active go-polipo` shows `activating`
+  while systemd keeps retrying, then `active`, provided the unit file has
+  the `RestartSec`/`StartLimitIntervalSec` settings above. This does not
+  happen at Windows startup.
+- **IPv6 is preferred when a host has both address families.** go-polipo
+  (Go's dialer) tries both and uses whichever connects first, so upstream
+  addresses in the log may now be IPv6.
+
+Switching, in **Windows PowerShell**:
+
+    wsl --shutdown
+    # edit %UserProfile%\.wslconfig as above, then:
+    wsl -e true
+    Start-Sleep 150                               # allow for the TIME_WAIT delay
+    wsl -l -v                                     # STATE: Running
+    wsl -e systemctl is-active go-polipo          # active
+    Test-NetConnection 127.0.0.1 -Port 8123       # TcpTestSucceeded : True
+
+From inside WSL, `ip -6 route` should now list a `default` route. To go
+back, remove the `networkingMode` line and run `wsl --shutdown` again.
 
 ### Updating the binary
 

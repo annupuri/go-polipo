@@ -219,21 +219,12 @@ Windowsの場合と同様、`diskCacheRoot`はgo-polipoが初回利用時に自�
 
     $ ps -p 1 -o comm=
 
-`systemd`と表示されれば、ユニットファイル(例: `~/go-polipo.service`)を作成します:
+`systemd`と表示されれば、サンプルのユニットファイル`systemd/go-polipo.service`をコピーし、中の`<you>`と`/path/to/go-polipo`を置き換えます:
 
-    [Unit]
-    Description=go-polipo caching proxy
-    After=network-online.target
-    Wants=network-online.target
+    $ cp systemd/go-polipo.service ~/go-polipo.service
+    $ sed -i "s|<you>|$USER|g; s|/path/to/go-polipo|$PWD|" ~/go-polipo.service
 
-    [Service]
-    Type=simple
-    User=<you>
-    ExecStart=/path/to/go-polipo/bin/polipo -c /home/<you>/.polipo
-    Restart=on-failure
-
-    [Install]
-    WantedBy=multi-user.target
+このファイルの`RestartSec=5`と`StartLimitIntervalSec=0`は、ポート8123がまだ他に掴まれている間もsystemdに再試行を続けさせるための設定です。ミラーモードのネットワークでは、WSLの再起動後に最大2分ほどこの状態になります(後述の「IPv6とミラーモードのネットワーク」参照)。これらが無いと、systemdの既定値(100ms後に再試行し、10秒以内に5回起動したら諦める)により、1秒足らずでサービスが恒久的に停止してしまいます。
 
 配置して有効化します:
 
@@ -246,8 +237,13 @@ Windowsの場合と同様、`diskCacheRoot`はgo-polipoが初回利用時に自�
 
 WSL2は既定で、最後のWSLターミナル/ウィンドウを閉じてからしばらくするとバックグラウンドVM自体を終了させ、systemdごとgo-polipoも道連れに停止します。**Windows側**の`%UserProfile%\.wslconfig`に以下を追記してこれを無効化してください:
 
+    [general]
+    instanceIdleTimeout=-1
+
     [wsl2]
     vmIdleTimeout=-1
+
+`vmIdleTimeout`はVMを、`instanceIdleTimeout`はWSLのセッションが無くなった後のディストリビューション自体を落とさないための設定です。既定のNATモードではこれが無くても(WSLのlocalhost転送が動いているため)たまたまディストリビューションが動き続けますが、ミラーモードでは必須です。無いと、後述のログオン時のショートカットが実行されてから約15秒でディストリビューションがgo-polipoごと停止します。
 
 ### Windowsログオン時にWSLを自動起動する
 
@@ -264,6 +260,39 @@ WSL2のVMはWindowsログオン時に自動では起動しないため、Microso
 Windows再起動後に確認:
 
     Test-NetConnection 127.0.0.1 -Port 8123
+
+### IPv6とミラーモードのネットワーク
+
+WSLの既定のNATモードでは、Windows側にIPv6接続があってもLinux VMにはIPv6接続がありません。このため、IPv6(AAAA)アドレスしか持たないホストにはgo-polipo経由で接続できず、ログには次のように出ます:
+
+    CONNECT failed: dial example.com:443: dial tcp [2606:...]:443: connect: network is unreachable
+
+(プロキシをオフにすればWindowsからは接続できます。)ミラーモードにすると、WSLがWindowsと同じIPv4・IPv6アドレスを使うようになります。Windows 11 22H2以降が必要です。`%UserProfile%\.wslconfig`に、前述の`instanceIdleTimeout`と合わせて設定します:
+
+    [general]
+    instanceIdleTimeout=-1
+
+    [wsl2]
+    vmIdleTimeout=-1
+    networkingMode=mirrored
+
+ミラーモードで変わる点:
+
+- **WindowsとWSLでポート番号の空間を共有します。** Windows側のプロセスが127.0.0.1:8123で待ち受けていると、go-polipoは起動できません(ログに`bind: address already in use`)。セクション6のタスクやショートカットが無効になっていることを確認してください。
+- **Windows側でTIME_WAIT状態のポートも使用中とみなされます。** NATモードでは、Windows側からポート8123への接続をWSLのlocalhost転送(`wslrelay.exe`)が受けています。`wsl --shutdown`の後、それらの接続はWindowsの既定で最大2分間TIME_WAITとして残ります。このため、NATモードからミラーモードに切り替えた直後や、その後WSLを再起動した直後は、最大2分ほどgo-polipoが待ち受けを開始できません。その間、systemdが再試行を続けるため`systemctl is-active go-polipo`は`activating`と表示され、その後`active`になります(ユニットファイルに前述の`RestartSec`/`StartLimitIntervalSec`がある場合)。Windowsの起動直後には起きません。
+- **IPv4とIPv6の両方を持つホストではIPv6が優先されることがあります。** go-polipo(Goのダイヤラー)は両方を試して先に繋がった方を使うため、ログに出る接続先がIPv6アドレスになることがあります。
+
+切り替え手順(**Windows PowerShell**で):
+
+    wsl --shutdown
+    # 上記のとおり %UserProfile%\.wslconfig を編集してから:
+    wsl -e true
+    Start-Sleep 150                               # TIME_WAITの待ち時間を見込む
+    wsl -l -v                                     # STATE が Running
+    wsl -e systemctl is-active go-polipo          # active
+    Test-NetConnection 127.0.0.1 -Port 8123       # TcpTestSucceeded : True
+
+WSL内で`ip -6 route`を実行すると、`default`の経路が表示されるはずです。元に戻すには、`networkingMode`の行を削除して再度`wsl --shutdown`します。
 
 ### バイナリの更新
 
