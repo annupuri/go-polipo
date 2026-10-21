@@ -3,7 +3,7 @@ go-polipo (v2.0.0)
 
 (For the English version, see README.md / 英語版は README.md を参照してください)
 
-go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.27.1) で
+go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.27.3) で
 完全に書き直した再実装です。
 
 オリジナルのシングルスレッド C 版とは異なり、go-polipo は Go ネイティブの

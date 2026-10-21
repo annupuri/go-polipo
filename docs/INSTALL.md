@@ -8,7 +8,7 @@ This is a Go-based implementation of the Polipo caching web proxy.
 1. Requirements
 ---------------
 
-To build go-polipo, you need to have Go (version 1.27.1 or later) installed on your system.
+To build go-polipo, you need to have Go (version 1.27.3 or later) installed on your system.
 
 2. Building and running go-polipo
 ---------------------------------
