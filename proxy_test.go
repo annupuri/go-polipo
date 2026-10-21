@@ -690,9 +690,16 @@ func TestDialContextDirect(t *testing.T) {
 	conn.Close()
 }
 
+// deadLoopback is a loopback host for tests that need a port nothing listens
+// on to fail fast. Not 127.0.0.1: under WSL's mirrored networking a connect
+// to a closed 127.0.0.1 port is silently dropped instead of refused, so those
+// tests would hang until the go test timeout. ::1 is refused at once (or, with
+// IPv6 disabled, fails at once as unassignable).
+const deadLoopback = "[::1]"
+
 func TestDialContextSocks(t *testing.T) {
 	cfg := NewDefaultConfig()
-	cfg.SocksParentProxy = "127.0.0.1:1" // nothing listening
+	cfg.SocksParentProxy = deadLoopback + ":1" // nothing listening
 	ph := newTestHandler(cfg)
 	if ph.socksDialer == nil {
 		t.Fatal("expected socksDialer to be configured")
@@ -1018,7 +1025,7 @@ func TestProxyForwardUncachable(t *testing.T) {
 func TestProxyForwardRoundTripError(t *testing.T) {
 	ph := newTestHandler(NewDefaultConfig())
 	// Port 9999 is in the default allowedPorts range but nothing listens there.
-	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9999/", nil)
+	req := httptest.NewRequest(http.MethodGet, "http://"+deadLoopback+":9999/", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 	ph.ServeHTTP(rr, req)
@@ -1161,7 +1168,7 @@ func TestRelaxTransparencyMaybeServesStaleOnFailure(t *testing.T) {
 
 	// Port 9999 is in the default allowedPorts range but nothing listens there,
 	// so the round trip fails the way an unreachable origin would.
-	target := "http://127.0.0.1:9999/resource"
+	target := "http://" + deadLoopback + ":9999/resource"
 	seedCacheEntry(t, cm, target, "stale body", false)
 
 	req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -1188,7 +1195,7 @@ func TestRelaxTransparencyFalseStillErrorsOnFailure(t *testing.T) {
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
-	target := "http://127.0.0.1:9999/resource"
+	target := "http://" + deadLoopback + ":9999/resource"
 	seedCacheEntry(t, cm, target, "stale body", false)
 
 	req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -1860,7 +1867,7 @@ func TestProxyConnectDialFailure(t *testing.T) {
 	defer pc.Close()
 
 	// Port 1 is allowed but nothing listens there: expect 502 from the tunnel.
-	fmt.Fprintf(pc, "CONNECT 127.0.0.1:1 HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n")
+	fmt.Fprintf(pc, "CONNECT %[1]s:1 HTTP/1.1\r\nHost: %[1]s:1\r\n\r\n", deadLoopback)
 	statusLine, err := bufio.NewReader(pc).ReadString('\n')
 	if err != nil || !strings.Contains(statusLine, "502") {
 		t.Fatalf("status line = %q, err = %v; want 502", statusLine, err)
