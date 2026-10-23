@@ -249,21 +249,22 @@ WSL2は既定で、最後のWSLターミナル/ウィンドウを閉じてから
     [wsl2]
     vmIdleTimeout=-1
 
-`vmIdleTimeout`はVMを、`instanceIdleTimeout`はWSLのセッションが無くなった後のディストリビューション自体を落とさないための設定です。既定のNATモードではこれが無くても(WSLのlocalhost転送が動いているため)たまたまディストリビューションが動き続けますが、ミラーモードでは必須です。無いと、後述のログオン時のショートカットが実行されてから約15秒でディストリビューションがgo-polipoごと停止します。
+`vmIdleTimeout`はVMを、`instanceIdleTimeout`はWSLのセッションが無くなった後のディストリビューション自体を落とさないための設定です。既定のNATモードではこれが無くても(WSLのlocalhost転送が動いているため)たまたまディストリビューションが動き続けますが、ミラーモードでは必須です。無いと、後述のログオン時のタスクが実行されてから約15秒でディストリビューションがgo-polipoごと停止します。
 
-### Windowsログオン時にWSLを自動起動する
+### Windowsログオン時(とスリープ復帰時)にWSLを自動起動する
 
-WSL2のVMはWindowsログオン時に自動では起動しないため、Microsoft署名済み(スマートアプリコントロールの対象外)の`wsl.exe`を呼び出すスタートアップフォルダのショートカットで一度起こしてやる必要があります。これによりsystemd経由でgo-polipoも起動します。**Windows PowerShell**で:
+WSL2のVMはWindowsログオン時に自動では起動せず、実際にはWindowsのスリープからの復帰時にも再起動されていることがよくあります。Microsoft署名済み(スマートアプリコントロールの対象外)の`wsl.exe`を、ログオン時・ロック解除時・スリープからの復帰時に実行するタスクスケジューラのタスクで、その都度WSLを起こします。これによりsystemd経由でgo-polipoも起動します。WSLがすでに動いている時に実行しても害はありません。`windows/register-wsl-task.ps1`が、このタスクを現在のWindowsユーザー用に`go-polipo-wsl`として登録し、一度実行します。**Windows PowerShell**で(通常は管理者権限は不要です。登録が「アクセスが拒否されました」で失敗した場合は、管理者権限のプロンプトで実行してください):
 
-    $startup = [Environment]::GetFolderPath('Startup')
-    $ws = New-Object -ComObject WScript.Shell
-    $sc = $ws.CreateShortcut("$startup\go-polipo-wsl.lnk")
-    $sc.TargetPath  = "$env:WINDIR\System32\wsl.exe"
-    $sc.Arguments   = "-d <ディストリビューション名> -u <you> -- true"
-    $sc.WindowStyle = 7
-    $sc.Save()
+    powershell -NoProfile -ExecutionPolicy Bypass -File \\wsl.localhost\<ディストリビューション名>\path\to\go-polipo\windows\register-wsl-task.ps1 -Distro <ディストリビューション名> -User <you>
+    Get-ScheduledTaskInfo -TaskName go-polipo-wsl | Select-Object LastRunTime, LastTaskResult   # 0 なら成功
 
-Windows再起動後に確認:
+タスクは`wsl.exe -d <ディストリビューション名> -u <you> -- true`を`conhost --headless`経由で実行するため、コンソールウィンドウは表示されません。削除するには:
+
+    Unregister-ScheduledTask -TaskName go-polipo-wsl -Confirm:$false
+
+同じ`wsl.exe`コマンドを実行するスタートアップフォルダのショートカットでも動きますが、サインイン時にしか実行されず、しかも遅れて実行されます。Windowsはデスクトップの読み込みが終わってからスタートアップの項目を実行するため、go-polipoが起動するのはログオンから40〜60秒後(タスクでは約10秒後)で、それより先に開いたアプリケーションはプロキシに接続できませんでした。スリープからの復帰時には何もしません。以前にショートカットを作成していた場合は、タスクを登録した後に削除してください。
+
+Windows再起動後と、スリープからの復帰後に確認:
 
     Test-NetConnection 127.0.0.1 -Port 8123
 

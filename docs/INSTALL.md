@@ -354,25 +354,36 @@ to `%UserProfile%\.wslconfig` on the **Windows** side to disable that:
 itself from being shut down once no WSL session is attached. In the default
 NAT mode the distro happens to stay up without it (WSL's localhost relay
 keeps it busy), but in mirrored mode it is required: without it the distro,
-and go-polipo with it, powers off about 15 seconds after the logon shortcut
+and go-polipo with it, powers off about 15 seconds after the logon task
 below has run.
 
-### Start WSL automatically at Windows logon
+### Start WSL automatically at Windows logon (and after sleep)
 
-The WSL2 VM does not start on its own at Windows logon; a Startup-folder
-shortcut that runs the Microsoft-signed (and thus Smart-App-Control-exempt)
-`wsl.exe` wakes it, which lets systemd start go-polipo in turn. In
-**Windows PowerShell**:
+The WSL2 VM does not start on its own at Windows logon, and in practice it
+is often restarted when Windows resumes from sleep as well. A Task Scheduler
+task that runs the Microsoft-signed (and thus Smart-App-Control-exempt)
+`wsl.exe` at logon, at workstation unlock and on resume from sleep wakes it
+each time, which lets systemd start go-polipo in turn. Running it while WSL
+is already up is harmless. `windows/register-wsl-task.ps1` registers this
+task as `go-polipo-wsl` for the current Windows user and runs it once. In
+**Windows PowerShell** (no elevation is normally needed; if registering
+fails with "Access is denied", run it from an elevated prompt):
 
-    $startup = [Environment]::GetFolderPath('Startup')
-    $ws = New-Object -ComObject WScript.Shell
-    $sc = $ws.CreateShortcut("$startup\go-polipo-wsl.lnk")
-    $sc.TargetPath  = "$env:WINDIR\System32\wsl.exe"
-    $sc.Arguments   = "-d <YourDistroName> -u <you> -- true"
-    $sc.WindowStyle = 7
-    $sc.Save()
+    powershell -NoProfile -ExecutionPolicy Bypass -File \\wsl.localhost\<YourDistroName>\path\to\go-polipo\windows\register-wsl-task.ps1 -Distro <YourDistroName> -User <you>
+    Get-ScheduledTaskInfo -TaskName go-polipo-wsl | Select-Object LastRunTime, LastTaskResult   # 0 = success
 
-Verify after a Windows restart:
+The task runs `wsl.exe -d <YourDistroName> -u <you> -- true` through
+`conhost --headless`, so no console window flashes up. To remove it:
+
+    Unregister-ScheduledTask -TaskName go-polipo-wsl -Confirm:$false
+
+A Startup-folder shortcut running the same `wsl.exe` command also works, but
+only at sign-in, and late: Windows runs Startup items only after the desktop
+has loaded, so go-polipo came up 40-60 seconds after logon (about 10 seconds
+with the task), and applications opened before then could not reach the proxy. It does nothing after a resume
+from sleep. If you created one earlier, remove it once the task is in place.
+
+Verify after a Windows restart, and after a resume from sleep:
 
     Test-NetConnection 127.0.0.1 -Port 8123
 
