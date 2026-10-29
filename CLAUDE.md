@@ -38,6 +38,9 @@ Run gofmt, vet and the tests before every commit.
   fallback path in `Makefile`, and the "Go 1.x.y" mentions in `README*.md`,
   `docs/INSTALL*.md` and `CHANGES`. CI reads the version from `go.mod`.
   Afterwards run `asdf reshim golang`, or gopls and other shimmed tools fail.
+- **`CONTRIBUTING.md`** repeats the principles, test rules and commit rules
+  in this file for outside contributors; when one of them changes here,
+  change it there too.
 - **CHANGES** has a single, still-unreleased "go-polipo 2.0.0" entry. Fold new
   work into it instead of adding new dated entries. The dateline, `version.go`
   and a release tag are settled when the project is published.
@@ -66,4 +69,18 @@ Run gofmt, vet and the tests before every commit.
 
 - Messages in English: a short imperative subject, then a body explaining why.
 - One purpose per commit. Keep refactoring separate from behaviour changes.
-- **The maintainer pushes.** Claude stops at commit and never runs `git push`.
+- **Never commit on `main`.** `main` changes only through a pull request.
+  Before the first commit of a piece of work, create a topic branch from an
+  up-to-date `main`, named after its purpose (`fix/...`, `feat/...`,
+  `docs/...`, `refactor/...`). If you find yourself on `main` with
+  uncommitted changes, move them to a new branch before committing.
+- Pull requests are merged with "Rebase and merge", so every commit on the
+  branch lands on `main` as is. Keep the branch's commits clean.
+- **The maintainer pushes and merges.** Claude stops at commit on the topic
+  branch and never runs `git push`, `gh pr create`, `gh pr merge` or anything
+  else that changes `origin`.
+- **Do not check out or run an outside contributor's unmerged branch** (build,
+  test, `make`, or start a session in it) until the maintainer has reviewed
+  its diff, especially changes to `CLAUDE.md`, `.claude/`, `.mcp.json`,
+  `Makefile`, `.github/` and test code. Review such a pull request from its
+  diff only.
