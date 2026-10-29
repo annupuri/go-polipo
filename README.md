@@ -42,6 +42,7 @@ Documentation
 See `docs/INSTALL.md` for building and installation instructions, including a
 "Building on Windows" section and running go-polipo at Windows startup.
 For architecture details and C-to-Go file mapping, refer to `docs/ARCHITECTURE.md`.
+To contribute, see `CONTRIBUTING.md`.
 
 Acknowledgements and license
 ---------------------------
