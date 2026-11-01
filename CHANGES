@@ -152,6 +152,9 @@
     error, warn, info and forbidden (0x1-0x8) are logged; Polipo's
     uncacheable, superseded, Vary and tunnel bits (0x10-0x80) are
     accepted and ignored, and a rejected CONNECT is logged as forbidden.
+  * On Unix, SIGUSR1 and SIGUSR2 reopen logFile, as in Polipo, so log
+    rotation works.  If the file cannot be opened again, go-polipo keeps
+    logging to the old one instead of exiting as Polipo did.
   * Incompatible changes from Polipo 1.x:
       - Build system is "go build" / the provided Makefile; the autoconf
         style options and PLATFORM_DEFINES are gone.

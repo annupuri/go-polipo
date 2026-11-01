@@ -11,8 +11,11 @@ import (
 )
 
 func TestSetupReloadSignals(t *testing.T) {
-	var reloads, discards atomic.Int32
+	var reopens, reloads, discards atomic.Int32
 	setupReloadSignals(0x07, func() error {
+		reopens.Add(1)
+		return nil
+	}, func() error {
 		reloads.Add(1)
 		return nil
 	}, func() {
@@ -31,6 +34,10 @@ func TestSetupReloadSignals(t *testing.T) {
 	}
 	if got := reloads.Load(); got != 2 {
 		t.Errorf("expected reload to run twice (SIGUSR1 + SIGUSR2), got %d", got)
+	}
+	// Both signals reopen the log file, matching Polipo's reopenLog.
+	if got := reopens.Load(); got != 2 {
+		t.Errorf("expected the log file to be reopened twice (SIGUSR1 + SIGUSR2), got %d", got)
 	}
 	// Only SIGUSR2 drops the memory cache, matching Polipo's discardObjects.
 	if got := discards.Load(); got != 1 {
