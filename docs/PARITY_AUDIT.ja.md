@@ -181,8 +181,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `daemonise`, `pidFile` | 🔷 | バックグラウンド化はサービスマネージャ / Windows インストーラ + タスクスケジューラ任せ。 |
 | `SIGTERM`, `SIGINT` | ✅ | `server.Close()` でグレースフル終了。 |
 | `SIGHUP` | ❌ | 設定リロードなし。 |
-| `SIGUSR1`（インメモリデータの書き出し + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14）:** `forbidden`/`uncachable`（§4）を再読み込みする。Polipo の「書き出し」側（`writeoutObjects`）に相当する処理は無い — go-polipo のキャッシュはディスクのみで、メモリだけに保持されているデータが無いため。 |
-| `SIGUSR2`（メモリキャッシュ破棄 + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14）:** `SIGUSR1` と同じ再読み込み。go-polipo には破棄すべき独立したメモリキャッシュが無い（§10）ため、Polipo とは異なりこの2つのシグナルは同じ動作になる。 |
+| `SIGUSR1`（インメモリデータの書き出し + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14）:** `forbidden`/`uncachable`（§4）を再読み込みする。Polipo の「書き出し」側（`writeoutObjects`）に相当する処理は無い — `Store` がメモリキャッシュと同時にディスクへも書き込むため、後から書き出すものが無い。 |
+| `SIGUSR2`（メモリキャッシュ破棄 + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14。メモリキャッシュの破棄は 2026-11-01 に追加）:** メモリキャッシュを空にしてから（`CacheManager.DiscardMemory`、§10）、`SIGUSR1` と同じ再読み込みを行う。Polipo の `discardObjects` + `initForbidden`（`event.c`）と同じ。Polipo と同じくディスクキャッシュには触れない。2026-11-01 より前は、メモリキャッシュを追加する前の名残で再読み込みだけだった。 |
 
 ---
 
@@ -269,8 +269,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
   （§4, §15）。~~ **完了（2026-09-14）:** `ProxyHandler.Reload` が両ファイルを
   再読み込みし、原子的に差し替える。Unix では `SIGUSR1`/`SIGUSR2`
   （`signal_unix.go`）から起動でき、Polipo の「シグナルで `initForbidden()`」
-  という挙動に対応する — go-polipo には `SIGUSR2` が破棄すべき独立した
-  メモリキャッシュが無いため、両シグナルの動作は同じにした。Windows には
+  という挙動に対応する。`SIGUSR2` はその前にメモリキャッシュも空にする
+  （2026-11-01 追加、§15 参照）。Windows には
   `SIGUSR1`/`SIGUSR2` 自体が存在しない（`syscall` パッケージに無い）ため、
   `POST /polipo/reload` でこのプラットフォームをカバーする — こちらは
   どの環境でも使える。これは Polipo の `/polipo/status?init-forbidden`

@@ -16,7 +16,8 @@
     with the disk cache off.  A hit goes through the exact same
     freshness/Vary rules as a disk hit.  It is not persisted across
     restarts and is not touched by -x or /polipo/flush, which reclaim
-    disk space that a memory-resident entry doesn't occupy.
+    disk space that a memory-resident entry doesn't occupy.  SIGUSR2
+    empties it, as in Polipo.
   * A single-range Range request (bytes=start-end, bytes=start-, or a
     suffix bytes=-n) against a cached entry is served as a 206 Partial
     Content (or 416 if it doesn't fit), honouring If-Range (RFC 9110

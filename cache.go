@@ -190,6 +190,16 @@ func (cm *CacheManager) GetCachePath(rawURL string) (string, error) {
 	return filepath.Join(dir, encoded), nil
 }
 
+// DiscardMemory empties the memory cache, leaving the disk cache untouched -
+// the counterpart of Polipo's discardObjects on SIGUSR2. Nothing is lost
+// beyond memory: every entry that fit on disk was written there by Store
+// at the same time.
+func (cm *CacheManager) DiscardMemory() {
+	if cm.memCache != nil {
+		cm.memCache.Purge()
+	}
+}
+
 // Lookup retrieves a cached response for the request if it exists and is fresh.
 func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 	resp, stale := cm.lookupEntry(req)

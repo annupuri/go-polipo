@@ -145,7 +145,7 @@ func serve(config *Config) int {
 
 	cacheMgr := NewCacheManager(config)
 	handler := NewProxyHandler(config, cacheMgr, forbidden, uncachable, forbiddenTunnels)
-	setupReloadSignals(config.LogLevel, handler.Reload)
+	setupReloadSignals(config.LogLevel, handler.Reload, cacheMgr.DiscardMemory)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))
 	server := &http.Server{Addr: addr, Handler: handler}
