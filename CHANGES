@@ -65,6 +65,10 @@
     validator) settles which variant is correct.  dontTrustVaryETag
     (default "maybe", matching Polipo) controls whether such an entry's
     ETag is trusted for that revalidation.
+  * A response with Cache-Control: no-cache is likewise cached but never
+    served as a fresh hit, whatever its max-age: every reuse is
+    revalidated with the origin first (RFC 9111 section 5.2.2.4,
+    matching Polipo).
   * The disk cache write policy is stricter than Polipo's in a few ways.
     Responses that carry a Set-Cookie header are no longer written to
     disk by default; set the new dontCacheCookies variable to false for

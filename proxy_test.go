@@ -1510,6 +1510,57 @@ func TestVaryEntryNeverServedWithoutRevalidation(t *testing.T) {
 	}
 }
 
+func TestNoCacheEntryNeverServedWithoutRevalidation(t *testing.T) {
+	hits := 0
+	var gotINM string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		gotINM = r.Header.Get("If-None-Match")
+		w.Header().Set("ETag", `"v1"`)
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	// A high max-age would make an ordinary entry fresh; no-cache must
+	// override that and force a revalidation regardless.
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+		Header: http.Header{}, Body: io.NopCloser(strings.NewReader("cached body")),
+	}
+	resp.Header.Set("Cache-Control", "max-age=999999, no-cache")
+	resp.Header.Set("Date", timeHeader(0))
+	resp.Header.Set("ETag", `"v1"`)
+	if err := cm.Store(req, resp); err != nil {
+		t.Fatalf("seed Store failed: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, r)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i, rr.Code)
+		}
+		if got, _ := io.ReadAll(rr.Body); string(got) != "cached body" {
+			t.Errorf("request %d: body = %q, want the cached body after a 304", i, got)
+		}
+		if gotINM != `"v1"` {
+			t.Errorf("request %d: If-None-Match sent = %q, want %q", i, gotINM, `"v1"`)
+		}
+	}
+	if hits != 2 {
+		t.Errorf("origin hits = %d, want 2 (every request must revalidate a no-cache entry)", hits)
+	}
+}
+
 func TestConditionalRevalidation304ServesCachedBodyAndRefreshes(t *testing.T) {
 	var gotINM string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

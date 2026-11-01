@@ -129,6 +129,19 @@ func responseVaries(resp *http.Response) bool {
 	return strings.TrimSpace(resp.Header.Get("Vary")) != ""
 }
 
+// responseNoCache reports whether resp carries a Cache-Control: no-cache
+// directive. Such a response may be stored, but RFC 9111 section 5.2.2.4
+// forbids reusing it without first revalidating with the origin, however fresh
+// its max-age says it is - the same rule as Polipo's objectMustRevalidate
+// (object.c), which checks CACHE_NO. Like responseVaries, lookupEntry
+// therefore always reports it stale. The qualified form (no-cache="field")
+// is treated as unqualified, as RFC 9111 allows. Directive names are
+// case-insensitive, and Cache-Control may span several header lines.
+func responseNoCache(resp *http.Response) bool {
+	cc := strings.ToLower(strings.Join(resp.Header.Values("Cache-Control"), ","))
+	return strings.Contains(cc, "no-cache")
+}
+
 // cacheControlAllowsAuthenticated reports whether a response Cache-Control value
 // carries a directive that, per RFC 9111 section 3.5 (RFC 2616 section 14.8),
 // lets a shared cache store the response to an authenticated request.
@@ -246,7 +259,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	if cm.memCache != nil {
 		if entry, ok := cm.memCache.Get(key); ok {
 			resp := entry.response(req)
-			return resp, cm.isExpired(resp) || responseVaries(resp)
+			return resp, cm.isExpired(resp) || responseVaries(resp) || responseNoCache(resp)
 		}
 	}
 
@@ -293,8 +306,10 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// cannot be matched against the current request's headers, and only a
 	// round-trip to the origin (a revalidation, or a full re-fetch when
 	// there is no usable validator - see addConditionalHeaders) can settle
-	// which variant is correct. See responseVaries.
-	stale = cm.isExpired(resp) || responseVaries(resp)
+	// which variant is correct. See responseVaries. A no-cache response is
+	// always stale for the same reason: only the origin may approve its
+	// reuse. See responseNoCache.
+	stale = cm.isExpired(resp) || responseVaries(resp) || responseNoCache(resp)
 
 	// Clean up X-Polipo headers before returning
 	resp.Header.Del("X-Polipo-Location")
