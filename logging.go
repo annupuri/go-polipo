@@ -1,6 +1,10 @@
 package main
 
-import "log"
+import (
+	"log"
+	"os"
+	"sync"
+)
 
 // Log categories, matching Polipo's logLevel bitmask (log.h). Each bit gates
 // an independent class of message rather than an ordered severity
@@ -30,4 +34,53 @@ func logf(logLevel, category int, format string, args ...any) {
 		return
 	}
 	log.Printf(format, args...)
+}
+
+// logFileWriter is the log package's output when logFile is set. Reopen
+// swaps in a freshly opened file at the same path, so that after a log
+// rotation tool renames the file, logging continues in a new one - Polipo's
+// reopenLog (log.c), run on SIGUSR1 and SIGUSR2.
+type logFileWriter struct {
+	mu   sync.Mutex
+	path string
+	f    *os.File
+}
+
+func openLogFileWriter(path string) (*logFileWriter, error) {
+	f, err := openLogFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return &logFileWriter{path: path, f: f}, nil
+}
+
+func openLogFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+}
+
+func (w *logFileWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.f.Write(p)
+}
+
+// Reopen opens the log file's path again and switches to it. If that fails,
+// logging carries on in the current file and the error is returned - unlike
+// Polipo, which exited, so a failed log rotation does not take the proxy down.
+func (w *logFileWriter) Reopen() error {
+	f, err := openLogFile(w.path)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	old := w.f
+	w.f = f
+	w.mu.Unlock()
+	return old.Close()
+}
+
+func (w *logFileWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.f.Close()
 }

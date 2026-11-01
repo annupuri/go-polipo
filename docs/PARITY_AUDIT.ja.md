@@ -172,7 +172,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | 変数 | 状態 | 備考 |
 | :--- | :--: | :--- |
 | `logLevel` | ✅ | **完了（2026-09-14）:** 強制するようにした。`logLevel` はPolipo自身と同じ、独立したメッセージ種別のビットマスク（`log.h`の`L_ERROR`/`L_WARN`/`L_INFO`/`L_FORBIDDEN`等）であり、順序付きの重大度しきい値ではない — `logging.go`の`logf`が各既存呼び出し箇所を該当する1カテゴリで判定する、Polipo自身の`do_log`呼び出し（`if (type & LOGGING_MAX & logLevel) ...`）と同じ方式。既定値`0x07`（`LogError|LogWarn|LogInfo`）はPolipoの`LOGGING_DEFAULT`と完全一致する。挙動上の注意点: この既定値には`LogForbidden`が含まれないため、これまでの監査作業で追加してきた「Denied: ...」系のアクセス拒否ログは、ここからは既定では出力されないオプトイン扱いになる — Polipoに合わせた結果だが、この監査の少し前までのgo-polipoの挙動からは実質的な変更である。**意図的な差分（2026-11-01）:** 定義するのは go-polipo が実際に出力する4種類（`LogError`/`LogWarn`/`LogInfo`/`LogForbidden`）だけ。Polipo の `L_UNCACHEABLE`（0x10）、`L_SUPERSEDED`（0x20）、`L_VARY`（0x40）、`L_TUNNEL`（0x80、`tunnel.c` の「tunnel host:port allowed/blocked」）に当たるメッセージは go-polipo には無い。これらのビットを含む `logLevel` もエラーにはせず受け付け（Polipo の設定ファイルをそのまま読めるように）、そのビットは無視する。拒否した CONNECT はほかのポリシーによる拒否と同じく `LogForbidden` で記録し、許可した CONNECT は記録しない。以前は使われていない定数を「整合性のため」に定義しており、`config.sample` には 0x80 でトンネルのメッセージが出ると誤って書かれていた。 |
-| `logFile` | ✅ | `log` の出力先を切り替え。追記モード。 |
+| `logFile` | ✅ | `log` の出力先を切り替え。追記モード。Polipo の `reopenLog` と同じく `SIGUSR1`/`SIGUSR2`（Unix）で開き直すので、ログローテーションができる（§15）。 |
 | `logFilePermissions` | ⚠️ | `0644` にハードコード（v1.1.x 既定は `0640`）。 |
 | `logSyslog`, `logFacility` | ❌ | syslog 出力なし。 |
 | `scrubLogs` | ❌ | ログからの個人情報スクラブなし。 |
@@ -184,8 +184,9 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `daemonise`, `pidFile` | 🔷 | バックグラウンド化はサービスマネージャ / Windows インストーラ + タスクスケジューラ任せ。 |
 | `SIGTERM`, `SIGINT` | ✅ | `server.Close()` でグレースフル終了。 |
 | `SIGHUP` | ❌ | 設定リロードなし。 |
-| `SIGUSR1`（インメモリデータの書き出し + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14）:** `forbidden`/`uncachable`（§4）を再読み込みする。Polipo の「書き出し」側（`writeoutObjects`）に相当する処理は無い — `Store` がメモリキャッシュと同時にディスクへも書き込むため、後から書き出すものが無い。 |
-| `SIGUSR2`（メモリキャッシュ破棄 + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14。メモリキャッシュの破棄は 2026-11-01 に追加）:** メモリキャッシュを空にしてから（`CacheManager.DiscardMemory`、§10）、`SIGUSR1` と同じ再読み込みを行う。Polipo の `discardObjects` + `initForbidden`（`event.c`）と同じ。Polipo と同じくディスクキャッシュには触れない。2026-11-01 より前は、メモリキャッシュを追加する前の名残で再読み込みだけだった。 |
+| `SIGUSR1`（ログの開き直し + インメモリデータの書き出し + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14。ログの開き直しは 2026-11-01 に追加）:** `logFile` を開き直してから、`forbidden`/`uncachable`（§4）を再読み込みする。Polipo の「書き出し」側（`writeoutObjects`）に相当する処理は無い — `Store` がメモリキャッシュと同時にディスクへも書き込むため、後から書き出すものが無い。 |
+| `SIGUSR2`（ログの開き直し + メモリキャッシュ破棄 + `forbidden` 再読み込み） | ✅ | **完了（2026-09-14。メモリキャッシュの破棄とログの開き直しは 2026-11-01 に追加）:** `logFile` を開き直し、メモリキャッシュを空にしてから（`CacheManager.DiscardMemory`、§10）、`SIGUSR1` と同じ再読み込みを行う。Polipo の `discardObjects` + `initForbidden`（`event.c`）と同じ。Polipo と同じくディスクキャッシュには触れない。2026-11-01 より前は、メモリキャッシュを追加する前の名残で再読み込みだけだった。 |
+| `SIGUSR1`/`SIGUSR2` でのログの開き直し | ✅ | **完了（2026-11-01）:** どちらのシグナルでも、最初に `logFile` を同じパスで開き直す（`logFileWriter.Reopen`）。Polipo の `reopenLog`（`log.c`、`event.c` から呼ばれる）と同じで、ローテーションツールがファイル名を変えてから go-polipo にシグナルを送ればよい。**意図的な差分:** 開き直せなかった場合、Polipo は終了したが、go-polipo はエラーを記録して元のファイルに書き続ける — ローテーションの失敗でプロキシを止めないため。Windows にはこれらのシグナルが無いので、ログファイルを開き直すには再起動が必要。 |
 
 ---
 

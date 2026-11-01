@@ -108,28 +108,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	// Redirect the logger to a file when asked. This matters for background
 	// use on Windows, where a -H windowsgui build has no console for stderr.
+	var reopenLog func() error
 	if config.LogFile != "" {
-		f, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		w, err := openLogFileWriter(config.LogFile)
 		if err != nil {
 			fmt.Fprintf(stderr, "Cannot open logFile %q: %v\n", config.LogFile, err)
 			return 1
 		}
 		defer func() {
 			log.SetOutput(os.Stderr)
-			f.Close()
+			w.Close()
 		}()
-		log.SetOutput(f)
+		log.SetOutput(w)
+		reopenLog = w.Reopen
 	}
 
-	return serve(config)
+	return serve(config, reopenLog)
 }
 
 // serve builds the proxy handler and blocks serving requests until the
 // process receives SIGINT or SIGTERM. All of its messages go through the log
 // package (respecting logFile), so headless deployments (e.g. a Windows Task
 // Scheduler entry with no console) still leave a record of whether the
-// server actually started.
-func serve(config *Config) int {
+// server actually started. reopenLog, nil when logFile is unset, reopens the
+// log file on SIGUSR1/SIGUSR2.
+func serve(config *Config, reopenLog func() error) int {
 	forbidden := NewForbiddenList()
 	if err := forbidden.Load(config.ForbiddenFile, config.LogLevel); err != nil {
 		logf(config.LogLevel, LogWarn, "Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
@@ -145,7 +148,7 @@ func serve(config *Config) int {
 
 	cacheMgr := NewCacheManager(config)
 	handler := NewProxyHandler(config, cacheMgr, forbidden, uncachable, forbiddenTunnels)
-	setupReloadSignals(config.LogLevel, handler.Reload, cacheMgr.DiscardMemory)
+	setupReloadSignals(config.LogLevel, reopenLog, handler.Reload, cacheMgr.DiscardMemory)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))
 	server := &http.Server{Addr: addr, Handler: handler}

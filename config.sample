@@ -181,4 +181,5 @@
 
 # Redirect logs to a file instead of standard error.  Required for silent
 # background use on Windows (a "-H windowsgui" build has no console).
+# On Unix, SIGUSR1 or SIGUSR2 reopens it, for use with log rotation.
 # logFile = "C:/Users/you/AppData/Local/go-polipo/polipo.log"
