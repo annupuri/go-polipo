@@ -181,8 +181,8 @@ at the end groups findings by how much they matter before a public release.
 | `daemonise`, `pidFile` | 🔷 | Backgrounding left to the service manager / the Windows installer + Task Scheduler. |
 | `SIGTERM`, `SIGINT` | ✅ | Graceful `server.Close()`. |
 | `SIGHUP` | ❌ | No config reload. |
-| `SIGUSR1` (write out cache + reload `forbidden`) | ✅ | **Done (2026-09-14):** reloads `forbidden`/`uncachable` (§4). Polipo's `writeoutObjects` half has no equivalent here - go-polipo's cache is disk-only, so there is nothing held only in memory to flush. |
-| `SIGUSR2` (drop memory cache + reload `forbidden`) | ✅ | **Done (2026-09-14):** same reload as `SIGUSR1`. go-polipo has no separate in-memory cache to drop (§10), so the two signals are equivalent here, unlike in Polipo. |
+| `SIGUSR1` (write out cache + reload `forbidden`) | ✅ | **Done (2026-09-14):** reloads `forbidden`/`uncachable` (§4). Polipo's `writeoutObjects` half has no equivalent here - `Store` writes every entry to disk at once (alongside the memory cache), so there is nothing to write out later. |
+| `SIGUSR2` (drop memory cache + reload `forbidden`) | ✅ | **Done (2026-09-14; memory-cache drop added 2026-11-01):** empties the memory cache (`CacheManager.DiscardMemory`, §10), then does the same reload as `SIGUSR1`, matching Polipo's `discardObjects` + `initForbidden` (`event.c`). The disk cache is untouched, as in Polipo. Before 2026-11-01 it only reloaded, a leftover from before the memory cache existed. |
 
 ---
 
@@ -277,8 +277,8 @@ at the end groups findings by how much they matter before a public release.
   §15).~~ **Done (2026-09-14):** `ProxyHandler.Reload` re-reads both files
   and atomically swaps them in. On Unix, `SIGUSR1`/`SIGUSR2` trigger it
   (`signal_unix.go`), matching Polipo's `initForbidden()`-on-signal behaviour;
-  both signals do the same thing here since go-polipo has no separate
-  in-memory cache for `SIGUSR2` to drop. Windows has no `SIGUSR1`/`SIGUSR2`
+  `SIGUSR2` also empties the memory cache first (added 2026-11-01, see
+  §15). Windows has no `SIGUSR1`/`SIGUSR2`
   (`syscall` doesn't define them there), so `POST /polipo/reload` covers that
   platform - and works everywhere else too. This is a new go-polipo-only
   endpoint, not a port of Polipo's `/polipo/status?init-forbidden` action;

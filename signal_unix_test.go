@@ -11,10 +11,12 @@ import (
 )
 
 func TestSetupReloadSignals(t *testing.T) {
-	var calls atomic.Int32
+	var reloads, discards atomic.Int32
 	setupReloadSignals(0x07, func() error {
-		calls.Add(1)
+		reloads.Add(1)
 		return nil
+	}, func() {
+		discards.Add(1)
 	})
 
 	for _, sig := range []syscall.Signal{syscall.SIGUSR1, syscall.SIGUSR2} {
@@ -24,10 +26,14 @@ func TestSetupReloadSignals(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
-	for calls.Load() < 2 && time.Now().Before(deadline) {
+	for reloads.Load() < 2 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := calls.Load(); got != 2 {
+	if got := reloads.Load(); got != 2 {
 		t.Errorf("expected reload to run twice (SIGUSR1 + SIGUSR2), got %d", got)
+	}
+	// Only SIGUSR2 drops the memory cache, matching Polipo's discardObjects.
+	if got := discards.Load(); got != 1 {
+		t.Errorf("expected the memory cache to be discarded once (SIGUSR2 only), got %d", got)
 	}
 }

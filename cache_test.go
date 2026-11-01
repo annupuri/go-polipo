@@ -1073,6 +1073,41 @@ func TestMemoryCacheRespectsFreshnessAndVary(t *testing.T) {
 	})
 }
 
+// TestDiscardMemoryKeepsDiskCache checks that DiscardMemory (SIGUSR2) empties
+// the memory cache while the disk copy keeps serving the same entry.
+func TestDiscardMemoryKeepsDiskCache(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+
+	url := "http://example.com/discard"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if !cm.memCache.Contains(url) {
+		t.Fatal("entry was not admitted to the memory cache")
+	}
+
+	cm.DiscardMemory()
+	if cm.memCache.Len() != 0 {
+		t.Errorf("memory cache has %d entries after DiscardMemory, want 0", cm.memCache.Len())
+	}
+	got := cm.Lookup(req)
+	if got == nil {
+		t.Fatal("the disk cache should still serve the entry")
+	}
+	defer got.Body.Close()
+	if body, _ := io.ReadAll(got.Body); string(body) != "body" {
+		t.Errorf("body = %q, want %q", body, "body")
+	}
+
+	// With the memory cache disabled there is nothing to discard.
+	cfg2 := NewDefaultConfig()
+	cfg2.MemoryCacheEntries = 0
+	NewCacheManager(cfg2).DiscardMemory()
+}
+
 // TestMemoryCacheDisabled checks that MemoryCacheEntries=0 turns the memory
 // cache off entirely without affecting the disk cache.
 func TestMemoryCacheDisabled(t *testing.T) {

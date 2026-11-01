@@ -123,7 +123,7 @@
 
 # Reload forbiddenFile, uncachableFile and forbiddenTunnelsFile without
 # restarting: send SIGUSR1 or SIGUSR2 (Unix only), or POST /polipo/reload
-# (any platform, including Windows).
+# (any platform, including Windows).  SIGUSR2 also empties the memory cache.
 
 
 ### Outgoing connections
