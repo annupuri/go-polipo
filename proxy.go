@@ -426,6 +426,17 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Any other local-form request (a browser pointed at go-polipo asking
+	// for /favicon.ico, say, or /polipo/ with the local interface disabled)
+	// is also addressed to go-polipo itself, and there is nothing else here
+	// to serve. Polipo answered these from localDocumentRoot, with 404 when
+	// the file was absent; go-polipo has no document root, so it is always
+	// 404. Forwarding them instead fails anyway: there is no target host.
+	if isLocalForm(req) {
+		http.NotFound(w, req)
+		return
+	}
+
 	// 2. Forbidden URL verification
 	if url := targetURL(req); ph.forbidden.Load().Match(url, req.Host) {
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s is blacklisted", url)

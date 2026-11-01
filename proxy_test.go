@@ -138,6 +138,43 @@ func TestProxyLocalInterfaceNotForProxiedURLs(t *testing.T) {
 	}
 }
 
+// TestProxyOtherLocalFormIsNotFound: a local-form request outside the local
+// interface (a browser that opened /polipo/ fetching /favicon.ico) is
+// answered 404 by go-polipo itself, as Polipo did when localDocumentRoot had
+// no such file, instead of being "forwarded" to no host at all - which
+// failed with a 502 and a "Proxy error" log line. The same goes for /polipo/
+// when the local interface is disabled.
+func TestProxyOtherLocalFormIsNotFound(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	disabled := NewDefaultConfig()
+	disabled.DisableLocalInterface = true
+	for _, tc := range []struct {
+		name   string
+		cfg    *Config
+		method string
+		path   string
+	}{
+		{"favicon", NewDefaultConfig(), http.MethodGet, "/favicon.ico"},
+		{"root", NewDefaultConfig(), http.MethodGet, "/"},
+		{"POST elsewhere", NewDefaultConfig(), http.MethodPost, "/form"},
+		{"local interface disabled", disabled, http.MethodGet, "/polipo/"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		newTestHandler(tc.cfg).ServeHTTP(rr, req)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("%s: %s %s: got %d, want 404", tc.name, tc.method, tc.path, rr.Code)
+		}
+	}
+	if strings.Contains(buf.String(), "Proxy error") {
+		t.Errorf("local-form requests must not be forwarded, but got:\n%s", buf.String())
+	}
+}
+
 func TestProxyForbiddenFiltering(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cm := NewCacheManager(cfg)
