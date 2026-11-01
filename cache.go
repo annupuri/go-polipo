@@ -284,6 +284,10 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 		return nil, false
 	}
 
+	// resp.Body reads through a bufio.Reader, so closing it would leave the
+	// file itself open until the garbage collector got to it.
+	resp.Body = fileBody{ReadCloser: resp.Body, file: file}
+
 	// A response carrying Vary is always reported stale, regardless of its
 	// actual HTTP freshness: the cache key is the URL alone, so this entry
 	// cannot be matched against the current request's headers, and only a
@@ -299,6 +303,18 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	resp.Header.Del("X-Polipo-Body-Offset")
 
 	return resp, stale
+}
+
+// fileBody is a disk cache entry's body: closing it also closes the cache
+// file it is read from.
+type fileBody struct {
+	io.ReadCloser
+	file *os.File
+}
+
+func (b fileBody) Close() error {
+	b.ReadCloser.Close()
+	return b.file.Close()
 }
 
 // Heuristic freshness parameters (RFC 9111 section 4.2.2). Polipo exposed the
