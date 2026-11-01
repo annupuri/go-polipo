@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -122,7 +123,7 @@ func TestCacheStoreAndLookup(t *testing.T) {
 	resp.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 
 	// 1. Store the response
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("Store failed: %v", err)
 	}
 
@@ -307,7 +308,7 @@ func TestCacheInvalidAndNonGetCases(t *testing.T) {
 		Header:     make(http.Header),
 		Body:       io.NopCloser(bytes.NewBufferString("test")),
 	}
-	if err := cm.Store(reqPost, respMock); err != nil {
+	if err := storeNow(cm, reqPost, respMock); err != nil {
 		t.Errorf("unexpected error on non-GET Store: %v", err)
 	}
 	if body, _ := io.ReadAll(respMock.Body); string(body) != "test" {
@@ -323,7 +324,7 @@ func TestCacheInvalidAndNonGetCases(t *testing.T) {
 	respNoStore.Header.Set("Cache-Control", "no-store")
 	reqGet := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 
-	if err := cm.Store(reqGet, respNoStore); err != nil {
+	if err := storeNow(cm, reqGet, respNoStore); err != nil {
 		t.Errorf("unexpected error on no-store Store: %v", err)
 	}
 	if body, _ := io.ReadAll(respNoStore.Body); string(body) != "test" {
@@ -332,6 +333,18 @@ func TestCacheInvalidAndNonGetCases(t *testing.T) {
 }
 
 // mkResp builds a 200 response with the given body and headers (key,value pairs).
+// storeNow calls Store and then reads the response body to EOF, as a client
+// would, so the entry is committed before storeNow returns. resp.Body is
+// replaced with a fresh reader over the same bytes, so a test can still read
+// what the client received.
+func storeNow(cm *CacheManager, req *http.Request, resp *http.Response) error {
+	cm.Store(req, resp)
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	return err
+}
+
 func mkResp(body string, hdr ...string) *http.Response {
 	h := make(http.Header)
 	for i := 0; i+1 < len(hdr); i += 2 {
@@ -365,7 +378,7 @@ func TestStoreSkipsSetCookie(t *testing.T) {
 	cm := NewCacheManager(cfg)
 
 	resp := mkResp("body", "Cache-Control", "max-age=3600", "Set-Cookie", "sid=abc")
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if got, _ := io.ReadAll(resp.Body); string(got) != "body" {
@@ -380,7 +393,7 @@ func TestStoreSkipsSetCookie(t *testing.T) {
 	cfg2.DiskCacheRoot = t.TempDir()
 	cfg2.DontCacheCookies = false
 	cm2 := NewCacheManager(cfg2)
-	if err := cm2.Store(req, mkResp("body", "Cache-Control", "max-age=3600", "Set-Cookie", "sid=abc")); err != nil {
+	if err := storeNow(cm2, req, mkResp("body", "Cache-Control", "max-age=3600", "Set-Cookie", "sid=abc")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if !fileExistsForURL(t, cm2, url) {
@@ -401,7 +414,7 @@ func TestStoreCachesVaryButAlwaysStale(t *testing.T) {
 		url := "http://example.com/vary/" + strings.ReplaceAll(strings.TrimSpace(vary), " ", "_")
 		req := httptest.NewRequest(http.MethodGet, url, nil)
 		resp := mkResp("variant", "Cache-Control", "max-age=3600", "ETag", `"v1"`, "Vary", vary)
-		if err := cm.Store(req, resp); err != nil {
+		if err := storeNow(cm, req, resp); err != nil {
 			t.Fatalf("Store(Vary: %q): %v", vary, err)
 		}
 		if got, _ := io.ReadAll(resp.Body); string(got) != "variant" {
@@ -431,7 +444,7 @@ func TestStoreCachesVaryButAlwaysStale(t *testing.T) {
 	// same as a response with no Vary at all.
 	url := "http://example.com/vary/empty"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
-	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600", "Vary", "")); err != nil {
+	if err := storeNow(cm, req, mkResp("body", "Cache-Control", "max-age=3600", "Vary", "")); err != nil {
 		t.Fatalf("Store(empty Vary): %v", err)
 	}
 	if !fileExistsForURL(t, cm, url) {
@@ -455,7 +468,7 @@ func TestStoreSkipsAuthenticated(t *testing.T) {
 	// Authorization present, response not explicitly shareable -> not cached.
 	reqAuth := httptest.NewRequest(http.MethodGet, url, nil)
 	reqAuth.Header.Set("Authorization", "Bearer t0ken")
-	if err := cm.Store(reqAuth, mkResp("secret", "Cache-Control", "max-age=3600")); err != nil {
+	if err := storeNow(cm, reqAuth, mkResp("secret", "Cache-Control", "max-age=3600")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if fileExistsForURL(t, cm, url) {
@@ -466,7 +479,7 @@ func TestStoreSkipsAuthenticated(t *testing.T) {
 	url2 := "http://example.com/public-but-authed"
 	reqAuth2 := httptest.NewRequest(http.MethodGet, url2, nil)
 	reqAuth2.Header.Set("Authorization", "Bearer t0ken")
-	if err := cm.Store(reqAuth2, mkResp("ok", "Cache-Control", "public, max-age=3600")); err != nil {
+	if err := storeNow(cm, reqAuth2, mkResp("ok", "Cache-Control", "public, max-age=3600")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if !fileExistsForURL(t, cm, url2) {
@@ -484,7 +497,7 @@ func TestStoreSkipsAuthenticated(t *testing.T) {
 	url3 := "http://example.com/proxy-authed"
 	reqProxyAuth := httptest.NewRequest(http.MethodGet, url3, nil)
 	reqProxyAuth.Header.Set("Proxy-Authorization", "Basic Zm9vOmJhcg==")
-	if err := cm.Store(reqProxyAuth, mkResp("secret", "Cache-Control", "max-age=3600")); err != nil {
+	if err := storeNow(cm, reqProxyAuth, mkResp("secret", "Cache-Control", "max-age=3600")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if !fileExistsForURL(t, cm, url3) {
@@ -506,7 +519,7 @@ func TestStoreSkipsOversizedEntries(t *testing.T) {
 		resp := mkResp("this body is way over 5 bytes", "Cache-Control", "max-age=3600")
 		resp.ContentLength = int64(len("this body is way over 5 bytes"))
 
-		if err := cm.Store(req, resp); err != nil {
+		if err := storeNow(cm, req, resp); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if fileExistsForURL(t, cm, url) {
@@ -526,7 +539,7 @@ func TestStoreSkipsOversizedEntries(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, url, nil)
 		resp := mkResp("also way over the limit", "Cache-Control", "max-age=3600")
 
-		if err := cm.Store(req, resp); err != nil {
+		if err := storeNow(cm, req, resp); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if fileExistsForURL(t, cm, url) {
@@ -544,7 +557,7 @@ func TestStoreSkipsOversizedEntries(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, url, nil)
 		resp := mkResp("ok", "Cache-Control", "max-age=3600")
 
-		if err := cm.Store(req, resp); err != nil {
+		if err := storeNow(cm, req, resp); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if !fileExistsForURL(t, cm, url) {
@@ -562,7 +575,7 @@ func TestStoreSkipsOversizedEntries(t *testing.T) {
 		resp := mkResp("this body is way over 5 bytes", "Cache-Control", "max-age=3600")
 		resp.ContentLength = int64(len("this body is way over 5 bytes"))
 
-		if err := cm2.Store(req, resp); err != nil {
+		if err := storeNow(cm2, req, resp); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if !fileExistsForURL(t, cm2, url) {
@@ -595,7 +608,7 @@ func TestDiskCacheDisabled(t *testing.T) {
 			url := "http://example.com/x"
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 			resp := mkResp("body", "Cache-Control", "max-age=3600")
-			if err := cm.Store(req, resp); err != nil {
+			if err := storeNow(cm, req, resp); err != nil {
 				t.Fatalf("Store: %v", err)
 			}
 			if got, _ := io.ReadAll(resp.Body); string(got) != "body" {
@@ -886,7 +899,7 @@ func TestMemoryCacheServesWithoutDisk(t *testing.T) {
 	url := "http://example.com/memhit"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
 	resp := mkResp("memory body", "Cache-Control", "max-age=3600")
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 
@@ -927,7 +940,7 @@ func TestMemoryCacheIndependentOfNoDiskCache(t *testing.T) {
 
 			url := "http://example.com/x"
 			req := httptest.NewRequest(http.MethodGet, url, nil)
-			if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+			if err := storeNow(cm, req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
 				t.Fatalf("Store: %v", err)
 			}
 			if !cm.memCache.Contains(url) {
@@ -957,7 +970,7 @@ func TestMemoryCacheMaxEntrySize(t *testing.T) {
 
 		url := "http://example.com/toobig-for-mem"
 		req := httptest.NewRequest(http.MethodGet, url, nil)
-		if err := cm.Store(req, mkResp(body, "Cache-Control", "max-age=3600")); err != nil {
+		if err := storeNow(cm, req, mkResp(body, "Cache-Control", "max-age=3600")); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if cm.memCache.Contains(url) {
@@ -977,7 +990,7 @@ func TestMemoryCacheMaxEntrySize(t *testing.T) {
 
 		url := "http://example.com/toobig-for-disk"
 		req := httptest.NewRequest(http.MethodGet, url, nil)
-		if err := cm.Store(req, mkResp(body, "Cache-Control", "max-age=3600")); err != nil {
+		if err := storeNow(cm, req, mkResp(body, "Cache-Control", "max-age=3600")); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if !cm.memCache.Contains(url) {
@@ -1000,7 +1013,7 @@ func TestMemoryCacheEntriesEviction(t *testing.T) {
 	store := func(path string) {
 		url := "http://example.com/" + path
 		req := httptest.NewRequest(http.MethodGet, url, nil)
-		if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+		if err := storeNow(cm, req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
 			t.Fatalf("Store(%s): %v", path, err)
 		}
 	}
@@ -1054,7 +1067,7 @@ func TestStoreCachesNoCacheButAlwaysStale(t *testing.T) {
 			for _, v := range tc.cc {
 				resp.Header.Add("Cache-Control", v)
 			}
-			if err := cm.Store(req, resp); err != nil {
+			if err := storeNow(cm, req, resp); err != nil {
 				t.Fatalf("%s (memoryCacheEntries=%d): Store: %v", tc.name, memEntries, err)
 			}
 			if !fileExistsForURL(t, cm, url) {
@@ -1085,7 +1098,7 @@ func TestMemoryCacheRespectsFreshnessAndVary(t *testing.T) {
 		url := "http://example.com/stale"
 		req := httptest.NewRequest(http.MethodGet, url, nil)
 		resp := mkResp("body", "Cache-Control", "max-age=0", "Date", time.Now().UTC().Format(http.TimeFormat))
-		if err := cm.Store(req, resp); err != nil {
+		if err := storeNow(cm, req, resp); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if !cm.memCache.Contains(url) {
@@ -1112,7 +1125,7 @@ func TestMemoryCacheRespectsFreshnessAndVary(t *testing.T) {
 		url := "http://example.com/vary"
 		req := httptest.NewRequest(http.MethodGet, url, nil)
 		resp := mkResp("body", "Cache-Control", "max-age=3600", "Vary", "Accept-Encoding")
-		if err := cm.Store(req, resp); err != nil {
+		if err := storeNow(cm, req, resp); err != nil {
 			t.Fatalf("Store: %v", err)
 		}
 		if got := cm.Lookup(req); got != nil {
@@ -1131,7 +1144,7 @@ func TestDiscardMemoryKeepsDiskCache(t *testing.T) {
 
 	url := "http://example.com/discard"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
-	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+	if err := storeNow(cm, req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if !cm.memCache.Contains(url) {
@@ -1179,7 +1192,7 @@ func TestDiskLookupClosesCacheFile(t *testing.T) {
 	cm := NewCacheManager(cfg)
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/fd", nil)
-	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+	if err := storeNow(cm, req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 
@@ -1216,7 +1229,7 @@ func TestDiskHitPromotedToMemory(t *testing.T) {
 		if knownLength {
 			resp.ContentLength = int64(len(body))
 		}
-		if err := seed.Store(httptest.NewRequest(http.MethodGet, url, nil), resp); err != nil {
+		if err := storeNow(seed, httptest.NewRequest(http.MethodGet, url, nil), resp); err != nil {
 			t.Fatalf("Store(%s): %v", url, err)
 		}
 	}
@@ -1285,7 +1298,7 @@ func TestMemoryCacheDisabled(t *testing.T) {
 
 	url := "http://example.com/diskonly"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
-	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+	if err := storeNow(cm, req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
 	if !fileExistsForURL(t, cm, url) {
@@ -1296,4 +1309,149 @@ func TestMemoryCacheDisabled(t *testing.T) {
 		t.Fatal("Lookup should still hit the disk cache")
 	}
 	got.Body.Close()
+}
+
+// tempFiles lists the cache's temporary (still-being-written) files.
+func tempFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var found []string
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasPrefix(d.Name(), cacheTempPrefix) {
+			found = append(found, path)
+		}
+		return nil
+	})
+	return found
+}
+
+// failingReader returns its data, then err instead of EOF.
+type failingReader struct {
+	data []byte
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+// TestStoreDiscardsIncompleteBody: an entry is committed only once its body
+// has been read to EOF. A body closed early (the client went away) or cut
+// off by a read error (a broken origin connection) leaves nothing in either
+// cache, and no temporary file behind.
+func TestStoreDiscardsIncompleteBody(t *testing.T) {
+	cases := map[string]func(cm *CacheManager, req *http.Request){
+		"closed early": func(cm *CacheManager, req *http.Request) {
+			resp := mkResp("a body that is not read to the end", "Cache-Control", "max-age=3600")
+			cm.Store(req, resp)
+			buf := make([]byte, 5)
+			io.ReadFull(resp.Body, buf)
+			resp.Body.Close()
+		},
+		"read error": func(cm *CacheManager, req *http.Request) {
+			resp := mkResp("", "Cache-Control", "max-age=3600")
+			resp.Body = io.NopCloser(&failingReader{data: []byte("partial"), err: io.ErrUnexpectedEOF})
+			cm.Store(req, resp)
+			if _, err := io.ReadAll(resp.Body); err != io.ErrUnexpectedEOF {
+				t.Errorf("read error: got %v, want the origin's error passed through", err)
+			}
+			resp.Body.Close()
+		},
+	}
+	for name, run := range cases {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+		url := "http://example.com/incomplete"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+
+		run(cm, req)
+
+		if fileExistsForURL(t, cm, url) {
+			t.Errorf("%s: an incomplete body must not be written to the disk cache", name)
+		}
+		if cm.memCache.Contains(url) {
+			t.Errorf("%s: an incomplete body must not be added to the memory cache", name)
+		}
+		if left := tempFiles(t, cfg.DiskCacheRoot); len(left) > 0 {
+			t.Errorf("%s: temporary files left behind: %v", name, left)
+		}
+	}
+}
+
+// TestStoreDropsBodyThatGrowsPastLimit: a response without a Content-Length
+// is admitted, then dropped from whichever cache it outgrows while it
+// streams. The client still gets the whole body.
+func TestStoreDropsBodyThatGrowsPastLimit(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cfg.MaxDiskCacheEntrySize = 10
+	cfg.MemoryCacheMaxEntrySize = 20
+	cm := NewCacheManager(cfg)
+
+	const body = "fifteen bytes.."
+	url := "http://example.com/grows"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	resp := mkResp(body, "Cache-Control", "max-age=3600")
+	resp.ContentLength = -1
+	if err := storeNow(cm, req, resp); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if got, _ := io.ReadAll(resp.Body); string(got) != body {
+		t.Errorf("client body = %q, want %q", got, body)
+	}
+	if fileExistsForURL(t, cm, url) {
+		t.Error("a body over maxDiskCacheEntrySize must not reach the disk cache")
+	}
+	if left := tempFiles(t, cfg.DiskCacheRoot); len(left) > 0 {
+		t.Errorf("temporary files left behind: %v", left)
+	}
+	if !cm.memCache.Contains(url) {
+		t.Error("the body still fits memoryCacheMaxEntrySize and should be in the memory cache")
+	}
+}
+
+// TestExpireTemporaryFiles: Expire leaves a temporary file that is still
+// being written alone, and removes one a crash left behind, even when its
+// content would otherwise look like a valid entry.
+func TestExpireTemporaryFiles(t *testing.T) {
+	root := t.TempDir()
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = root
+	cm := NewCacheManager(cfg)
+
+	dir := filepath.Join(root, "example.com")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	valid := "HTTP/1.1 200 OK\r\nCache-Control: max-age=999999\r\nDate: " + timeHeader(0) + "\r\nContent-Length: 2\r\n\r\nok"
+	fresh := filepath.Join(dir, cacheTempPrefix+"fresh")
+	old := filepath.Join(dir, cacheTempPrefix+"old")
+	for _, p := range []string{fresh, old} {
+		if err := os.WriteFile(p, []byte(valid), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	past := time.Now().Add(-2 * cacheTempMaxAge)
+	if err := os.Chtimes(old, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := cm.Expire()
+	if err != nil {
+		t.Fatalf("Expire: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("a temporary file still being written must be left alone: %v", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("an abandoned temporary file should be removed (stat err = %v)", err)
+	}
+	if stats.Scanned != 1 || stats.Removed != 1 {
+		t.Errorf("stats = %+v, want Scanned 1 (the abandoned file) and Removed 1", stats)
+	}
 }

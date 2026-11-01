@@ -10,6 +10,10 @@
   * The on-disk cache format is unchanged: the directory layout and the
     MD5 + custom-base64 file names are compatible with Polipo 1.x, so an
     existing cache can be reused.
+  * As in Polipo, a cacheable response is passed to the client as it
+    arrives and copied into the cache at the same time, rather than read
+    in full first.  The entry is saved once the whole body has arrived;
+    an interrupted transfer is not cached.
   * An in-memory LRU cache (memoryCacheEntries, default 1024 entries;
     memoryCacheMaxEntrySize, default 1MB) now sits in front of the disk
     cache, independent of noDiskCache/diskCacheRoot -- it works the same
