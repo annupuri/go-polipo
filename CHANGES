@@ -152,7 +152,10 @@
         tuning variables are removed.
       - The local web interface is reduced to /polipo/, /polipo/config
         (read-only), and the two new POST-only endpoints above; there is
-        no cache-index browsing or server-statistics page.
+        no cache-index browsing or server-statistics page.  As in
+        Polipo, it answers only requests addressed to go-polipo itself
+        (GET /polipo/...); a proxied http://example.com/polipo/... is
+        forwarded to that site.
       - Many low-level tuning variables from Polipo 1.x (chunk/object
         high marks, server slot counts, and similar) are no longer
         recognised; unknown variables are ignored (and now logged as a

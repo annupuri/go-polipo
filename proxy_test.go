@@ -67,7 +67,7 @@ func TestProxyLocalInterface(t *testing.T) {
 	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// Access /polipo/
-	req := httptest.NewRequest(http.MethodGet, "http://localhost:8123/polipo/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/polipo/", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 
@@ -82,7 +82,7 @@ func TestProxyLocalInterface(t *testing.T) {
 	}
 
 	// Access /polipo/config
-	reqConfig := httptest.NewRequest(http.MethodGet, "http://localhost:8123/polipo/config", nil)
+	reqConfig := httptest.NewRequest(http.MethodGet, "/polipo/config", nil)
 	reqConfig.RemoteAddr = "127.0.0.1:12345"
 	rrConfig := httptest.NewRecorder()
 
@@ -103,6 +103,35 @@ func TestProxyLocalInterface(t *testing.T) {
 	} {
 		if !strings.Contains(bodyConfig, want) {
 			t.Errorf("config page missing row %q\nbody:\n%s", want, bodyConfig)
+		}
+	}
+}
+
+// TestProxyLocalInterfaceNotForProxiedURLs: a proxied (absolute-form) request
+// whose path happens to start with /polipo belongs to the origin server, not
+// to go-polipo. Serving the local interface for it would let any website's
+// scripts read /polipo/config or POST /polipo/flush same-origin. Polipo makes
+// the same split (urlIsLocal in http_parse.c: only a URL starting with '/'
+// is local).
+func TestProxyLocalInterfaceNotForProxiedURLs(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer backend.Close()
+
+	ph := newTestHandler(NewDefaultConfig())
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/polipo/"},
+		{http.MethodGet, "/polipo/config"},
+		{http.MethodPost, "/polipo/flush"},
+		{http.MethodPost, "/polipo/reload"},
+	} {
+		req := httptest.NewRequest(tc.method, backend.URL+tc.path, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != http.StatusTeapot {
+			t.Errorf("%s %s%s: got %d, want 418 from the backend", tc.method, backend.URL, tc.path, rr.Code)
 		}
 	}
 }
@@ -230,7 +259,7 @@ func TestProxyReloadEndpoint(t *testing.T) {
 	ph := newTestHandler(cfg)
 
 	// GET must not trigger a reload (avoids prefetch/crawler side effects).
-	getReq := httptest.NewRequest(http.MethodGet, "http://localhost:8123/polipo/reload", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/polipo/reload", nil)
 	getReq.RemoteAddr = "127.0.0.1:12345"
 	getRR := httptest.NewRecorder()
 	ph.ServeHTTP(getRR, getReq)
@@ -242,7 +271,7 @@ func TestProxyReloadEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	postReq := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/reload", nil)
+	postReq := httptest.NewRequest(http.MethodPost, "/polipo/reload", nil)
 	postReq.RemoteAddr = "127.0.0.1:12345"
 	postRR := httptest.NewRecorder()
 	ph.ServeHTTP(postRR, postReq)
@@ -267,7 +296,7 @@ func TestProxyFlushEndpoint(t *testing.T) {
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	// GET must not trigger a flush (avoids prefetch/crawler side effects).
-	getReq := httptest.NewRequest(http.MethodGet, "http://localhost:8123/polipo/flush", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/polipo/flush", nil)
 	getReq.RemoteAddr = "127.0.0.1:12345"
 	getRR := httptest.NewRecorder()
 	ph.ServeHTTP(getRR, getReq)
@@ -285,7 +314,7 @@ func TestProxyFlushEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	postReq := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/flush", nil)
+	postReq := httptest.NewRequest(http.MethodPost, "/polipo/flush", nil)
 	postReq.RemoteAddr = "127.0.0.1:12345"
 	postRR := httptest.NewRecorder()
 	ph.ServeHTTP(postRR, postReq)
@@ -325,7 +354,7 @@ func TestProxyFlushEndpointErrorWhenNoDiskCache(t *testing.T) {
 	cfg.DiskCacheRoot = "" // disk cache disabled -> Expire() errors
 	ph := newTestHandler(cfg)
 
-	req := httptest.NewRequest(http.MethodPost, "http://localhost:8123/polipo/flush", nil)
+	req := httptest.NewRequest(http.MethodPost, "/polipo/flush", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 	ph.ServeHTTP(rr, req)
@@ -1808,15 +1837,19 @@ func TestProxyAuthCredentials(t *testing.T) {
 		t.Errorf("wrong credentials: got %d, want 407", rrWrong.Code)
 	}
 
-	// Correct credentials pass the auth gate and reach the local interface
-	// (chosen because it needs no outbound network access).
-	reqOK := httptest.NewRequest(http.MethodGet, "http://example.com/polipo/", nil)
+	// Correct credentials pass the auth gate and are forwarded (to a local
+	// backend, so no outbound network access is needed).
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer backend.Close()
+	reqOK := httptest.NewRequest(http.MethodGet, backend.URL+"/", nil)
 	reqOK.RemoteAddr = "127.0.0.1:12345"
 	reqOK.Header.Set("Proxy-Authorization", basic("alice", "secret"))
 	rrOK := httptest.NewRecorder()
 	ph.ServeHTTP(rrOK, reqOK)
-	if rrOK.Code != http.StatusOK {
-		t.Errorf("correct credentials: got %d, want 200", rrOK.Code)
+	if rrOK.Code != http.StatusTeapot {
+		t.Errorf("correct credentials: got %d, want 418 from the backend", rrOK.Code)
 	}
 
 	// Local-form request (a browser pointed straight at go-polipo rather than
