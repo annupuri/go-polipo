@@ -156,7 +156,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 | ページ / 変数 | 状態 | 備考 |
 | :--- | :--: | :--- |
-| `/polipo/` , `/polipo/config` | ✅ | 実装済み。`config` は**読み取り専用**の表。 |
+| `/polipo/` , `/polipo/config` | ✅ | 実装済み。`config` は**読み取り専用**の表。Polipo の `urlIsLocal` と同じく、ローカル形式のリクエスト（`GET /polipo/...`）にだけ応答し、プロキシ経由の `http://example.com/polipo/...` はそのサイトへ転送する（2026-11-01 修正：以前はこれにも管理画面が応答し、任意のサイトから `/polipo/config` の読み取りや `/polipo/flush` の実行ができた）。 |
 | `disableLocalInterface` | ✅ | 尊重。 |
 | Web からの設定**編集** / `disableConfiguration` | ❌ | 未実装（ページは読み取り専用）なのでガードは無意味。 |
 | `/polipo/status?`（状態表示 + キャッシュフラッシュ操作） | ⚠️ | **キャッシュフラッシュのみ完了（2026-09-14）。状態/統計表示側は今も❌。** Polipo自身の `/polipo/status?` アクション（`local.c`: `init-forbidden`、`reopen-log`、`discard-objects`、`writeout-objects`、`free-chunk-arenas`）は、go-polipoでは「既に別パスで対応済み」（`init-forbidden` → `POST /polipo/reload`、§4/§15）か「対応するものが無い」（残り4つはPolipoのメモリ上オブジェクトキャッシュとチャンクアリーナ向けで、go-polipoには相当する仕組みが無い — §10）のいずれかにしか当たらない。どのアクションも**ディスクキャッシュには一切触れない** — Polipoがディスクキャッシュを削除するのは別プロセスの`-x`実行時のみで、HTTP経由での操作は存在しない。つまりこの項目には移植すべき実物のアクションが元から無かった。`POST /polipo/flush`（`proxy.go`）はPolipoの移植ではなく**go-polipo独自の新設エンドポイント**で、稼働中のサーバー上で`-x`と同じ`CacheManager.Expire()`を実行し、結果件数を表示する — 特にWindowsでは`-x`を実行するための別シェルセッションが無いことが多いため有用（§15参照）。統計表示（RTT・サーバー能力など）側は下の別行の通り今回も未対応で、そもそもこの項目のスコープ外としていた。 |

@@ -417,8 +417,13 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 1.5 Local Interface handle (Polipo local web page)
-	if !ph.config.DisableLocalInterface && strings.HasPrefix(req.URL.Path, "/polipo") {
+	// 1.5 Local Interface handle (Polipo local web page). Only a local-form
+	// request is addressed to go-polipo itself; an absolute-form
+	// http://example.com/polipo/... belongs to that origin and must be
+	// forwarded, or any website's scripts could read /polipo/config or POST
+	// /polipo/flush same-origin. Polipo's urlIsLocal (http_parse.c) makes the
+	// same split.
+	if !ph.config.DisableLocalInterface && isLocalForm(req) && strings.HasPrefix(req.URL.Path, "/polipo") {
 		ph.handleLocal(w, req)
 		return
 	}
