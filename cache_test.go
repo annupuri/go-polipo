@@ -1151,6 +1151,78 @@ func TestDiskLookupClosesCacheFile(t *testing.T) {
 	}
 }
 
+// TestDiskHitPromotedToMemory checks that a GET served from the disk cache is
+// copied into the memory cache - as after a restart, when only the disk holds
+// anything - and that HEAD hits and bodies over memoryCacheMaxEntrySize are
+// not, while still reading back complete.
+func TestDiskHitPromotedToMemory(t *testing.T) {
+	root := t.TempDir()
+	// Seed the disk only, through a manager with no memory cache.
+	seedCfg := NewDefaultConfig()
+	seedCfg.DiskCacheRoot = root
+	seedCfg.MemoryCacheEntries = 0
+	seed := NewCacheManager(seedCfg)
+	store := func(url, body string, knownLength bool) {
+		t.Helper()
+		resp := mkResp(body, "Cache-Control", "max-age=3600")
+		if knownLength {
+			resp.ContentLength = int64(len(body))
+		}
+		if err := seed.Store(httptest.NewRequest(http.MethodGet, url, nil), resp); err != nil {
+			t.Fatalf("Store(%s): %v", url, err)
+		}
+	}
+	store("http://example.com/small", "small body", false)
+	store("http://example.com/big-known", "a body over the limit", true)
+	store("http://example.com/big-unknown", "a body over the limit", false)
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = root
+	cfg.MemoryCacheMaxEntrySize = 10
+	cm := NewCacheManager(cfg)
+	lookup := func(method, url string) string {
+		t.Helper()
+		resp := cm.Lookup(httptest.NewRequest(method, url, nil))
+		if resp == nil {
+			t.Fatalf("%s %s: miss", method, url)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("%s %s: reading body: %v", method, url, err)
+		}
+		return string(body)
+	}
+
+	lookup(http.MethodHead, "http://example.com/small")
+	if cm.memCache.Contains("http://example.com/small") {
+		t.Error("a HEAD hit must not be promoted (it has no body)")
+	}
+	if got := lookup(http.MethodGet, "http://example.com/small"); got != "small body" {
+		t.Errorf("small: body = %q", got)
+	}
+	if !cm.memCache.Contains("http://example.com/small") {
+		t.Fatal("a GET disk hit should be promoted to the memory cache")
+	}
+	// The promoted copy now answers on its own.
+	path, _ := cm.GetCachePath("http://example.com/small")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := lookup(http.MethodGet, "http://example.com/small"); got != "small body" {
+		t.Errorf("small from memory: body = %q", got)
+	}
+
+	for _, url := range []string{"http://example.com/big-known", "http://example.com/big-unknown"} {
+		if got := lookup(http.MethodGet, url); got != "a body over the limit" {
+			t.Errorf("%s: body = %q, want it complete", url, got)
+		}
+		if cm.memCache.Contains(url) {
+			t.Errorf("%s: a body over memoryCacheMaxEntrySize must not be promoted", url)
+		}
+	}
+}
+
 // TestMemoryCacheDisabled checks that MemoryCacheEntries=0 turns the memory
 // cache off entirely without affecting the disk cache.
 func TestMemoryCacheDisabled(t *testing.T) {
