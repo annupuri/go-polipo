@@ -302,7 +302,43 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	resp.Header.Del("X-Polipo-Access")
 	resp.Header.Del("X-Polipo-Body-Offset")
 
+	// Copy the entry into the memory cache, so that later hits skip the
+	// disk - otherwise the memory cache would only ever hold what was
+	// fetched since the last restart. Nothing needs demoting when the LRU
+	// evicts it again: the disk copy stays where it is. A HEAD response
+	// carries no body to copy.
+	if cm.memCache != nil && req.Method == http.MethodGet {
+		cm.promote(key, resp)
+	}
+
 	return resp, stale
+}
+
+// promote copies a disk hit into the memory cache, subject to the same
+// memoryCacheMaxEntrySize limit as Store. A body over the limit is not
+// copied and keeps streaming from the file, with whatever was already read
+// put back in front of the rest.
+func (cm *CacheManager) promote(key string, resp *http.Response) {
+	limit := cm.config.MemoryCacheMaxEntrySize
+	if limit >= 0 && resp.ContentLength > limit {
+		return
+	}
+	var r io.Reader = resp.Body
+	if limit >= 0 {
+		r = io.LimitReader(resp.Body, limit+1)
+	}
+	body, err := io.ReadAll(r)
+	if err != nil || (limit >= 0 && int64(len(body)) > limit) {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
+		return
+	}
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	cm.memCache.Add(key, newMemEntry(resp, body))
 }
 
 // fileBody is a disk cache entry's body: closing it also closes the cache
