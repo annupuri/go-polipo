@@ -1027,6 +1027,54 @@ func TestMemoryCacheEntriesEviction(t *testing.T) {
 // TestMemoryCacheRespectsFreshnessAndVary checks that a memory-cache hit goes
 // through the same isExpired/responseVaries logic as a disk hit, rather than
 // a separate copy of the rules that could drift from it.
+// TestStoreCachesNoCacheButAlwaysStale: a response Cache-Control: no-cache may
+// be stored but must not be reused without revalidating with the origin (RFC
+// 9111 section 5.2.2.4; Polipo's objectMustRevalidate), however fresh its
+// max-age says it is - in both the disk and the memory cache.
+func TestStoreCachesNoCacheButAlwaysStale(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cc   []string
+	}{
+		{"bare", []string{"no-cache"}},
+		{"with max-age, mixed case", []string{"max-age=3600, No-Cache"}},
+		{"qualified form treated as unqualified", []string{`max-age=3600, no-cache="Set-Cookie"`}},
+		{"second header line", []string{"max-age=3600", "no-cache"}},
+	} {
+		for _, memEntries := range []int{0, 1024} {
+			cfg := NewDefaultConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			cfg.MemoryCacheEntries = memEntries
+			cm := NewCacheManager(cfg)
+
+			url := "http://example.com/nocache"
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			resp := mkResp("body", "ETag", `"v1"`, "Date", time.Now().UTC().Format(http.TimeFormat))
+			for _, v := range tc.cc {
+				resp.Header.Add("Cache-Control", v)
+			}
+			if err := cm.Store(req, resp); err != nil {
+				t.Fatalf("%s (memoryCacheEntries=%d): Store: %v", tc.name, memEntries, err)
+			}
+			if !fileExistsForURL(t, cm, url) {
+				t.Errorf("%s: a no-cache response should still be cached", tc.name)
+			}
+
+			if got := cm.Lookup(req); got != nil {
+				got.Body.Close()
+				t.Errorf("%s (memoryCacheEntries=%d): Lookup must not report a no-cache entry fresh", tc.name, memEntries)
+			}
+			stale, isStale := cm.LookupStale(req)
+			if stale == nil || !isStale {
+				t.Errorf("%s (memoryCacheEntries=%d): LookupStale should return the entry with stale=true", tc.name, memEntries)
+			}
+			if stale != nil {
+				stale.Body.Close()
+			}
+		}
+	}
+}
+
 func TestMemoryCacheRespectsFreshnessAndVary(t *testing.T) {
 	t.Run("stale entry is a Lookup miss but a LookupStale hit", func(t *testing.T) {
 		cfg := NewDefaultConfig()
