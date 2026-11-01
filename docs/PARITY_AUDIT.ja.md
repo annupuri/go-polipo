@@ -165,7 +165,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `/polipo/status?`（状態表示 + キャッシュフラッシュ操作） | ⚠️ | **キャッシュフラッシュのみ完了（2026-09-14）。状態/統計表示側は今も❌。** Polipo自身の `/polipo/status?` アクション（`local.c`: `init-forbidden`、`reopen-log`、`discard-objects`、`writeout-objects`、`free-chunk-arenas`）は、go-polipoでは「既に別パスで対応済み」（`init-forbidden` → `POST /polipo/reload`、§4/§15）か「対応するものが無い」（残り4つはPolipoのメモリ上オブジェクトキャッシュとチャンクアリーナ向けで、go-polipoには相当する仕組みが無い — §10）のいずれかにしか当たらない。どのアクションも**ディスクキャッシュには一切触れない** — Polipoがディスクキャッシュを削除するのは別プロセスの`-x`実行時のみで、HTTP経由での操作は存在しない。つまりこの項目には移植すべき実物のアクションが元から無かった。`POST /polipo/flush`（`proxy.go`）はPolipoの移植ではなく**go-polipo独自の新設エンドポイント**で、稼働中のサーバー上で`-x`と同じ`CacheManager.Expire()`を実行し、結果件数を表示する — 特にWindowsでは`-x`を実行するための別シェルセッションが無いことが多いため有用（§15参照）。統計表示（RTT・サーバー能力など）側は下の別行の通り今回も未対応で、そもそもこの項目のスコープ外としていた。 |
 | `/polipo/servers?`（サーバー別 RTT・転送レート・能力） / `disableServersList` | ❌ | サーバー統計を一切収集しない。 |
 | `/polipo/index?URL`, `/polipo/recursive-index?` / `disableIndexing` | ❌ | キャッシュインデックスの閲覧なし。 |
-| `localDocumentRoot`, `disableProxy` | ❌ | 単なるローカルファイルサーバーとしては動かせない。 |
+| `localDocumentRoot`, `disableProxy` | ❌ | 単なるローカルファイルサーバーとしては動かせない。`/polipo/` 以外への直接アクセス（例：`/polipo/` を開いたブラウザが取りに来る `/favicon.ico`）や、`disableLocalInterface` 時の `/polipo/` への直接アクセスには `404 Not Found` を返す。Polipo が `localDocumentRoot` に該当ファイルが無いときに返したのと同じ（Polipo は POST には `405` を返した）。2026-11-01 修正：以前はこうした要求を転送先ホスト無しで転送しようとして、`502` と「Proxy error」のログになっていた。 |
 
 ## 14. ロギング
 

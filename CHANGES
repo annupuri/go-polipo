@@ -168,7 +168,8 @@
         no cache-index browsing or server-statistics page.  As in
         Polipo, it answers only requests addressed to go-polipo itself
         (GET /polipo/...); a proxied http://example.com/polipo/... is
-        forwarded to that site.
+        forwarded to that site.  Any other request addressed to
+        go-polipo itself (such as /favicon.ico) gets 404 Not Found.
       - Many low-level tuning variables from Polipo 1.x (chunk/object
         high marks, server slot counts, and similar) are no longer
         recognised; unknown variables are ignored (and now logged as a
