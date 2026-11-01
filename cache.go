@@ -472,19 +472,23 @@ func (cm *CacheManager) isExpired(resp *http.Response) bool {
 	return now.After(date.Add(heuristicLifetime(resp, date)))
 }
 
-// Store writes a cacheable response to the disk cache. It consumes resp.Body
-// and replaces it with an equivalent in-memory reader, so the caller can still
-// stream the response afterwards. Non-cacheable responses are left untouched.
-// An error is returned only when the response body cannot be read.
-func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
+// Store arranges for a cacheable response to be written to the disk and/or
+// memory cache. It does not read the body itself: it replaces resp.Body with a
+// reader that passes the body through to the caller unchanged while copying
+// it into the cache, so the client receives each byte as soon as the origin
+// sends it rather than after the whole body has arrived - as Polipo did. The
+// entry is committed only when the body has been read to EOF; if reading
+// stops early (the client went away, or the origin's connection broke), the
+// partial copy is discarded. Non-cacheable responses are left untouched.
+func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	if req.Method != http.MethodGet || resp.StatusCode != http.StatusOK {
-		return nil
+		return
 	}
 
 	// Cache-Control checks
 	cc := resp.Header.Get("Cache-Control")
 	if strings.Contains(cc, "no-store") || strings.Contains(cc, "private") {
-		return nil
+		return
 	}
 
 	// go-polipo's cache key is the URL alone, so it cannot store more than one
@@ -497,113 +501,220 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) error {
 	// replayed to everyone who later requests the same URL. Polipo cached these,
 	// so this is opt-out via dontCacheCookies.
 	if cm.config.DontCacheCookies && len(resp.Header["Set-Cookie"]) > 0 {
-		return nil
+		return
 	}
 
 	// RFC 9111 section 3.5 (RFC 2616 section 14.8): a shared cache must not
 	// reuse a response to a request carrying Authorization unless the response
 	// explicitly permits it.
 	if requestIsAuthenticated(req) && !cacheControlAllowsAuthenticated(cc) {
-		return nil
+		return
 	}
 
 	diskEnabled := !cm.diskCacheDisabled()
 	memEnabled := cm.memCache != nil
 	if !diskEnabled && !memEnabled {
-		return nil
+		return
 	}
 
 	// maxDiskCacheEntrySize / memoryCacheMaxEntrySize: reject known-oversized
-	// responses before ever reading the body into memory - matching Polipo's
-	// makeDiskEntry, which makes this same check against the declared
-	// Content-Length (its object->length) before deciding to store. The
-	// response is still forwarded to the client untouched either way; only
-	// caching is skipped. The two destinations have independent ceilings, so
-	// a response can be too big for one and still fit the other.
+	// responses up front - matching Polipo's makeDiskEntry, which makes this
+	// same check against the declared Content-Length (its object->length)
+	// before deciding to store. The response is still forwarded to the client
+	// untouched either way; only caching is skipped. The two destinations have
+	// independent ceilings, so a response can be too big for one and still fit
+	// the other. A body that turns out larger than declared (or had no
+	// Content-Length) is caught while it streams, in cacheBody.Read.
 	maxDiskSize := cm.config.MaxDiskCacheEntrySize
 	diskWants := diskEnabled && (maxDiskSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxDiskSize)
 	maxMemSize := cm.config.MemoryCacheMaxEntrySize
 	memWants := memEnabled && (maxMemSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxMemSize)
 	if !diskWants && !memWants {
-		return nil
+		return
 	}
 
-	// Read the body into memory so it can be written to disk and/or kept in
-	// the memory cache, and replayed to the client either way.
-	bodyBytes, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return err
-	}
-
-	// Restore the response body for the caller.
-	resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	// Fallback for when Content-Length was absent or understated (chunked
-	// transfer, or a lying origin): the fast path above only catches a
-	// declared size, so re-check against what was actually read.
-	size := int64(len(bodyBytes))
-	if diskWants && maxDiskSize >= 0 && size > maxDiskSize {
-		diskWants = false
-	}
-	if memWants && maxMemSize >= 0 && size > maxMemSize {
-		memWants = false
-	}
-
+	b := &cacheBody{cm: cm, src: resp.Body, key: req.URL.String()}
 	if diskWants {
-		cm.storeDisk(req, resp, bodyBytes)
+		b.disk = cm.startDiskWrite(req, resp)
 	}
 	if memWants {
-		cm.memCache.Add(req.URL.String(), newMemEntry(resp, bodyBytes))
+		// Snapshot the headers now: the caller may change resp.Header while
+		// the body is still streaming.
+		b.mem = newMemEntry(resp, nil)
+		b.memBuf = new(bytes.Buffer)
 	}
-
-	return nil
+	if b.disk == nil && b.mem == nil {
+		return
+	}
+	resp.Body = b
 }
 
-// storeDisk writes resp (whose body has already been read into bodyBytes) to
-// the disk cache. Failures are logged rather than returned: a disk I/O
-// problem should not turn into a client-visible error for what is otherwise a
-// normal response (the caller already has its own replayable copy of the body
-// regardless of whether this succeeds).
-func (cm *CacheManager) storeDisk(req *http.Request, resp *http.Response, bodyBytes []byte) {
+// cacheTempPrefix starts the name of a disk cache entry that is still being
+// written. Cache file names are custom-base64 (b64fss), which never contains
+// a '.', so a temporary file can never be mistaken for an entry.
+const cacheTempPrefix = ".tmp-"
+
+// cacheTempMaxAge is how long Expire leaves a temporary file alone. One that
+// has not been written to for this long was left behind by a crash.
+const cacheTempMaxAge = time.Hour
+
+// diskWrite is a disk cache entry being written in the background. The body
+// arrives through pw; a goroutine serializes the response, Polipo metadata
+// headers included, into a temporary file next to the final path, and sends
+// the outcome on done once pw is closed.
+type diskWrite struct {
+	path string // final cache file
+	tmp  string // temporary file being written
+	pw   *io.PipeWriter
+	done chan error
+}
+
+// startDiskWrite starts writing resp to a temporary file, or returns nil (after
+// logging why) if that cannot be set up.
+func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response) *diskWrite {
 	path, err := cm.GetCachePath(req.URL.String())
 	if err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
-		return
+		return nil
 	}
 
+	// Under the lock, so that Expire's pruneEmptyDirs cannot remove the
+	// directory between MkdirAll and CreateTemp.
 	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
+		cm.mu.Unlock()
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't create cache directory %s: %v", req.URL, dir, err)
-		return
+		return nil
 	}
-
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	file, err := os.CreateTemp(dir, cacheTempPrefix+"*")
+	cm.mu.Unlock()
 	if err != nil {
-		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't open cache file %s: %v", req.URL, path, err)
+		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't create a temporary file in %s: %v", req.URL, dir, err)
+		return nil
+	}
+
+	pr, pw := io.Pipe()
+	clone := *resp
+	clone.Body = pr
+	clone.Header = resp.Header.Clone()
+	clone.Header.Set("X-Polipo-Location", req.URL.String())
+	clone.Header.Set("X-Polipo-Date", time.Now().Format(http.TimeFormat))
+	clone.Header.Set("X-Polipo-Access", time.Now().Format(http.TimeFormat))
+
+	w := &diskWrite{path: path, tmp: file.Name(), pw: pw, done: make(chan error, 1)}
+	go func() {
+		err := clone.Write(file)
+		if cerr := file.Close(); err == nil {
+			err = cerr
+		}
+		// If Write stopped early (a disk error), unblock and fail any further
+		// writes to pw instead of leaving them waiting for a reader.
+		pr.CloseWithError(errCacheWriteStopped)
+		w.done <- err
+	}()
+	return w
+}
+
+var (
+	errCacheWriteStopped = fmt.Errorf("cache file writer stopped")
+	errCacheBodyAborted  = fmt.Errorf("response body not read to the end")
+	errCacheTooLarge     = fmt.Errorf("response body larger than maxDiskCacheEntrySize")
+)
+
+// cacheBody is the response body Store hands back: reads pass through from
+// src, and each chunk is also copied to the disk and/or memory cache entry
+// being built. The entry is committed when src reports EOF.
+type cacheBody struct {
+	cm  *CacheManager
+	src io.ReadCloser
+	key string
+
+	disk   *diskWrite    // nil once dropped or finished
+	mem    *memEntry     // nil once dropped or finished
+	memBuf *bytes.Buffer // the body so far, for mem
+	size   int64
+
+	once sync.Once
+}
+
+func (b *cacheBody) Read(p []byte) (int, error) {
+	n, err := b.src.Read(p)
+	if n > 0 {
+		b.size += int64(n)
+		if b.disk != nil {
+			if max := b.cm.config.MaxDiskCacheEntrySize; max >= 0 && b.size > max {
+				b.dropDisk(errCacheTooLarge)
+			} else if _, werr := b.disk.pw.Write(p[:n]); werr != nil {
+				b.dropDisk(werr)
+			}
+		}
+		if b.mem != nil {
+			if max := b.cm.config.MemoryCacheMaxEntrySize; max >= 0 && b.size > max {
+				b.mem, b.memBuf = nil, nil
+			} else {
+				b.memBuf.Write(p[:n])
+			}
+		}
+	}
+	switch {
+	case err == io.EOF:
+		b.once.Do(b.commit)
+	case err != nil:
+		b.once.Do(b.abort)
+	}
+	return n, err
+}
+
+// Close discards whatever was not committed: a body closed before EOF is
+// incomplete and must not be cached.
+func (b *cacheBody) Close() error {
+	b.once.Do(b.abort)
+	return b.src.Close()
+}
+
+// commit finishes the disk write and moves the file into place, and adds the
+// memory entry.
+func (b *cacheBody) commit() {
+	if w := b.disk; w != nil {
+		b.disk = nil
+		w.pw.Close()
+		if err := <-w.done; err != nil {
+			logf(b.cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't write cache file %s: %v", b.key, w.path, err)
+			os.Remove(w.tmp)
+		} else {
+			b.cm.mu.Lock()
+			err := os.Rename(w.tmp, w.path)
+			b.cm.mu.Unlock()
+			if err != nil {
+				logf(b.cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't move %s into place: %v", b.key, w.tmp, err)
+				os.Remove(w.tmp)
+			}
+		}
+	}
+	if b.mem != nil {
+		b.mem.body = b.memBuf.Bytes()
+		b.cm.memCache.Add(b.key, b.mem)
+		b.mem, b.memBuf = nil, nil
+	}
+}
+
+// abort discards the partial entry.
+func (b *cacheBody) abort() {
+	b.dropDisk(errCacheBodyAborted)
+	b.mem, b.memBuf = nil, nil
+}
+
+// dropDisk stops the disk write and removes its temporary file.
+func (b *cacheBody) dropDisk(reason error) {
+	w := b.disk
+	if w == nil {
 		return
 	}
-	defer file.Close()
-
-	// Create clone of response to write
-	cloneResp := *resp
-	cloneResp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	cloneResp.Header = resp.Header.Clone()
-
-	// Add Polipo metadata headers
-	cloneResp.Header.Set("X-Polipo-Location", req.URL.String())
-	cloneResp.Header.Set("X-Polipo-Date", time.Now().Format(http.TimeFormat))
-	cloneResp.Header.Set("X-Polipo-Access", time.Now().Format(http.TimeFormat))
-
-	// Write to disk in HTTP format
-	if err := cloneResp.Write(file); err != nil {
-		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't write cache file %s: %v", req.URL, path, err)
-		os.Remove(path) // Delete incomplete cache file
-	}
+	b.disk = nil
+	w.pw.CloseWithError(reason)
+	<-w.done
+	os.Remove(w.tmp)
 }
 
 // ExpireStats reports the outcome of an Expire run.
@@ -655,6 +766,9 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 		if err != nil {
 			return nil // vanished between listing and stat; ignore
 		}
+		if strings.HasPrefix(d.Name(), cacheTempPrefix) && time.Since(info.ModTime()) < cacheTempMaxAge {
+			return nil // an entry still being written by Store
+		}
 		stats.Scanned++
 		reason := cm.expireReason(path, info)
 		if reason == "" {
@@ -687,6 +801,9 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 // bookkeeping/logging; callers other than Expire only need to know whether
 // the result is empty.
 func (cm *CacheManager) expireReason(path string, info fs.FileInfo) string {
+	if strings.HasPrefix(info.Name(), cacheTempPrefix) {
+		return "abandoned" // a partial write left behind by a crash
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return ""

@@ -11,10 +11,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -848,7 +850,7 @@ func TestProxyServedFromCache(t *testing.T) {
 	}
 	resp.Header.Set("Cache-Control", "max-age=3600")
 	resp.Header.Set("Date", timeHeader(0))
-	if err := cm.Store(seedReq, resp); err != nil {
+	if err := storeNow(cm, seedReq, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 
@@ -1098,7 +1100,7 @@ func seedCacheEntry(t *testing.T, cm *CacheManager, target, body string, fresh b
 		resp.Header.Set("Cache-Control", "max-age=1")
 		resp.Header.Set("Date", timeHeader(-2*time.Hour))
 	}
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 }
@@ -1331,7 +1333,7 @@ func seedStaleEntryWithValidators(t *testing.T, cm *CacheManager, target, body, 
 	if lastModified != "" {
 		resp.Header.Set("Last-Modified", lastModified)
 	}
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 }
@@ -1363,7 +1365,7 @@ func seedStaleVaryEntry(t *testing.T, cm *CacheManager, target, body, vary, etag
 	if lastModified != "" {
 		resp.Header.Set("Last-Modified", lastModified)
 	}
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 }
@@ -1492,7 +1494,7 @@ func TestVaryEntryNeverServedWithoutRevalidation(t *testing.T) {
 	resp.Header.Set("Date", timeHeader(0))
 	resp.Header.Set("ETag", `"v1"`)
 	resp.Header.Set("Vary", "Accept-Encoding")
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 
@@ -1537,7 +1539,7 @@ func TestNoCacheEntryNeverServedWithoutRevalidation(t *testing.T) {
 	resp.Header.Set("Cache-Control", "max-age=999999, no-cache")
 	resp.Header.Set("Date", timeHeader(0))
 	resp.Header.Set("ETag", `"v1"`)
-	if err := cm.Store(req, resp); err != nil {
+	if err := storeNow(cm, req, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 
@@ -2052,7 +2054,7 @@ func seedRangeTestCache(t *testing.T, body string) (ph *ProxyHandler, target str
 	resp.Header.Set("Date", timeHeader(0))
 	resp.Header.Set("ETag", `"range-etag"`)
 	resp.Header.Set("Last-Modified", timeHeader(-time.Hour))
-	if err := cm.Store(seedReq, resp); err != nil {
+	if err := storeNow(cm, seedReq, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 	return ph, target
@@ -2201,7 +2203,7 @@ func TestRangeServedViaProxyOffline(t *testing.T) {
 	}
 	resp.Header.Set("Cache-Control", "max-age=3600")
 	resp.Header.Set("Date", timeHeader(0))
-	if err := cm.Store(seedReq, resp); err != nil {
+	if err := storeNow(cm, seedReq, resp); err != nil {
 		t.Fatalf("seed Store failed: %v", err)
 	}
 
@@ -2213,5 +2215,77 @@ func TestRangeServedViaProxyOffline(t *testing.T) {
 	}
 	if got, want := rr.Body.String(), "234"; got != want {
 		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+// TestStoreStreamsBodyWhileCaching: a cacheable response reaches the client
+// as the origin sends it, not after the whole body has been read into the
+// cache - Store used to io.ReadAll the body first. The origin here sends
+// the first part, then waits until the client has received it; with the old
+// behaviour the client never sees a byte and the test times out.
+func TestStoreStreamsBodyWhileCaching(t *testing.T) {
+	const first, rest = "first part;", "the rest"
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write([]byte(first))
+		w.(http.Flusher).Flush()
+		<-release
+		w.Write([]byte(rest))
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	proxy := httptest.NewServer(NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList()))
+	defer proxy.Close()
+	// Deferred after the servers, so it runs before their Close: on failure
+	// the handlers would otherwise wait for release forever, and Close with
+	// them.
+	defer releaseOnce.Do(func() { close(release) })
+	proxyURL, _ := url.Parse(proxy.URL)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Timeout:   5 * time.Second,
+	}
+
+	target := backend.URL + "/streamed"
+	resp, err := client.Get(target)
+	if err != nil {
+		t.Fatalf("GET through proxy: %v (no response headers before the origin finished: the body is not streamed)", err)
+	}
+	defer resp.Body.Close()
+
+	got := make(chan string, 1)
+	go func() {
+		buf := make([]byte, len(first))
+		n, _ := io.ReadFull(resp.Body, buf)
+		got <- string(buf[:n])
+	}()
+	select {
+	case s := <-got:
+		if s != first {
+			t.Fatalf("first part = %q, want %q", s, first)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the client received nothing before the origin finished: the body is not streamed")
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	tail, err := io.ReadAll(resp.Body)
+	if err != nil || string(tail) != rest {
+		t.Fatalf("rest = %q, %v; want %q", tail, err, rest)
+	}
+
+	// The complete body was committed to the cache once it reached EOF.
+	cached := cm.Lookup(httptest.NewRequest(http.MethodGet, target, nil))
+	if cached == nil {
+		t.Fatal("the streamed response should be cached")
+	}
+	defer cached.Body.Close()
+	if body, _ := io.ReadAll(cached.Body); string(body) != first+rest {
+		t.Errorf("cached body = %q, want %q", body, first+rest)
 	}
 }

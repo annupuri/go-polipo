@@ -180,9 +180,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	if ph.uncachable.Load().Match(req.URL.String(), req.URL.Host) {
 		return nil
 	}
-	if err := ph.cacheManager.Store(req, resp); err != nil {
-		logf(ph.config.LogLevel, LogWarn, "Cache store warning: %v", err)
-	}
+	ph.cacheManager.Store(req, resp)
 	return nil
 }
 
