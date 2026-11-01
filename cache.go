@@ -137,9 +137,23 @@ func responseVaries(resp *http.Response) bool {
 // therefore always reports it stale. The qualified form (no-cache="field")
 // is treated as unqualified, as RFC 9111 allows. Directive names are
 // case-insensitive, and Cache-Control may span several header lines.
+// Without any Cache-Control, Pragma: no-cache counts too (see pragmaNoCache).
 func responseNoCache(resp *http.Response) bool {
 	cc := strings.ToLower(strings.Join(resp.Header.Values("Cache-Control"), ","))
-	return strings.Contains(cc, "no-cache")
+	return strings.Contains(cc, "no-cache") || pragmaNoCache(resp.Header)
+}
+
+// pragmaNoCache reports whether h carries Pragma: no-cache and no
+// Cache-Control at all; when Cache-Control is present, it alone decides. In
+// a request, RFC 9111 section 5.4 requires treating that as Cache-Control:
+// no-cache. In a response its meaning is unspecified; Polipo (http_parse.c)
+// honoured it there as well, and so does go-polipo.
+func pragmaNoCache(h http.Header) bool {
+	if len(h.Values("Cache-Control")) > 0 {
+		return false
+	}
+	pragma := strings.ToLower(strings.Join(h.Values("Pragma"), ","))
+	return strings.Contains(pragma, "no-cache")
 }
 
 // cacheControlAllowsAuthenticated reports whether a response Cache-Control value
@@ -248,7 +262,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 
 	// Cache-Control checks
 	cc := req.Header.Get("Cache-Control")
-	if strings.Contains(cc, "no-cache") || strings.Contains(cc, "no-store") {
+	if strings.Contains(cc, "no-cache") || strings.Contains(cc, "no-store") || pragmaNoCache(req.Header) {
 		return nil, false
 	}
 

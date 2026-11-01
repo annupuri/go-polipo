@@ -1455,3 +1455,71 @@ func TestExpireTemporaryFiles(t *testing.T) {
 		t.Errorf("stats = %+v, want Scanned 1 (the abandoned file) and Removed 1", stats)
 	}
 }
+
+// TestPragmaNoCache: Pragma: no-cache counts as Cache-Control: no-cache when
+// there is no Cache-Control header at all. For a request RFC 9111 section
+// 5.4 requires it (the lookup is skipped); for a response RFC 9111 says
+// nothing, and go-polipo follows Polipo (http_parse.c), which treated it as
+// no-cache too (the entry is stored but always stale). A Cache-Control
+// header, whatever it says, overrides Pragma in both directions.
+func TestPragmaNoCache(t *testing.T) {
+	t.Run("request", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+		url := "http://example.com/pragma-req"
+		if err := storeNow(cm, httptest.NewRequest(http.MethodGet, url, nil), mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+			t.Fatalf("Store: %v", err)
+		}
+		for _, tc := range []struct {
+			name    string
+			hdr     []string
+			wantHit bool
+		}{
+			{"Pragma: no-cache alone", []string{"Pragma", "no-cache"}, false},
+			{"mixed case", []string{"Pragma", "No-Cache"}, false},
+			{"overridden by Cache-Control", []string{"Pragma", "no-cache", "Cache-Control", "max-stale=60"}, true},
+			{"other Pragma", []string{"Pragma", "x-other"}, true},
+		} {
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			for i := 0; i+1 < len(tc.hdr); i += 2 {
+				req.Header.Add(tc.hdr[i], tc.hdr[i+1])
+			}
+			got, _ := cm.LookupStale(req)
+			if got != nil {
+				got.Body.Close()
+			}
+			if (got != nil) != tc.wantHit {
+				t.Errorf("%s: hit = %v, want %v", tc.name, got != nil, tc.wantHit)
+			}
+		}
+	})
+
+	t.Run("response", func(t *testing.T) {
+		for _, tc := range []struct {
+			name      string
+			hdr       []string
+			wantStale bool
+		}{
+			{"Pragma: no-cache alone", []string{"Pragma", "no-cache", "Expires", timeHeader(time.Hour)}, true},
+			{"overridden by Cache-Control", []string{"Pragma", "no-cache", "Cache-Control", "max-age=3600"}, false},
+		} {
+			cfg := NewDefaultConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			cm := NewCacheManager(cfg)
+			url := "http://example.com/pragma-resp"
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			if err := storeNow(cm, req, mkResp("body", append(tc.hdr, "Date", timeHeader(0))...)); err != nil {
+				t.Fatalf("%s: Store: %v", tc.name, err)
+			}
+			got, stale := cm.LookupStale(req)
+			if got == nil {
+				t.Fatalf("%s: the response should be stored", tc.name)
+			}
+			got.Body.Close()
+			if stale != tc.wantStale {
+				t.Errorf("%s: stale = %v, want %v", tc.name, stale, tc.wantStale)
+			}
+		}
+	})
+}
