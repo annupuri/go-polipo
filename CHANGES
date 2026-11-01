@@ -138,7 +138,10 @@
     Polipo's CONFIG_PASSWORD variables.
   * logLevel is a bitmask of independent message categories, as in
     Polipo, not an ordered severity threshold; the default (0x07) omits
-    LogForbidden/LogTunnel, matching Polipo's LOGGING_DEFAULT exactly.
+    denials (0x8), matching Polipo's LOGGING_DEFAULT exactly.  Only
+    error, warn, info and forbidden (0x1-0x8) are logged; Polipo's
+    uncacheable, superseded, Vary and tunnel bits (0x10-0x80) are
+    accepted and ignored, and a rejected CONNECT is logged as forbidden.
   * Incompatible changes from Polipo 1.x:
       - Build system is "go build" / the provided Makefile; the autoconf
         style options and PLATFORM_DEFINES are gone.

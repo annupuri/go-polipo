@@ -7,15 +7,17 @@ import "log"
 // threshold: unlike "WARN implies ERROR is also wanted" schemes, enabling
 // LogWarn says nothing about LogError, and any combination can be set at
 // once (Polipo's own default, 0x07, is LogError|LogWarn|LogInfo).
+//
+// Only the categories go-polipo actually logs are defined. Polipo's other
+// bits (0x10 uncacheable, 0x20 superseded, 0x40 Vary, 0x80 tunnel) have no
+// go-polipo messages; a logLevel that sets them is accepted, so an existing
+// Polipo config still loads, and those bits are simply ignored. A rejected
+// CONNECT is logged as LogForbidden, like every other policy denial.
 const (
-	LogError       = 0x1  // internal/unexpected failures
-	LogWarn        = 0x2  // recoverable problems (a skipped config/cache entry, ...)
-	LogInfo        = 0x4  // lifecycle and status messages (startup, reload, ...)
-	LogForbidden   = 0x8  // a request denied by policy (forbidden list, auth, ports)
-	LogUncacheable = 0x10 // present for parity with Polipo's bit; no call site uses it
-	LogSuperseded  = 0x20 // present for parity with Polipo's bit; no call site uses it
-	LogVary        = 0x40 // present for parity with Polipo's bit; no call site uses it
-	LogTunnel      = 0x80 // a CONNECT tunnel accepted or rejected
+	LogError     = 0x1 // internal/unexpected failures
+	LogWarn      = 0x2 // recoverable problems (a skipped config/cache entry, ...)
+	LogInfo      = 0x4 // lifecycle and status messages (startup, reload, ...)
+	LogForbidden = 0x8 // a request denied by policy (forbidden list, auth, ports)
 )
 
 // logf writes format/args through the standard log package iff category's
