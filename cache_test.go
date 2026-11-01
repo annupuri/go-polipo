@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -1106,6 +1107,48 @@ func TestDiscardMemoryKeepsDiskCache(t *testing.T) {
 	cfg2 := NewDefaultConfig()
 	cfg2.MemoryCacheEntries = 0
 	NewCacheManager(cfg2).DiscardMemory()
+}
+
+// TestDiskLookupClosesCacheFile checks that closing the body of a disk cache
+// hit also closes the cache file, rather than leaving one descriptor open per
+// hit until the garbage collector finalizes it. Garbage collection is turned
+// off for the test so a finalizer can't hide the leak.
+func TestDiskLookupClosesCacheFile(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("needs /proc/self/fd to count open files")
+	}
+	openFiles := func() int {
+		entries, err := os.ReadDir("/proc/self/fd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(entries)
+	}
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cfg.MemoryCacheEntries = 0 // every hit comes from disk
+	cm := NewCacheManager(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/fd", nil)
+	if err := cm.Store(req, mkResp("body", "Cache-Control", "max-age=3600")); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	before := openFiles()
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		for i := 0; i < 20; i++ {
+			resp := cm.Lookup(httptest.NewRequest(method, "http://example.com/fd", nil))
+			if resp == nil {
+				t.Fatalf("%s lookup %d: miss", method, i)
+			}
+			resp.Body.Close()
+		}
+	}
+	if after := openFiles(); after > before {
+		t.Errorf("%d files left open after 40 closed disk hits", after-before)
+	}
 }
 
 // TestMemoryCacheDisabled checks that MemoryCacheEntries=0 turns the memory
