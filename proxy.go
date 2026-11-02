@@ -222,19 +222,24 @@ func safeMethod(method string) bool {
 	return false
 }
 
-// revalidationHeaders are the response headers RFC 9111 section 3.4 and
-// 4.3.4 say a 304 may use to update a stored representation; everything
-// else about the cached entry (body, Content-Type, and so on) is unchanged
-// because the origin is asserting the entity itself has not changed.
-var revalidationHeaders = []string{
-	"Age", "Cache-Control", "Content-Location", "Date", "ETag", "Expires", "Vary",
+// bodyHeaders are the header fields a 304 does not update in the stored
+// response (RFC 9111 section 3.2): they describe the stored body, which the
+// 304 says has not changed and does not itself carry.
+var bodyHeaders = map[string]bool{
+	"Content-Encoding":  true,
+	"Content-Length":    true,
+	"Content-Range":     true,
+	"Content-Type":      true,
+	"Transfer-Encoding": true,
 }
 
 // reviveFromCache turns a 304 Not Modified response, received for a
 // conditional request addConditionalHeaders built from a stale cache entry,
 // back into the equivalent of a fresh 200: the cached body, plus the stored
-// headers with revalidationHeaders overwritten from the 304's own headers
-// where present. The caller (cacheResponse) then re-Stores the result, so
+// headers with every field the 304 carries put in place of the stored one,
+// except bodyHeaders (RFC 9111 sections 3.2 and 4.3.4). Hop-by-hop fields
+// are already gone by now. Polipo updated only the fields it parsed for
+// freshness. The caller (cacheResponse) then re-Stores the result, so
 // the refreshed freshness lifetime takes effect immediately. An error here
 // means the entry vanished between the conditional request going out and
 // the 304 coming back - too rare to do anything but report it, which
@@ -256,9 +261,9 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 	// 304's own Age, if any, says how old the revalidated one is.
 	merged := cached.Header.Clone()
 	merged.Del("Age")
-	for _, name := range revalidationHeaders {
-		if v := resp.Header.Values(name); len(v) > 0 {
-			merged[http.CanonicalHeaderKey(name)] = v
+	for name, v := range resp.Header {
+		if !bodyHeaders[name] {
+			merged[name] = v
 		}
 	}
 

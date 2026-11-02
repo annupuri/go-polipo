@@ -2881,3 +2881,56 @@ func TestMissingDateIsAppended(t *testing.T) {
 		cached.Body.Close()
 	}
 }
+
+// TestRevalidation304UpdatesStoredHeaders: a 304 updates every stored
+// header field it carries (RFC 9111 section 3.2), except those describing
+// the stored body, which it does not change.
+func TestRevalidation304UpdatesStoredHeaders(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Header().Set("X-Note", "new")
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.Header().Set("Content-Type", "text/html") // describes no body here
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	resp := mkResp("cached body", "Cache-Control", "max-age=1", "Date", timeHeader(-2*time.Hour),
+		"ETag", `"v1"`, "X-Note", "old", "Content-Type", "text/plain")
+	if err := storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil), resp); err != nil {
+		t.Fatalf("seed Store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if got, _ := io.ReadAll(rr.Body); rr.Code != http.StatusOK || string(got) != "cached body" {
+		t.Fatalf("got %d %q, want 200 with the cached body", rr.Code, got)
+	}
+
+	cm.DiscardMemory()
+	cached := cm.Lookup(httptest.NewRequest(http.MethodGet, target, nil))
+	if cached == nil {
+		t.Fatal("the revalidated entry should be fresh")
+	}
+	defer cached.Body.Close()
+	for _, h := range []http.Header{rr.Header(), cached.Header} {
+		if got := h.Values("X-Note"); len(got) != 1 || got[0] != "new" {
+			t.Errorf("X-Note = %q, want [new] from the 304", got)
+		}
+		if got := h.Get("Link"); got == "" {
+			t.Error("Link from the 304 is missing")
+		}
+		if got := h.Get("Content-Type"); got != "text/plain" {
+			t.Errorf("Content-Type = %q, want the stored text/plain", got)
+		}
+	}
+}
