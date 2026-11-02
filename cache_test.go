@@ -266,12 +266,12 @@ func TestCacheIsExpired(t *testing.T) {
 		t.Error("header-less response inside 10% of its Last-Modified age should be fresh")
 	}
 
-	// 10. Heuristic with no Last-Modified: flat 24h default.
-	if expired(mkR("Date", httpTime(-time.Hour))) {
-		t.Error("header-less response with no Last-Modified should be fresh for 24h")
+	// 10. No Last-Modified either: no heuristic lifetime, stale at once.
+	if !expired(mkR("Date", httpTime(0))) {
+		t.Error("header-less response with no Last-Modified should be stale at once")
 	}
-	if !expired(mkR("Date", httpTime(-25*time.Hour))) {
-		t.Error("header-less response with no Last-Modified should be expired after 24h")
+	if !expired(mkR("Date", httpTime(-time.Minute), "ETag", `"v1"`)) {
+		t.Error("an ETag alone should not give a header-less response a heuristic lifetime")
 	}
 
 	// 11. max-age overrides Expires (RFC 9111 section 5.3), even a past one.

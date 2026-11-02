@@ -66,9 +66,9 @@
 # diskCacheTruncateSize = 1048576
 #
 # A response with no Expires / max-age / s-maxage gets a heuristic freshness
-# lifetime (10% of the time since Last-Modified, capped at 24h; a flat 24h with
-# no Last-Modified), rather than being served as fresh until diskCacheUnlinkTime.
-# This is not configurable.
+# lifetime (10% of the time since Last-Modified, capped at 24h), rather than
+# being served as fresh until diskCacheUnlinkTime. With no Last-Modified either,
+# it gets none and is revalidated on every use. This is not configurable.
 
 # Responses to requests that carry an Authorization header are never written to
 # the disk cache unless the response is explicitly shareable
