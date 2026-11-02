@@ -1645,6 +1645,59 @@ func TestConditionalRevalidation304ServesCachedBodyAndRefreshes(t *testing.T) {
 	}
 }
 
+// TestRevalidation304ReplacesStoredAge: the Age stored with an entry
+// described it as first received. After a 304, only the 304's own Age says
+// how old the revalidated response is - and with none, it is new.
+func TestRevalidation304ReplacesStoredAge(t *testing.T) {
+	for _, tc := range []struct {
+		name, age304 string
+		fresh        bool
+	}{
+		{"304 without Age", "", true},
+		{"304 with Age beyond max-age", "4000", false},
+	} {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("ETag", `"v1"`)
+			w.Header().Set("Cache-Control", "max-age=3600")
+			w.Header().Set("Date", timeHeader(0))
+			if tc.age304 != "" {
+				w.Header().Set("Age", tc.age304)
+			}
+			w.WriteHeader(http.StatusNotModified)
+		}))
+
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+		ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+		// Stale because of its Age alone.
+		target := backend.URL + "/resource"
+		resp := mkResp("cached body", "Cache-Control", "max-age=3600", "Age", "7200",
+			"Date", timeHeader(0), "ETag", `"v1"`)
+		if err := storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil), resp); err != nil {
+			t.Fatalf("%s: seed Store: %v", tc.name, err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if got, _ := io.ReadAll(rr.Body); rr.Code != http.StatusOK || string(got) != "cached body" {
+			t.Fatalf("%s: got %d %q, want 200 with the cached body", tc.name, rr.Code, got)
+		}
+
+		cached := cm.Lookup(httptest.NewRequest(http.MethodGet, target, nil))
+		if cached != nil {
+			cached.Body.Close()
+		}
+		if (cached != nil) != tc.fresh {
+			t.Errorf("%s: revalidated entry fresh = %v, want %v", tc.name, cached != nil, tc.fresh)
+		}
+		backend.Close()
+	}
+}
+
 func TestConditionalRevalidationSendsIfModifiedSince(t *testing.T) {
 	lastModified := timeHeader(-48 * time.Hour)
 	var gotIMS string

@@ -42,8 +42,11 @@
     a restart via POST /polipo/flush.
   * Freshness follows RFC 9111 more closely than Polipo did.  s-maxage is
     honoured and takes precedence over max-age for this (shared) cache,
-    and an invalid Expires value such as "0" is treated as already
-    expired.  A 200 with no Expires, max-age or s-maxage is given a
+    max-age and s-maxage override Expires, and an invalid Expires value
+    such as "0" is treated as already expired.  A response's age counts
+    any Age header from a cache upstream (RFC 9111 section 4.2.3), and
+    an Expires lifetime is measured from Date rather than against the
+    local clock.  A 200 with no Expires, max-age or s-maxage is given a
     heuristic lifetime -- min(10% of the time since Last-Modified, 24h),
     or a flat 24h with no Last-Modified -- instead of being served as
     fresh until diskCacheUnlinkTime.  This matches Polipo's default
