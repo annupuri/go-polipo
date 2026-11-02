@@ -788,7 +788,7 @@ func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response, b
 	clone.Header = resp.Header.Clone()
 	clone.Header.Set("X-Polipo-Location", req.URL.String())
 	clone.Header.Set("X-Polipo-Date", birth.UTC().Format(http.TimeFormat))
-	clone.Header.Set("X-Polipo-Access", time.Now().Format(http.TimeFormat))
+	clone.Header.Set("X-Polipo-Access", time.Now().UTC().Format(http.TimeFormat))
 
 	w := &diskWrite{path: path, tmp: file.Name(), pw: pw, done: make(chan error, 1)}
 	go func() {
@@ -972,7 +972,7 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 			stats.RemovedForSize++
 			logf(cm.config.LogLevel, LogInfo, "Cache expire: removed %s (%d bytes, unused since %s): "+
 				"larger than diskCacheTruncateSize and older than diskCacheTruncateTime",
-				path, info.Size(), info.ModTime().Format(http.TimeFormat))
+				path, info.Size(), info.ModTime().UTC().Format(http.TimeFormat))
 		}
 		return nil
 	})
