@@ -95,6 +95,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `disableVia` | `true`（Via なし） | ⚠️ | go-polipo は `Via` を一切付けない — Polipo の*既定*と一致 — が、**有効化する手段がなく**、プロキシループ検出も無い。 |
 | `proxyName` / `displayName` | ホスト名 / `Polipo` | ❌ | プロキシ識別名を設定できない。エラー本文は Go の平文 `http.Error`。 |
 | `X-Forwarded-For` | — | ✅ | 明示的に nil 化し、クライアント IP を転送しない（`Director`）。 |
+| `Date` が無い応答 | — | ✅ | **実装済み（2026-11-03）。** 上流から `Date` の無い応答が来たら、受け取った時刻を `Date` として付けてから保存・転送する（`cacheResponse`。RFC 9110 §6.6.1）。Polipo と同じ（`server.c`）。以前は `Date` 無しのまま保存しており、`Date` の無い `304` では保存済みの古い `Date` が残るため、再検証したばかりのエントリがすぐ期限切れ扱いになっていた。 |
 | ホップバイホップヘッダの除去 | — | ✅ | `httputil.ReverseProxy` が RFC 7230 に従い処理。 |
 | `alwaysAddNoTransform` | `false` | ❌ | 些末。 |
 | `laxHttpParser`, `bigBufferSize`, `expectContinue` | — | 🔷 | パースは `net/http` の責務。`ExpectContinueTimeout` はトランスポート内で 1s 固定。 |

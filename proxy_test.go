@@ -2773,3 +2773,60 @@ func TestUnsafeRequestInvalidatesCache(t *testing.T) {
 		backend.Close()
 	}
 }
+
+// TestMissingDateIsAppended: a response from upstream without a Date gets
+// one recording when it was received before it is cached or passed on (RFC
+// 9110 section 6.6.1), as Polipo did. That matters most for a 304: without
+// it the revalidated entry keeps its old Date and counts as stale at once.
+func TestMissingDateIsAppended(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Date"] = nil // net/http would add one otherwise
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Cache-Control", "max-age=3600")
+		if r.Header.Get("If-None-Match") == `"v1"` {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		io.WriteString(w, "origin body")
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	// A fresh fetch is stored with a Date.
+	fresh := backend.URL + "/fresh"
+	req := httptest.NewRequest(http.MethodGet, fresh, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	ph.ServeHTTP(httptest.NewRecorder(), req)
+	cm.DiscardMemory()
+	if cached := cm.Lookup(httptest.NewRequest(http.MethodGet, fresh, nil)); cached == nil {
+		t.Error("the response should be cached and fresh")
+	} else {
+		cached.Body.Close()
+		if d, err := http.ParseTime(cached.Header.Get("Date")); err != nil || time.Since(d) > time.Minute {
+			t.Errorf("stored Date = %q, want the time it was received", cached.Header.Get("Date"))
+		}
+	}
+
+	// A 304 without a Date refreshes an entry whose stored Date is old.
+	stale := backend.URL + "/stale"
+	resp := mkResp("cached body", "Cache-Control", "max-age=3600", "ETag", `"v1"`, "Date", timeHeader(-2*time.Hour))
+	if err := storeNow(cm, httptest.NewRequest(http.MethodGet, stale, nil), resp); err != nil {
+		t.Fatalf("seed Store: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, stale, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if got, _ := io.ReadAll(rr.Body); rr.Code != http.StatusOK || string(got) != "cached body" {
+		t.Fatalf("got %d %q, want 200 with the cached body", rr.Code, got)
+	}
+	if cached := cm.Lookup(httptest.NewRequest(http.MethodGet, stale, nil)); cached == nil {
+		t.Error("the entry revalidated by a Date-less 304 should be fresh")
+	} else {
+		cached.Body.Close()
+	}
+}

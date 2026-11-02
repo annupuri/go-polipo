@@ -174,6 +174,14 @@ func (ph *ProxyHandler) Reload() error {
 // first fetched or last revalidated, so a later cache hit never needs to
 // re-censor or re-merge.
 func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
+	// RFC 9110 section 6.6.1: a response without a Date gets one recording
+	// when it was received, before it is cached or passed on - as Polipo
+	// did (server.c). Done first, so that a Date-less 304 refreshes the
+	// stored Date rather than leaving the old one, which would make the
+	// revalidated entry stale at once.
+	if len(resp.Header.Values("Date")) == 0 {
+		resp.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
+	}
 	// A 304 for a request the client made conditional itself answers the
 	// client's validators, not ours (addConditionalHeaders leaves those
 	// requests alone), so it goes back to the client as-is; Store ignores it.
