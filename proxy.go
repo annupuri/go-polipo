@@ -449,6 +449,10 @@ func (ph *ProxyHandler) createTransport() *http.Transport {
 		ResponseHeaderTimeout: ph.config.ServerTimeout,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		// A proxy passes the content on as the origin sent it (RFC 9110
+		// section 7.7). Left enabled, the Transport would ask for gzip when
+		// the client did not, and decompress the reply on its own.
+		DisableCompression: true,
 	}
 
 	if ph.config.ParentProxy != "" {

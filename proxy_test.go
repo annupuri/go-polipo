@@ -2934,3 +2934,44 @@ func TestRevalidation304UpdatesStoredHeaders(t *testing.T) {
 		}
 	}
 }
+
+// TestNoTransparentCompression: a request without Accept-Encoding reaches
+// the origin without one, and a compressed response reaches the client
+// untouched. net/http's Transport would otherwise ask for gzip on its own
+// and decompress the reply, changing the content a proxy should pass on as
+// is (RFC 9110 section 7.7) and storing an identity body under the gzip
+// variant's ETag.
+func TestNoTransparentCompression(t *testing.T) {
+	var gotAE []string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAE = r.Header.Values("Accept-Encoding")
+		if r.URL.Path == "/gzip" {
+			// Labelled gzip but not decodable as such: decompressing it on the
+			// client's behalf would lose the body altogether.
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Write([]byte("\x1f\x8b not really gzip"))
+			return
+		}
+		io.WriteString(w, "plain")
+	}))
+	defer backend.Close()
+
+	ph := newTestHandler(NewDefaultConfig())
+	for _, path := range []string{"/plain", "/gzip"} {
+		req := httptest.NewRequest(http.MethodGet, backend.URL+path, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if len(gotAE) != 0 {
+			t.Errorf("%s: origin got Accept-Encoding %q, want none", path, gotAE)
+		}
+		if path == "/gzip" {
+			if got := rr.Header().Get("Content-Encoding"); got != "gzip" {
+				t.Errorf("%s: Content-Encoding = %q, want gzip passed through", path, got)
+			}
+			if got := rr.Body.String(); got != "\x1f\x8b not really gzip" {
+				t.Errorf("%s: body = %q, want the origin's bytes", path, got)
+			}
+		}
+	}
+}

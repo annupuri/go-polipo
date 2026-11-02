@@ -97,6 +97,7 @@ at the end groups findings by how much they matter before a public release.
 | `X-Forwarded-For` | — | ✅ | Explicitly nilled so the client IP is not forwarded (`Director`). |
 | Missing `Date` | — | ✅ | **Done (2026-11-03).** A response from upstream without a `Date` gets one recording when it was received, before it is cached or passed on (`cacheResponse`; RFC 9110 §6.6.1), as Polipo did (`server.c`). It used to be stored without one; a `304` without one left the stored, older `Date` in place, so the entry it had just revalidated counted as stale at once. |
 | Hop-by-hop header stripping | — | ✅ | Handled by `httputil.ReverseProxy` per RFC 7230. |
+| Content passed through unchanged | — | ✅ | **Fixed 2026-11-03.** The upstream `Transport` has `DisableCompression` set, so `Accept-Encoding` and `Content-Encoding` pass through as the client and origin sent them (RFC 9110 §7.7), as in Polipo. It used to be left on: for a client that sent no `Accept-Encoding`, the `Transport` asked the origin for gzip itself and decompressed the reply, storing an identity body under the gzip variant's `ETag`, and a reply labelled gzip that did not decode reached the client with an empty body. |
 | `alwaysAddNoTransform` | `false` | ❌ | Minor. |
 | `laxHttpParser`, `bigBufferSize`, `expectContinue` | — | 🔷 | Parsing owned by `net/http`; `ExpectContinueTimeout` is a fixed 1s in the transport. |
 

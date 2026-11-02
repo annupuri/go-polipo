@@ -108,7 +108,9 @@
     a response may be before it is written to disk at all (default -1,
     unlimited, matching Polipo).
   * HTTP forwarding is built on net/http/httputil.ReverseProxy; hop-by-hop
-    headers are handled per RFC 7230.  CONNECT tunnelling and the
+    headers are handled per RFC 7230.  Its transparent gzip is turned
+    off, so Accept-Encoding and Content-Encoding pass through as sent,
+    as in Polipo (RFC 9110 section 7.7).  CONNECT tunnelling and the
     tunnelAllowedPorts filter are retained; the default
     (22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418)
     matches Polipo's (ssh, HTTP, POP, IMAP, HTTPS, rsync, IMAPS, POP3S,
