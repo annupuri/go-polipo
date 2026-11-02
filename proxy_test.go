@@ -1313,6 +1313,57 @@ func TestRelaxTransparencyTrueServesStaleWithoutContactingOrigin(t *testing.T) {
 	}
 }
 
+// TestStaleForbiddenEntryNotServedStale: an entry carrying must-revalidate,
+// proxy-revalidate, s-maxage or no-cache must not be served stale (RFC 9111
+// sections 4.2.4, 5.2.2), not even by relaxTransparency or proxyOffline,
+// which serve any other stale entry.
+func TestStaleForbiddenEntryNotServedStale(t *testing.T) {
+	for _, cc := range []string{"max-age=1", "max-age=1, must-revalidate", "max-age=1, proxy-revalidate", "s-maxage=1", "max-age=3600, no-cache"} {
+		forbidden := cc != "max-age=1"
+		for _, mode := range []string{"relaxTransparency=maybe", "relaxTransparency=true", "proxyOffline"} {
+			live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				io.WriteString(w, "live body")
+			}))
+			cfg := NewDefaultConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			target := live.URL + "/resource"
+			switch mode {
+			case "relaxTransparency=maybe":
+				cfg.RelaxTransparency = 1
+				target = "http://" + deadLoopback + ":9999/resource" // unreachable
+			case "relaxTransparency=true":
+				cfg.RelaxTransparency = 2
+			case "proxyOffline":
+				cfg.ProxyOffline = true
+			}
+			cm := NewCacheManager(cfg)
+			ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+			resp := mkResp("stale body", "Cache-Control", cc, "Date", timeHeader(-2*time.Hour))
+			if err := storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil), resp); err != nil {
+				t.Fatalf("seed Store: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			rr := httptest.NewRecorder()
+			ph.ServeHTTP(rr, req)
+			got, _ := io.ReadAll(rr.Body)
+			if servedStale := string(got) == "stale body"; servedStale == forbidden {
+				t.Errorf("%q under %s: got %d %q; served stale = %v, want %v",
+					cc, mode, rr.Code, got, servedStale, !forbidden)
+			}
+			if forbidden && mode == "relaxTransparency=true" && string(got) != "live body" {
+				t.Errorf("%q under %s: got %q, want the origin's live body", cc, mode, got)
+			}
+			if forbidden && mode == "proxyOffline" && rr.Code != http.StatusGatewayTimeout {
+				t.Errorf("%q under %s: status = %d, want 504", cc, mode, rr.Code)
+			}
+			live.Close()
+		}
+	}
+}
+
 func TestRelaxTransparencyMaybeStillContactsOriginWhenStale(t *testing.T) {
 	var hits int32
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

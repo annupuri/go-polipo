@@ -211,6 +211,17 @@ func responseForbidsStale(resp *http.Response) bool {
 	return false
 }
 
+// staleServable reports whether resp may be served stale at all, as
+// relaxTransparency and proxyOffline do. Not when it carries
+// must-revalidate, proxy-revalidate or s-maxage (see responseForbidsStale),
+// nor no-cache (see responseNoCache): RFC 9111 sections 4.2.4 and 5.2.2
+// require a successful validation with the origin before any reuse of
+// those once they are stale, even by a disconnected cache. Polipo served
+// them stale anyway.
+func staleServable(resp *http.Response) bool {
+	return !responseForbidsStale(resp) && !responseNoCache(resp)
+}
+
 // cacheControlAllowsAuthenticated reports whether a response Cache-Control value
 // carries a directive that, per RFC 9111 section 3.5 (RFC 2616 section 14.8),
 // lets a shared cache store the response to an authenticated request.
