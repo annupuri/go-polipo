@@ -36,6 +36,9 @@ func TestNewDefaultConfig(t *testing.T) {
 	if c.DontCacheCookies != true {
 		t.Errorf("expected DontCacheCookies true, got %t", c.DontCacheCookies)
 	}
+	if c.ClientTimeout != 120*time.Second || c.ServerTimeout != 90*time.Second || c.ServerIdleTimeout != 45*time.Second {
+		t.Errorf("expected Polipo's timeouts 2m0s/1m30s/45s, got %s/%s/%s", c.ClientTimeout, c.ServerTimeout, c.ServerIdleTimeout)
+	}
 	if c.AuthCredentials != "" {
 		t.Errorf("expected AuthCredentials unset, got %q", c.AuthCredentials)
 	}
@@ -225,6 +228,9 @@ func TestSetAllKeys(t *testing.T) {
 	ok("logFile", "/var/log/go-polipo.log")
 	ok("disableLocalInterface", "true")
 	ok("maxConcurrentRequests", "50")
+	ok("clientTimeout", "3m")
+	ok("serverTimeout", "60")
+	ok("serverIdleTimeout", "0")
 	ok("diskCacheUnlinkTime", "16d")
 	ok("maxDiskCacheEntrySize", "5000000")
 	ok("diskCacheTruncateTime", "2d")
@@ -255,6 +261,9 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.MaxConcurrentRequests != 50 {
 		t.Errorf("maxConcurrentRequests = %d, want 50", c.MaxConcurrentRequests)
+	}
+	if c.ClientTimeout != 3*time.Minute || c.ServerTimeout != time.Minute || c.ServerIdleTimeout != 0 {
+		t.Errorf("timeouts = %s/%s/%s, want 3m0s/1m0s/0s", c.ClientTimeout, c.ServerTimeout, c.ServerIdleTimeout)
 	}
 	if c.DiskCacheUnlinkTime != 16*24*time.Hour {
 		t.Errorf("diskCacheUnlinkTime = %s, want 384h0m0s", c.DiskCacheUnlinkTime)
@@ -323,6 +332,9 @@ func TestSetAllKeys(t *testing.T) {
 	fails("allowedPorts", "80,bad")
 	fails("logLevel", "not-hex")
 	fails("maxConcurrentRequests", "lots")
+	fails("clientTimeout", "soon")
+	fails("serverTimeout", "5w")
+	fails("serverIdleTimeout", "-1")
 	fails("diskCacheUnlinkTime", "5w")
 	fails("maxDiskCacheEntrySize", "big")
 	fails("diskCacheTruncateTime", "5w")

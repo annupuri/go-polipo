@@ -44,12 +44,14 @@ at the end groups findings by how much they matter before a public release.
 | `proxyPort` | `8123` | ✅ | |
 | `allowedClients` | (none) | ✅ | Bare IP, CIDR, `all`/`*`. Checked against the real TCP peer. |
 | `authCredentials` | (null) | ✅ | **Enforced (resolved 2026-09-12).** A single `"user:password"` string; empty (the default) requires no authentication, matching Polipo's unset default. When set, `ProxyHandler.isAuthorized` checks every request — forwarded, CONNECT, and local `/polipo/*` pages alike — before any other handling. Missing or wrong credentials get `407`/`Proxy-Authenticate` for an ordinary proxied request or CONNECT, or `401`/`WWW-Authenticate` (checked against `Authorization`, not `Proxy-Authorization`) for a request addressed straight at go-polipo rather than sent through it as a proxy — Polipo's `urlIsLocal` split, confirmed from the vendored C history (`auth.c`, `client.c`). Found while implementing `parentAuthCredentials` (2026-09-13): Polipo's config.c never prints a `CONFIG_PASSWORD` variable's actual value on `-v` or the config page, only `(hidden)`; `authCredentials` is one, but go-polipo's `Entries()` was showing it in the clear. Fixed alongside the two new password variables. |
+| `clientTimeout` | `120s` | ✅ | **Done (2026-11-03).** Bounds how long a client may take to send a request's headers (`ReadHeaderTimeout`) and how long its connection may sit idle between requests (`IdleTimeout`); `0` disables it. Not applied to request or response bodies, which `net/http` can only bound as a whole (Polipo's per-I/O inactivity timer has no direct equivalent there), nor to CONNECT tunnels, which Polipo left without a timeout too. Polipo forced `clientTimeout` above `serverTimeout` so that a client would not be dropped while the origin was still within its time; go-polipo has no client-side timer running during that wait, so it does not need the rule. It used to be missing, so a client could hold a connection open indefinitely without sending a request. |
 | `authRealm` | (varies) | ✅ | **Enforced (resolved 2026-09-12).** Defaults to `"Polipo"`, only takes effect while `authCredentials` is set (matching Polipo, which fills the same default at startup once `authCredentials` is non-null). Rendered into the `Basic realm="..."` challenge. |
 
 ## 3. Outgoing connections
 
 | Variable | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
+| `serverTimeout` / `serverIdleTimeout` | `90s` / `45s` | ✅ | **Done (2026-11-03).** `serverTimeout` bounds connecting to the origin, SOCKS or parent proxy (CONNECT tunnels included), waiting for response headers (`ResponseHeaderTimeout`), and any silence while an exchange is under way (`idleTimeoutConn`, which rearms a deadline on every read and write, as Polipo did in `server.c`). Running out is a `504`, as in Polipo; other upstream failures stay `502`. An established CONNECT tunnel has no timeout, as in Polipo. `serverIdleTimeout` is how long an unused connection to the origin is kept for reuse (`IdleConnTimeout`, which used to be a fixed 90s). `0` disables either. They used to be missing, so an origin that accepted a request and then stalled held its `maxConcurrentRequests` slot for as long as the client kept waiting. |
 | `proxyOutgoingAddress` | OS default | ❌ | Cannot bind the upstream socket to a chosen source address (multi-homed hosts). |
 | `useTemporarySourceAddress` | `maybe` | 🔷 | RFC 3041 temp IPv6 source selection — left to the OS. |
 | `allowedPorts` | `80-100, 1024-65535` | ✅ | **Enforced (resolved 2026-09-11).** `handleForward` derives the target port (`requestPort`) and rejects any not in `AllowedPorts` (`PortSet.Contains`) with a `403`, before the cache lookup or any upstream dial. The default now matches Polipo (`80-100, 1024-65535`), so privileged ports other than 80–100 (25, 110, 119, 143, …) are refused. `parsePortSet` accepts Polipo's `lo-hi` range syntax (open ends too: `-100`, `1024-`). CONNECT is still filtered by `tunnelAllowedPorts` only, as in Polipo — the two lists are not combined. |
@@ -134,7 +136,7 @@ at the end groups findings by how much they matter before a public release.
 | Partial instillation (store the byte ranges you have, fill gaps later) | ❌ | `Store` caches only whole `200 OK` bodies; `206 Partial Content` is never cached. |
 | Range-request assembly / serving ranges from cache | ⚠️ | **Done for complete entries only (2026-10-02):** `ProxyHandler.serveCached` satisfies a single-range `Range` request (`bytes=start-end`, `bytes=start-`, or a suffix `bytes=-n`) against a cache hit with a `206 Partial Content`/`Content-Range`, or a `416 Range Not Satisfiable` if the range doesn't fit; `If-Range` is honoured (RFC 9110 section 13.1.5: a strong-comparison-only match against the entity's current ETag/Last-Modified, falling back to the whole entity otherwise). `Accept-Ranges: bytes` is set on every cache-hit response. Deliberately out of scope, and the reason this isn't a plain ✅: a multi-range request (`bytes=0-1,3-4`) falls back to serving the whole entity rather than a `multipart/byteranges` response, and - the bigger limitation - this only ever slices an entity go-polipo already has complete, because that is the only kind it ever stores (see the row below); there is no notion of a partially-cached entity with a gap to fetch from the origin to satisfy a range that reaches past what is cached. Applied uniformly to all three places a cached entity is served to a client (a fresh hit, `relaxTransparency`'s stale serving, and `proxyOffline`), not just the common fresh-hit path. |
 | Poor Man's Multiplexing (`pmmSize`, `pmmFirstSize`) | ❌ | No segmented fetching of large objects. |
-| Pipelining / server-capability probing (`serverSlots*`, `smallRequestTime`, `replyUnpipeline*`, `maxPipelineTrain`, `maxSideBuffering`, `serverExpireTime`) | 🔷 | Connection reuse and multiplexing owned by `http.Transport` (fixed `MaxIdleConns:100`, `IdleConnTimeout:90s`). Not tunable via config. |
+| Pipelining / server-capability probing (`serverSlots*`, `smallRequestTime`, `replyUnpipeline*`, `maxPipelineTrain`, `maxSideBuffering`, `serverExpireTime`) | 🔷 | Connection reuse and multiplexing owned by `http.Transport` (fixed `MaxIdleConns:100`; `IdleConnTimeout` is `serverIdleTimeout`, §3). Not tunable via config. |
 
 ## 11. On-disk cache
 
@@ -450,7 +452,10 @@ at the end groups findings by how much they matter before a public release.
 ### C. Explicitly by-design (already in ARCHITECTURE.md; just needs a sentence)
 
 - PMM (§10).
-- All DNS knobs (§12), all connection-pool/pipelining knobs (§10).
+- All DNS knobs (§12), all connection-pool/pipelining knobs (§10). The
+  timeouts were not by design: they guard against a stalled peer rather than
+  tune performance, and were ported on 2026-11-03 (`clientTimeout` §2,
+  `serverTimeout`/`serverIdleTimeout` §3).
 - `daemonise` / `pidFile` (§15).
 - `logSyslog` / `logFacility` (§14) - no syslog sink.
 

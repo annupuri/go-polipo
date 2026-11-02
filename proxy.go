@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -124,7 +125,14 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 				}
 			}
 			logf(ph.config.LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			// A serverTimeout running out is a 504 (RFC 9110 section
+			// 15.6.5), as in Polipo; any other failure is a 502.
+			code := http.StatusBadGateway
+			var ne net.Error
+			if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout() {
+				code = http.StatusGatewayTimeout
+			}
+			http.Error(w, err.Error(), code)
 		},
 	}
 	return ph
@@ -345,7 +353,15 @@ func (ph *ProxyHandler) parseAllowedClients() {
 	}
 }
 
+// dialContext connects to addr, through the SOCKS parent proxy if there is
+// one, giving up after serverTimeout. Both forwarded requests and CONNECT
+// tunnels dial through it.
 func (ph *ProxyHandler) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if t := ph.config.ServerTimeout; t > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, t)
+		defer cancel()
+	}
 	if ph.socksDialer != nil {
 		if ctxDialer, ok := ph.socksDialer.(proxy.ContextDialer); ok {
 			return ctxDialer.DialContext(ctx, network, addr)
@@ -357,11 +373,46 @@ func (ph *ProxyHandler) dialContext(ctx context.Context, network, addr string) (
 	return d.DialContext(ctx, network, addr)
 }
 
+// dialUpstream dials a connection for the Transport, which carries forwarded
+// requests (never CONNECT tunnels), and applies serverTimeout to it for as
+// long as it lives; see idleTimeoutConn.
+func (ph *ProxyHandler) dialUpstream(ctx context.Context, network, addr string) (net.Conn, error) {
+	conn, err := ph.dialContext(ctx, network, addr)
+	if err != nil || ph.config.ServerTimeout <= 0 {
+		return conn, err
+	}
+	return &idleTimeoutConn{Conn: conn, timeout: ph.config.ServerTimeout}, nil
+}
+
+// idleTimeoutConn fails a read or write once the connection has gone timeout
+// without moving a byte - Polipo's serverTimeout, which it rearmed on every
+// I/O (server.c). Without it an origin that stops sending mid-response
+// holds its maxConcurrentRequests slot for as long as the client keeps
+// waiting. A write also pushes back the read deadline, because the
+// Transport keeps a read pending on a connection while it sits in the idle
+// pool: the deadline that read was given is otherwise still running when the
+// connection is reused for the next request.
+type idleTimeoutConn struct {
+	net.Conn
+	timeout time.Duration
+}
+
+func (c *idleTimeoutConn) Read(p []byte) (int, error) {
+	c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
+	return c.Conn.Read(p)
+}
+
+func (c *idleTimeoutConn) Write(p []byte) (int, error) {
+	c.Conn.SetDeadline(time.Now().Add(c.timeout))
+	return c.Conn.Write(p)
+}
+
 func (ph *ProxyHandler) createTransport() *http.Transport {
 	tr := &http.Transport{
-		DialContext:           ph.dialContext,
+		DialContext:           ph.dialUpstream,
 		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
+		IdleConnTimeout:       ph.config.ServerIdleTimeout,
+		ResponseHeaderTimeout: ph.config.ServerTimeout,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}

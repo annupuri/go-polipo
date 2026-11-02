@@ -31,6 +31,19 @@ type Config struct {
 	// missing, appended otherwise). Empty keeps logging on standard error.
 	LogFile string
 
+	// ClientTimeout, ServerTimeout and ServerIdleTimeout are Polipo's
+	// timeouts of the same names; 0 disables one. ClientTimeout bounds how
+	// long a client may take to send a request's headers, and how long its
+	// connection may sit idle between requests. ServerTimeout bounds
+	// connecting to the origin (or parent proxy), and any wait for it to
+	// send or accept the next bytes of an exchange. ServerIdleTimeout is how
+	// long an unused connection to the origin is kept for reuse. CONNECT
+	// tunnels, which may sit idle legitimately, are subject only to
+	// ServerTimeout's connect limit, as in Polipo.
+	ClientTimeout     time.Duration
+	ServerTimeout     time.Duration
+	ServerIdleTimeout time.Duration
+
 	// DiskCacheUnlinkTime is the maximum age (since last access) a cached
 	// file may reach before `-x` removes it, regardless of HTTP freshness.
 	DiskCacheUnlinkTime time.Duration
@@ -172,6 +185,9 @@ func NewDefaultConfig() *Config {
 		DisableLocalInterface:   false,
 		MaxConcurrentRequests:   100,
 		LogFile:                 "",
+		ClientTimeout:           120 * time.Second, // Polipo's defaults
+		ServerTimeout:           90 * time.Second,
+		ServerIdleTimeout:       45 * time.Second,
 		DiskCacheUnlinkTime:     32 * 24 * time.Hour,
 		MaxDiskCacheEntrySize:   -1,
 		DiskCacheTruncateTime:   108 * time.Hour, // 4.5 days, matching Polipo
@@ -234,6 +250,9 @@ func (c *Config) Entries() []ConfigEntry {
 		{"logFile", c.LogFile},
 		{"disableLocalInterface", strconv.FormatBool(c.DisableLocalInterface)},
 		{"maxConcurrentRequests", strconv.Itoa(c.MaxConcurrentRequests)},
+		{"clientTimeout", c.ClientTimeout.String()},
+		{"serverTimeout", c.ServerTimeout.String()},
+		{"serverIdleTimeout", c.ServerIdleTimeout.String()},
 		{"proxyOffline", strconv.FormatBool(c.ProxyOffline)},
 		{"relaxTransparency", tristateString(c.RelaxTransparency)},
 		{"dontTrustVaryETag", tristateString(c.DontTrustVaryETag)},
@@ -503,6 +522,24 @@ func (c *Config) Set(key, val string) error {
 			return fmt.Errorf("invalid maxConcurrentRequests '%s': %w", val, err)
 		}
 		c.MaxConcurrentRequests = limit
+	case "clientTimeout":
+		d, err := parseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid clientTimeout '%s': %w", val, err)
+		}
+		c.ClientTimeout = d
+	case "serverTimeout":
+		d, err := parseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid serverTimeout '%s': %w", val, err)
+		}
+		c.ServerTimeout = d
+	case "serverIdleTimeout":
+		d, err := parseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid serverIdleTimeout '%s': %w", val, err)
+		}
+		c.ServerIdleTimeout = d
 	case "diskCacheUnlinkTime":
 		d, err := parseDuration(val)
 		if err != nil {

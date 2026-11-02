@@ -44,12 +44,14 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `proxyPort` | `8123` | ✅ | |
 | `allowedClients` | (なし) | ✅ | 素の IP、CIDR、`all`/`*`。実際の TCP ピアアドレスで判定。 |
 | `authCredentials` | (null) | ✅ | **強制済み（2026-09-12 解決）。** `"user:password"` の単一文字列。空（既定）なら Polipo と同じく認証不要。設定時は `ProxyHandler.isAuthorized` が転送・CONNECT・ローカル `/polipo/*` ページを問わず、他のどの処理よりも先に全リクエストを検査する。認証情報が無い/誤りの場合、通常の転送リクエストと CONNECT には `407`/`Proxy-Authenticate`、go-polipo に（プロキシ経由でなく）直接アクセスしたリクエストには `401`/`WWW-Authenticate`（`Proxy-Authorization` ではなく `Authorization` を検証）を返す — これは Polipo の `urlIsLocal` による分岐で、推測ではなくベンダリングされた C 版の履歴（`auth.c`, `client.c`）から確認した。`parentAuthCredentials` 実装時（2026-09-13）に発見：Polipo の `config.c` は `CONFIG_PASSWORD` 型の変数の実際の値を `-v` や設定ページに一切表示せず、常に `(hidden)` とだけ表示する。`authCredentials` もこの型の一つだが、go-polipo の `Entries()` は平文で表示していた。新規追加した2つのパスワード変数と併せて修正済み。 |
+| `clientTimeout` | `120s` | ✅ | **実装済み（2026-11-03）。** クライアントがリクエストヘッダを送り終えるまでの時間（`ReadHeaderTimeout`）と、リクエストの合間に接続を遊ばせておける時間（`IdleTimeout`）の上限。`0` で無効。リクエストやレスポンスの本文には適用しない（`net/http` では本文全体の上限しか設定できず、Polipo の「I/O ごとの無通信タイマー」に当たるものが無い）。CONNECT トンネルにも適用しない（Polipo もトンネルにはタイムアウトを設けていなかった）。Polipo は、オリジンを待っている間にクライアントを切らないよう `clientTimeout` を `serverTimeout` より大きく補正していたが、go-polipo はその待ちの間にクライアント側のタイマーが動かないので、この補正は要らない。以前はこの設定が無く、クライアントはリクエストを送らないまま接続をいつまでも開けておけた。 |
 | `authRealm` | (可変) | ✅ | **強制済み（2026-09-12 解決）。** 既定値は `"Polipo"`。`authCredentials` が設定されているときのみ意味を持つ（Polipo も `authCredentials` が非 null なら起動時に同じ既定値を補う）。`Basic realm="..."` チャレンジにそのまま使われる。 |
 
 ## 3. 外向き接続
 
 | 変数 | v1.1.x 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
+| `serverTimeout` / `serverIdleTimeout` | `90s` / `45s` | ✅ | **実装済み（2026-11-03）。** `serverTimeout` は、オリジン・SOCKS・親プロキシへの接続（CONNECT トンネルの接続も含む）、レスポンスヘッダの待ち（`ResponseHeaderTimeout`）、やり取りの途中の無通信（`idleTimeoutConn`。Polipo の `server.c` と同じく、読み書きのたびに期限を延ばす）の上限。時間切れは Polipo と同じく `504`、それ以外の上流の失敗はこれまでどおり `502`。確立した CONNECT トンネルには、Polipo と同じくタイムアウトを設けない。`serverIdleTimeout` は、使っていないオリジンへの接続を再利用のために残しておく時間（`IdleConnTimeout`。以前は 90s 固定だった）。どちらも `0` で無効。以前はこの設定が無く、リクエストを受け付けたまま止まったオリジンが、クライアントが待ち続ける限り `maxConcurrentRequests` の枠を占有していた。 |
 | `proxyOutgoingAddress` | OS 既定 | ❌ | 上流ソケットの送信元アドレスを指定できない（マルチホーム環境）。 |
 | `useTemporarySourceAddress` | `maybe` | 🔷 | RFC 3041 の一時 IPv6 送信元選択 — OS 任せ。 |
 | `allowedPorts` | `80-100, 1024-65535` | ✅ | **強制済み（2026-09-11 解決）。** `handleForward` が対象ポートを求め（`requestPort`）、`AllowedPorts` に無ければ（`PortSet.Contains`）キャッシュ参照や上流ダイヤルの前に `403` で拒否する。既定は Polipo と同じ（`80-100, 1024-65535`）に戻したので、80–100 以外の特権ポート（25, 110, 119, 143, …）は拒否される。`parsePortSet` は Polipo の `lo-hi` レンジ構文（`-100`・`1024-` の開区間も）を受け付ける。CONNECT は Polipo 同様 `tunnelAllowedPorts` のみで判定し、2 つのリストは併用しない。 |
@@ -134,7 +136,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | 部分インスティレーション（持っているバイト範囲を保存し、後で隙間を埋める） | ❌ | `Store` は `200 OK` の本文全体しかキャッシュせず、`206 Partial Content` は保存しない。 |
 | レンジリクエストの組み立て / キャッシュからのレンジ配信 | ⚠️ | **完全なエントリに対してのみ完了（2026-10-02）:** `ProxyHandler.serveCached` が単一レンジの `Range` リクエスト（`bytes=start-end`、`bytes=start-`、サフィックス形式 `bytes=-n`）をキャッシュヒットに対して処理し、`206 Partial Content`/`Content-Range` を返す。範囲が収まらなければ `416 Range Not Satisfiable`。`If-Range` にも対応（RFC 9110 13.1.5: エンティティの現在のETag/Last-Modifiedとの厳密比較のみを行い、一致しなければ全体を返す）。キャッシュヒット応答には常に `Accept-Ranges: bytes` を付与する。単純な ✅ にしなかった理由: マルチレンジリクエスト（`bytes=0-1,3-4`）は非対応で全体を返す方にフォールバックすること、そしてより大きな制約として、これは go-polipo が既に完全な形で持っているエンティティを切り出すだけであること（go-polipoが保存するのは常にそれだけ、下の行を参照）— キャッシュしている範囲を超えた部分をオリジンから補完して満たす、という部分キャッシュの概念は無い。クライアントにキャッシュから配信する3箇所すべて（通常のフレッシュヒット、`relaxTransparency` による古いエントリの配信、`proxyOffline`）に一律で適用。 |
 | Poor Man's Multiplexing（`pmmSize`, `pmmFirstSize`） | ❌ | 大きなオブジェクトの分割取得なし。 |
-| パイプライン / サーバー能力の探索（`serverSlots*`, `smallRequestTime`, `replyUnpipeline*`, `maxPipelineTrain`, `maxSideBuffering`, `serverExpireTime`） | 🔷 | コネクション再利用と多重化は `http.Transport` の責務（`MaxIdleConns:100`、`IdleConnTimeout:90s` 固定）。設定では調整不可。 |
+| パイプライン / サーバー能力の探索（`serverSlots*`, `smallRequestTime`, `replyUnpipeline*`, `maxPipelineTrain`, `maxSideBuffering`, `serverExpireTime`） | 🔷 | コネクション再利用と多重化は `http.Transport` の責務（`MaxIdleConns:100` 固定。`IdleConnTimeout` は `serverIdleTimeout`、§3）。設定では調整不可。 |
 
 ## 11. ディスクキャッシュ
 
@@ -438,6 +440,9 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 - PMM（§10）。
 - すべての DNS ノブ（§12）、すべてのコネクションプール / パイプラインノブ（§10）。
+  ただしタイムアウトは割り切りの対象ではなかった。性能の調整ではなく、止まった
+  相手に引きずられないための仕組みなので、2026-11-03 に移植した（`clientTimeout`
+  は §2、`serverTimeout`/`serverIdleTimeout` は §3）。
 - `daemonise` / `pidFile`（§15）。
 - `logSyslog` / `logFacility`（§14）— syslog への出力先が無い。
 
