@@ -912,6 +912,10 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	if ph.answerMaxForwards(w, req) {
+		return
+	}
+
 	// proxyOffline: never contact the origin. Whatever is cached (fresh or
 	// stale) is served as-is; a true miss is a 502, not a network attempt.
 	if ph.config.ProxyOffline {
@@ -956,6 +960,36 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// is "maybe" or "true", the ErrorHandler falls back to a stale cache entry
 	// instead of a raw error if the origin cannot be reached.
 	ph.reverseProxy.ServeHTTP(w, req)
+}
+
+// answerMaxForwards applies RFC 9110 section 7.6.2 to a TRACE or OPTIONS
+// request: one carrying Max-Forwards: 0 is answered here, as the final
+// recipient, and reports true; any other Max-Forwards is decremented for
+// the forwarded request. OPTIONS gets an empty 200. TRACE gets a 405
+// rather than the echo of the request it asks for, which would hand back
+// whatever headers reached go-polipo. A Max-Forwards that is not a
+// non-negative integer is left alone. Polipo did not handle Max-Forwards,
+// and refused TRACE altogether.
+func (ph *ProxyHandler) answerMaxForwards(w http.ResponseWriter, req *http.Request) bool {
+	if req.Method != http.MethodTrace && req.Method != http.MethodOptions {
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(req.Header.Get("Max-Forwards")))
+	if err != nil || n < 0 {
+		return false
+	}
+	if n > 0 {
+		req.Header.Set("Max-Forwards", strconv.Itoa(n-1))
+		return false
+	}
+	if req.Method == http.MethodOptions {
+		w.Header().Set("Content-Length", "0")
+		w.WriteHeader(http.StatusOK)
+		return true
+	}
+	w.Header().Set("Allow", "OPTIONS")
+	http.Error(w, "TRACE is not answered by the proxy", http.StatusMethodNotAllowed)
+	return true
 }
 
 // serveOffline answers a forwarded request under proxyOffline, which never

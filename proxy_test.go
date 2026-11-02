@@ -3095,3 +3095,52 @@ func TestViaAfterRevalidation(t *testing.T) {
 		backend.Close()
 	}
 }
+
+// TestMaxForwards: a TRACE or OPTIONS request with Max-Forwards: 0 is
+// answered by go-polipo itself, and any other value is decremented on the
+// way through (RFC 9110 section 7.6.2); other methods, and values that are
+// not a non-negative integer, pass unchanged.
+func TestMaxForwards(t *testing.T) {
+	var gotMF []string
+	hits := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		gotMF = r.Header.Values("Max-Forwards")
+	}))
+	defer backend.Close()
+
+	ph := newTestHandler(NewDefaultConfig())
+	for _, tc := range []struct {
+		method, mf string
+		code       int
+		forwarded  string // Max-Forwards the origin sees; "-" if not forwarded
+	}{
+		{http.MethodOptions, "0", http.StatusOK, "-"},
+		{http.MethodTrace, "0", http.StatusMethodNotAllowed, "-"},
+		{http.MethodOptions, "3", http.StatusOK, "2"},
+		{http.MethodTrace, " 1 ", http.StatusOK, "0"},
+		{http.MethodGet, "0", http.StatusOK, "0"},
+		{http.MethodOptions, "-1", http.StatusOK, "-1"},
+		{http.MethodTrace, "many", http.StatusOK, "many"},
+	} {
+		hits, gotMF = 0, nil
+		req := httptest.NewRequest(tc.method, backend.URL+"/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Max-Forwards", tc.mf)
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != tc.code {
+			t.Errorf("%s Max-Forwards %q: status = %d, want %d", tc.method, tc.mf, rr.Code, tc.code)
+		}
+		if tc.forwarded == "-" {
+			if hits != 0 {
+				t.Errorf("%s Max-Forwards %q: forwarded, want answered by the proxy", tc.method, tc.mf)
+			}
+			if tc.method == http.MethodTrace && rr.Header().Get("Allow") == "" {
+				t.Errorf("%s Max-Forwards %q: a 405 needs Allow", tc.method, tc.mf)
+			}
+		} else if len(gotMF) != 1 || gotMF[0] != tc.forwarded {
+			t.Errorf("%s Max-Forwards %q: origin got %q, want %q", tc.method, tc.mf, gotMF, tc.forwarded)
+		}
+	}
+}
