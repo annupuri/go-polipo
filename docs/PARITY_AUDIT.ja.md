@@ -96,6 +96,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `proxyName` / `displayName` | ホスト名 / `Polipo` | ❌ | プロキシ識別名を設定できない（`Via` にはプロセスごとの仮名を使う。`disableVia` を参照）。エラー本文は Go の平文 `http.Error`。 |
 | `X-Forwarded-For` | — | ✅ | 明示的に nil 化し、クライアント IP を転送しない（`Director`）。 |
 | `Date` が無い応答 | — | ✅ | **実装済み（2026-11-03）。** 上流から `Date` の無い応答が来たら、受け取った時刻を `Date` として付けてから保存・転送する（`cacheResponse`。RFC 9110 §6.6.1）。Polipo と同じ（`server.c`）。以前は `Date` 無しのまま保存しており、`Date` の無い `304` では保存済みの古い `Date` が残るため、再検証したばかりのエントリがすぐ期限切れ扱いになっていた。 |
+| `Max-Forwards`（TRACE、OPTIONS） | — | ✅ | **実装済み（2026-11-03）。** `Max-Forwards: 0` の `TRACE` と `OPTIONS` には、go-polipo が最終的な受け手として自分で答え、1以上なら1減らして転送する（RFC 9110 §7.6.2。`answerMaxForwards`）。`OPTIONS` には空の `200` を返す。`TRACE` には、求められているリクエストのこだまではなく `405`（`Allow: OPTIONS` 付き）を返す。こだまを返すと、go-polipo に届いたヘッダをそのまま返してしまうため。Polipo は `Max-Forwards` を処理せず、`TRACE` には知らないメソッドと同じく `501` を返していた。go-polipo はどのメソッドも転送する。 |
 | ホップバイホップヘッダの除去 | — | ✅ | `httputil.ReverseProxy` が RFC 7230 に従い処理。 |
 | 内容を変えずに中継 | — | ✅ | **2026-11-03 修正。** 上流用の `Transport` に `DisableCompression` を設定し、`Accept-Encoding` と `Content-Encoding` はクライアントとオリジンが送ったとおりに通す（RFC 9110 §7.7）。Polipo と同じ。以前は無効にしておらず、`Accept-Encoding` を付けないクライアントのリクエストでは、`Transport` が自分で gzip を要求して応答を展開していた。そのため gzip 版の `ETag` で非圧縮の本文を保存していたほか、`Content-Encoding: gzip` なのに展開できない応答は、本文が空のままクライアントに届いていた。 |
 | `alwaysAddNoTransform` | `false` | ❌ | 些末。 |
