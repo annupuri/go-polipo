@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
@@ -41,6 +42,14 @@ type ProxyHandler struct {
 	allowAll    bool
 	allowIPs    []net.IP
 	allowNets   []*net.IPNet
+
+	// viaName is how this instance names itself in Via (RFC 9110 section
+	// 7.6.3). Polipo used the machine's hostname (proxyName); this is a
+	// pseudonym, which the RFC allows, so the hostname is not revealed to
+	// every site. A random part makes it unique to the running instance:
+	// a request that comes back through it is a loop, while a chain of two
+	// go-polipo instances is not mistaken for one.
+	viaName string
 }
 
 // NewProxyHandler creates a new ProxyHandler.
@@ -48,6 +57,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	ph := &ProxyHandler{
 		config:       config,
 		cacheManager: cacheManager,
+		viaName:      "go-polipo-" + strings.ToLower(rand.Text()[:8]),
 	}
 	ph.forbidden.Store(forbidden)
 	ph.uncachable.Store(uncachable)
@@ -108,6 +118,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 				*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), clientConditionalKey{}, true))
 			}
 			ph.addConditionalHeaders(outReq)
+			ph.addVia(outReq.Header, outReq.ProtoMajor, outReq.ProtoMinor)
 			*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), requestTimeKey{}, time.Now()))
 		},
 		ModifyResponse: ph.cacheResponse,
@@ -185,6 +196,12 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	if len(resp.Header.Values("Date")) == 0 {
 		resp.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 	}
+	// Via goes on before anything is stored, so a cache hit carries the
+	// same Via as the response first passed on. A 304 merged into a stored
+	// entry gets it only if it brought a Via of its own, which replaces
+	// the stored one; otherwise the stored Via, already naming this
+	// instance, stays as it is.
+	needVia := len(resp.Header.Values("Via")) > 0
 	// A 304 for a request the client made conditional itself answers the
 	// client's validators, not ours (addConditionalHeaders leaves those
 	// requests alone), so it goes back to the client as-is; Store ignores it.
@@ -192,6 +209,11 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 		if err := ph.reviveFromCache(resp); err != nil {
 			return err
 		}
+	} else {
+		needVia = true
+	}
+	if needVia {
+		ph.addVia(resp.Header, resp.ProtoMajor, resp.ProtoMinor)
 	}
 	for _, h := range ph.config.CensoredHeaders {
 		resp.Header.Del(h)
@@ -210,6 +232,28 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	}
 	ph.cacheManager.Store(req, resp)
 	return nil
+}
+
+// addVia appends this instance to the Via of a message it forwards, received
+// over HTTP/major.minor, as RFC 9110 section 7.6.3 requires - unless
+// disableVia is set.
+func (ph *ProxyHandler) addVia(h http.Header, major, minor int) {
+	if !ph.config.DisableVia {
+		h.Add("Via", fmt.Sprintf("%d.%d %s", major, minor, ph.viaName))
+	}
+}
+
+// viaNames reports whether any entry of h's Via names name as the
+// intermediary that received it - Polipo's checkVia (http_parse.c).
+func viaNames(h http.Header, name string) bool {
+	for _, line := range h.Values("Via") {
+		for _, entry := range strings.Split(line, ",") {
+			if fields := strings.Fields(entry); len(fields) >= 2 && strings.EqualFold(fields[1], name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // safeMethod reports whether method is one RFC 9110 section 9.2.1 defines as
@@ -856,6 +900,15 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	if port := requestPort(req); !ph.config.AllowedPorts.Contains(port) {
 		logf(ph.config.LogLevel, LogForbidden, "Denied: port %d not in allowedPorts (target=%s)", port, req.URL)
 		http.Error(w, "Forbidden: target port not allowed", http.StatusForbidden)
+		return
+	}
+
+	// A request that already went through this instance has come back to
+	// it: a loop, typically a parentProxy that leads back here. Polipo
+	// answered it the same way.
+	if viaNames(req.Header, ph.viaName) {
+		logf(ph.config.LogLevel, LogError, "Proxy loop detected: %s %s", req.Method, req.URL)
+		http.Error(w, "Proxy loop detected", http.StatusGatewayTimeout)
 		return
 	}
 

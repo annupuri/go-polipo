@@ -92,8 +92,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | :--- | :--- | :--: | :--- |
 | `censoredHeaders` | (空) | ✅ | **実装済み（2026-09-13 解決）。** ヘッダ名のリストを、転送リクエスト（`Director`）と受信レスポンス（`cacheResponse`、キャッシュ・クライアントへの返却より前）の両方から除去する — 送受信で別リストではなく、Polipo の単一のヘッダコピーフィルタ（`http_parse.c`）と同じく1つのリストを両方向でチェックする。レスポンスへの適用はフェッチ時に一度きりなので、後のキャッシュヒットは既にクリーンな状態（Polipo の「パース時に一度だけ」というモデルと一致）。 |
 | `censorReferer` | `false` | ⚠️ | **実装済み（2026-09-13 解決）。** 推測ではなくベンダリングされた C 版の履歴（`http_parse.c`）から確認した Polipo の三値：`false`（既定）は `Referer` をそのまま転送、`maybe` はリクエスト先と異なるホストを指す場合のみ削除（クロスオリジン時のみ）、`true` は常に削除。1点意図的に変えた箇所がある：クロスオリジン判定に Polipo の `urlSameHost`（`http://` という4文字スキームのみを前提にした ASCII 前置比較で、`https://` の Referer は原理的に絶対に「同一ホスト」と判定されない）をそのまま再現するのではなく `net/url` を使った — go-polipo 版は `https://` でも正しく動く、C ソースの字面より踏み込んだ改善。 |
-| `disableVia` | `true`（Via なし） | ⚠️ | go-polipo は `Via` を一切付けない — Polipo の*既定*と一致 — が、**有効化する手段がなく**、プロキシループ検出も無い。 |
-| `proxyName` / `displayName` | ホスト名 / `Polipo` | ❌ | プロキシ識別名を設定できない。エラー本文は Go の平文 `http.Error`。 |
+| `disableVia` | `true`（Via なし） | ✅ | **実装済み（2026-11-03）。既定は意図的に `false`。** RFC 9110 §7.6.3 の必須要件どおり、転送するすべてのリクエストとレスポンスの `Via` に自分を加える（Polipo の既定では付けなかった）。`disableVia = true` で付けなくなる。名前には Polipo の `proxyName`（ホスト名）ではなく、`go-polipo-` に起動時に決めるランダムな文字列を続けた仮名を使う。マシン名をすべてのサイトに知らせないためで、RFC も仮名を認めている。転送しようとするリクエストの `Via` にこのプロセスの名前が既にあればループ（たとえば自分に戻ってくる `parentProxy`）とみなし、Polipo（`checkVia`）と同じく `504 Proxy loop detected` を返す。名前はプロセスごとに異なるので、go-polipo を2台つないだ構成をループと誤認しない。Polipo はレスポンスの `Via` も調べていたが、ループは必ずまずリクエストとして現れるので、go-polipo はリクエストだけを調べる。キャッシュから返すレスポンスには、最初に中継したときの `Via` が付く。自分の `Via` を持ってきた `304` は、保存済みの `Via` を置き換える。CONNECT トンネルには `Via` を付けない。以前は `Via` を付けず、付ける手段もループ検出も無かった。 |
+| `proxyName` / `displayName` | ホスト名 / `Polipo` | ❌ | プロキシ識別名を設定できない（`Via` にはプロセスごとの仮名を使う。`disableVia` を参照）。エラー本文は Go の平文 `http.Error`。 |
 | `X-Forwarded-For` | — | ✅ | 明示的に nil 化し、クライアント IP を転送しない（`Director`）。 |
 | `Date` が無い応答 | — | ✅ | **実装済み（2026-11-03）。** 上流から `Date` の無い応答が来たら、受け取った時刻を `Date` として付けてから保存・転送する（`cacheResponse`。RFC 9110 §6.6.1）。Polipo と同じ（`server.c`）。以前は `Date` 無しのまま保存しており、`Date` の無い `304` では保存済みの古い `Date` が残るため、再検証したばかりのエントリがすぐ期限切れ扱いになっていた。 |
 | ホップバイホップヘッダの除去 | — | ✅ | `httputil.ReverseProxy` が RFC 7230 に従い処理。 |
@@ -451,7 +451,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 ### D. 些末 / 価値が低い
 
-- `proxyName` / `displayName`、`disableVia` トグル（§7）。
+- `proxyName` / `displayName`（§7）。（`disableVia` は 2026-11-03 に実装済み。）
 - `forbiddenUrl` / `forbiddenRedirectCode`（§4）。
 - `redirector`（§4）。
 - `localDocumentRoot` / `disableProxy`、キャッシュインデックスページ（§13）。
