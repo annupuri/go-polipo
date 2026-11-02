@@ -522,6 +522,31 @@ func fileExistsForURL(t *testing.T, cm *CacheManager, rawURL string) bool {
 	return err == nil
 }
 
+// TestStoreSkipsRequestNoStore: a request carrying Cache-Control: no-store
+// forbids storing the response to it (RFC 9111 section 5.2.1.5), in memory
+// and on disk; the client still gets the whole body.
+func TestStoreSkipsRequestNoStore(t *testing.T) {
+	for _, cc := range []string{"no-store", "max-age=0, No-Store"} {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+
+		url := "http://example.com/private"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("Cache-Control", cc)
+		resp := mkResp("body", "Cache-Control", "max-age=600", "Date", time.Now().UTC().Format(http.TimeFormat))
+		if err := storeNow(cm, req, resp); err != nil {
+			t.Fatalf("%q: Store: %v", cc, err)
+		}
+		if body, _ := io.ReadAll(resp.Body); string(body) != "body" {
+			t.Errorf("%q: client got %q, want the whole body", cc, body)
+		}
+		if cm.memCache.Contains(url) || fileExistsForURL(t, cm, url) {
+			t.Errorf("%q: the response was stored", cc)
+		}
+	}
+}
+
 func TestStoreSkipsSetCookie(t *testing.T) {
 	url := "http://example.com/with-cookie"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
