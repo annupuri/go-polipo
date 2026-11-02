@@ -54,12 +54,14 @@ type memEntry struct {
 	protoMinor int
 	header     http.Header
 	body       []byte
+	birth      time.Time // see responseBirth; a disk entry keeps it in X-Polipo-Date
 }
 
 // newMemEntry snapshots resp (whose body has already been read into
 // bodyBytes) for storage in the memory cache.
-func newMemEntry(resp *http.Response, bodyBytes []byte) *memEntry {
+func newMemEntry(resp *http.Response, bodyBytes []byte, birth time.Time) *memEntry {
 	return &memEntry{
+		birth:      birth,
 		status:     resp.Status,
 		statusCode: resp.StatusCode,
 		proto:      resp.Proto,
@@ -273,7 +275,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	if cm.memCache != nil {
 		if entry, ok := cm.memCache.Get(key); ok {
 			resp := entry.response(req)
-			return resp, cm.isExpired(resp) || responseVaries(resp) || responseNoCache(resp)
+			return resp, cm.isExpired(resp, entry.birth) || responseVaries(resp) || responseNoCache(resp)
 		}
 	}
 
@@ -323,7 +325,8 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// which variant is correct. See responseVaries. A no-cache response is
 	// always stale for the same reason: only the origin may approve its
 	// reuse. See responseNoCache.
-	stale = cm.isExpired(resp) || responseVaries(resp) || responseNoCache(resp)
+	birth := storedBirth(resp)
+	stale = cm.isExpired(resp, birth) || responseVaries(resp) || responseNoCache(resp)
 
 	// Clean up X-Polipo headers before returning
 	resp.Header.Del("X-Polipo-Location")
@@ -337,7 +340,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// evicts it again: the disk copy stays where it is. A HEAD response
 	// carries no body to copy.
 	if cm.memCache != nil && req.Method == http.MethodGet {
-		cm.promote(key, resp)
+		cm.promote(key, resp, birth)
 	}
 
 	return resp, stale
@@ -347,7 +350,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 // memoryCacheMaxEntrySize limit as Store. A body over the limit is not
 // copied and keeps streaming from the file, with whatever was already read
 // put back in front of the rest.
-func (cm *CacheManager) promote(key string, resp *http.Response) {
+func (cm *CacheManager) promote(key string, resp *http.Response, birth time.Time) {
 	limit := cm.config.MemoryCacheMaxEntrySize
 	if limit >= 0 && resp.ContentLength > limit {
 		return
@@ -367,7 +370,7 @@ func (cm *CacheManager) promote(key string, resp *http.Response) {
 	resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
-	cm.memCache.Add(key, newMemEntry(resp, body))
+	cm.memCache.Add(key, newMemEntry(resp, body, birth))
 }
 
 // fileBody is a disk cache entry's body: closing it also closes the cache
@@ -401,6 +404,40 @@ func responseDate(resp *http.Response) time.Time {
 		return d
 	}
 	return time.Now()
+}
+
+// maxAgeValue caps a parsed Age, as RFC 9111 section 1.2.2 caps any
+// delta-seconds that overflows.
+const maxAgeValue = 1 << 31
+
+// responseBirth returns the instant a response just received from upstream
+// was generated, so that its current age (RFC 9111 section 4.2.3) is simply
+// the time elapsed since. It is the earlier of the response's Date and
+// requestTime less any Age reported by a cache further upstream - the RFC's
+// corrected_initial_age, which counts the round trip as time the response
+// spent ageing. Polipo kept the same instant in object->age (server.c) and
+// stored it on disk as X-Polipo-Date.
+func responseBirth(h http.Header, requestTime time.Time) time.Time {
+	birth := requestTime
+	if age, err := strconv.ParseInt(strings.TrimSpace(h.Get("Age")), 10, 64); err == nil && age > 0 {
+		birth = birth.Add(-time.Duration(min(age, maxAgeValue)) * time.Second)
+	}
+	if d, err := http.ParseTime(h.Get("Date")); err == nil && d.Before(birth) {
+		birth = d
+	}
+	return birth
+}
+
+// storedBirth reads back the responseBirth of a disk cache entry from its
+// X-Polipo-Date. Polipo omitted X-Polipo-Date when it equalled Date, and
+// before go-polipo stored the birth there it stored the time of writing, so
+// Date, when earlier, still wins.
+func storedBirth(resp *http.Response) time.Time {
+	date := responseDate(resp)
+	if t, err := http.ParseTime(resp.Header.Get("X-Polipo-Date")); err == nil && t.Before(date) {
+		return t
+	}
+	return date
 }
 
 // ccFreshnessLifetime reads an explicit freshness lifetime out of a
@@ -451,39 +488,34 @@ func heuristicLifetime(resp *http.Response, date time.Time) time.Duration {
 	return heuristicMaxLifetime
 }
 
-// isExpired determines if the cached response is expired.
-func (cm *CacheManager) isExpired(resp *http.Response) bool {
-	now := time.Now()
-	hasExplicit := false
-
-	// Expires header.
+// freshnessLifetime returns how long resp stays fresh after its birth (RFC
+// 9111 section 4.2.1): s-maxage or max-age, which override Expires (section
+// 5.3); otherwise Expires less Date; otherwise a heuristic lifetime rather
+// than treating the entry as fresh indefinitely. Without a Date, birth stands
+// in for it.
+func freshnessLifetime(resp *http.Response, birth time.Time) time.Duration {
+	if life, ok := ccFreshnessLifetime(resp.Header.Get("Cache-Control")); ok {
+		return life
+	}
+	date := birth
+	if d, err := http.ParseTime(resp.Header.Get("Date")); err == nil {
+		date = d
+	}
 	if expiresStr := resp.Header.Get("Expires"); expiresStr != "" {
-		hasExplicit = true
 		t, err := http.ParseTime(expiresStr)
 		if err != nil {
-			return true // an invalid Expires (e.g. "0") means "already expired" (RFC 9111 5.3)
+			return 0 // an invalid Expires (e.g. "0") means "already expired" (RFC 9111 5.3)
 		}
-		if now.After(t) {
-			return true
-		}
+		return t.Sub(date)
 	}
+	return heuristicLifetime(resp, date)
+}
 
-	// Cache-Control: max-age / s-maxage.
-	if life, ok := ccFreshnessLifetime(resp.Header.Get("Cache-Control")); ok {
-		hasExplicit = true
-		if now.After(responseDate(resp).Add(life)) {
-			return true
-		}
-	}
-
-	if hasExplicit {
-		return false
-	}
-
-	// No explicit expiration: fall back to a heuristic lifetime rather than
-	// treating the entry as fresh indefinitely.
-	date := responseDate(resp)
-	return now.After(date.Add(heuristicLifetime(resp, date)))
+// isExpired reports whether resp, generated at birth (see responseBirth), is
+// no longer fresh: RFC 9111 section 4.2 calls it fresh only while its
+// freshness lifetime exceeds its current age.
+func (cm *CacheManager) isExpired(resp *http.Response, birth time.Time) bool {
+	return time.Since(birth) >= freshnessLifetime(resp, birth)
 }
 
 // Store arranges for a cacheable response to be written to the disk and/or
@@ -547,14 +579,20 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 		return
 	}
 
+	requestTime, ok := req.Context().Value(requestTimeKey{}).(time.Time)
+	if !ok {
+		requestTime = time.Now()
+	}
+	birth := responseBirth(resp.Header, requestTime)
+
 	b := &cacheBody{cm: cm, src: resp.Body, key: req.URL.String()}
 	if diskWants {
-		b.disk = cm.startDiskWrite(req, resp)
+		b.disk = cm.startDiskWrite(req, resp, birth)
 	}
 	if memWants {
 		// Snapshot the headers now: the caller may change resp.Header while
 		// the body is still streaming.
-		b.mem = newMemEntry(resp, nil)
+		b.mem = newMemEntry(resp, nil, birth)
 		b.memBuf = new(bytes.Buffer)
 	}
 	if b.disk == nil && b.mem == nil {
@@ -585,7 +623,7 @@ type diskWrite struct {
 
 // startDiskWrite starts writing resp to a temporary file, or returns nil (after
 // logging why) if that cannot be set up.
-func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response) *diskWrite {
+func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response, birth time.Time) *diskWrite {
 	path, err := cm.GetCachePath(req.URL.String())
 	if err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
@@ -613,7 +651,7 @@ func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response) *
 	clone.Body = pr
 	clone.Header = resp.Header.Clone()
 	clone.Header.Set("X-Polipo-Location", req.URL.String())
-	clone.Header.Set("X-Polipo-Date", time.Now().Format(http.TimeFormat))
+	clone.Header.Set("X-Polipo-Date", birth.UTC().Format(http.TimeFormat))
 	clone.Header.Set("X-Polipo-Access", time.Now().Format(http.TimeFormat))
 
 	w := &diskWrite{path: path, tmp: file.Name(), pw: pw, done: make(chan error, 1)}
@@ -830,7 +868,7 @@ func (cm *CacheManager) expireReason(path string, info fs.FileInfo) string {
 	}
 	defer resp.Body.Close()
 
-	if cm.isExpired(resp) {
+	if cm.isExpired(resp, storedBirth(resp)) {
 		return "http-stale"
 	}
 

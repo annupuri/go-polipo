@@ -107,6 +107,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 				*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), clientConditionalKey{}, true))
 			}
 			ph.addConditionalHeaders(outReq)
+			*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), requestTimeKey{}, time.Now()))
 		},
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -189,7 +190,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 // else about the cached entry (body, Content-Type, and so on) is unchanged
 // because the origin is asserting the entity itself has not changed.
 var revalidationHeaders = []string{
-	"Cache-Control", "Content-Location", "Date", "ETag", "Expires", "Vary",
+	"Age", "Cache-Control", "Content-Location", "Date", "ETag", "Expires", "Vary",
 }
 
 // reviveFromCache turns a 304 Not Modified response, received for a
@@ -214,7 +215,10 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 		return fmt.Errorf("reading cached body for %s: %w", req.URL, err)
 	}
 
+	// The stored Age described the response as first received; only the
+	// 304's own Age, if any, says how old the revalidated one is.
 	merged := cached.Header.Clone()
+	merged.Del("Age")
 	for _, name := range revalidationHeaders {
 		if v := resp.Header.Values(name); len(v) > 0 {
 			merged[http.CanonicalHeaderKey(name)] = v
@@ -233,6 +237,11 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 // client itself sent If-None-Match or If-Modified-Since (set in the Director
 // before addConditionalHeaders runs, read by cacheResponse).
 type clientConditionalKey struct{}
+
+// requestTimeKey records, on the outgoing request's context, when the
+// Director sent it upstream: RFC 9111's request_time, from which Store
+// works out the response's age (see responseBirth).
+type requestTimeKey struct{}
 
 // hasConditionalHeaders reports whether req carries a validator, i.e.
 // whether the origin may answer it with a 304.

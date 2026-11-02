@@ -164,13 +164,14 @@ func TestCacheStoreAndLookup(t *testing.T) {
 func TestCacheIsExpired(t *testing.T) {
 	cfg := NewDefaultConfig()
 	cm := NewCacheManager(cfg)
+	expired := func(r *http.Response) bool { return cm.isExpired(r, storedBirth(r)) }
 
 	// 1. Check Expires header in the past
 	respPast := &http.Response{
 		Header: make(http.Header),
 	}
 	respPast.Header.Set("Expires", time.Now().UTC().Add(-5*time.Minute).Format(http.TimeFormat))
-	if !cm.isExpired(respPast) {
+	if !expired(respPast) {
 		t.Error("expected response with past Expires to be expired")
 	}
 
@@ -179,7 +180,7 @@ func TestCacheIsExpired(t *testing.T) {
 		Header: make(http.Header),
 	}
 	respFuture.Header.Set("Expires", time.Now().UTC().Add(5*time.Minute).Format(http.TimeFormat))
-	if cm.isExpired(respFuture) {
+	if expired(respFuture) {
 		t.Error("expected response with future Expires to be fresh")
 	}
 
@@ -189,7 +190,7 @@ func TestCacheIsExpired(t *testing.T) {
 	}
 	respCCExpired.Header.Set("Cache-Control", "max-age=60")
 	respCCExpired.Header.Set("Date", time.Now().UTC().Add(-2*time.Minute).Format(http.TimeFormat))
-	if !cm.isExpired(respCCExpired) {
+	if !expired(respCCExpired) {
 		t.Error("expected response with exceeded max-age to be expired")
 	}
 
@@ -205,7 +206,7 @@ func TestCacheIsExpired(t *testing.T) {
 	}
 	respCCFreshWithOpts.Header.Set("Cache-Control", "public, max-age=300")
 	respCCFreshWithOpts.Header.Set("Date", time.Now().UTC().Add(-2*time.Minute).Format(http.TimeFormat))
-	if cm.isExpired(respCCFreshWithOpts) {
+	if expired(respCCFreshWithOpts) {
 		t.Error("expected response within max-age (with public option) to be fresh")
 	}
 
@@ -221,7 +222,7 @@ func TestCacheIsExpired(t *testing.T) {
 	}
 
 	// 6. s-maxage takes precedence over max-age for a shared cache.
-	if !cm.isExpired(mkR(
+	if !expired(mkR(
 		"Cache-Control", "max-age=100000, s-maxage=10",
 		"Date", httpTime(-time.Minute),
 	)) {
@@ -229,20 +230,20 @@ func TestCacheIsExpired(t *testing.T) {
 	}
 
 	// 7. Invalid Expires ("0") is treated as already expired.
-	if !cm.isExpired(mkR("Expires", "0", "Date", httpTime(0))) {
+	if !expired(mkR("Expires", "0", "Date", httpTime(0))) {
 		t.Error(`Expires: "0" should be treated as expired`)
 	}
 
 	// 8. Heuristic: no Expires/max-age, Last-Modified far in the past.
 	// Lifetime = min(10% of age, 24h) = 24h; a 2-day-old Date is stale.
-	if !cm.isExpired(mkR(
+	if !expired(mkR(
 		"Last-Modified", httpTime(-100*24*time.Hour),
 		"Date", httpTime(-2*24*time.Hour),
 	)) {
 		t.Error("header-less response 2 days old (24h heuristic cap) should be expired")
 	}
 	// Same document fetched just now is still fresh.
-	if cm.isExpired(mkR(
+	if expired(mkR(
 		"Last-Modified", httpTime(-100*24*time.Hour),
 		"Date", httpTime(-time.Minute),
 	)) {
@@ -251,14 +252,14 @@ func TestCacheIsExpired(t *testing.T) {
 
 	// 9. Heuristic with a recent Last-Modified: age at fetch = 1h, lifetime = 6m.
 	// A Date 30 minutes ago is well past that.
-	if !cm.isExpired(mkR(
+	if !expired(mkR(
 		"Last-Modified", httpTime(-90*time.Minute),
 		"Date", httpTime(-30*time.Minute),
 	)) {
 		t.Error("header-less response older than 10% of its Last-Modified age should be expired")
 	}
 	// Fetched 2 minutes ago, still inside the 6m lifetime.
-	if cm.isExpired(mkR(
+	if expired(mkR(
 		"Last-Modified", httpTime(-62*time.Minute),
 		"Date", httpTime(-2*time.Minute),
 	)) {
@@ -266,11 +267,102 @@ func TestCacheIsExpired(t *testing.T) {
 	}
 
 	// 10. Heuristic with no Last-Modified: flat 24h default.
-	if cm.isExpired(mkR("Date", httpTime(-time.Hour))) {
+	if expired(mkR("Date", httpTime(-time.Hour))) {
 		t.Error("header-less response with no Last-Modified should be fresh for 24h")
 	}
-	if !cm.isExpired(mkR("Date", httpTime(-25*time.Hour))) {
+	if !expired(mkR("Date", httpTime(-25*time.Hour))) {
 		t.Error("header-less response with no Last-Modified should be expired after 24h")
+	}
+
+	// 11. max-age overrides Expires (RFC 9111 section 5.3), even a past one.
+	if expired(mkR(
+		"Cache-Control", "max-age=600",
+		"Expires", httpTime(-time.Minute),
+		"Date", httpTime(-time.Minute),
+	)) {
+		t.Error("max-age=600 on a 1-minute-old response should win over a past Expires")
+	}
+
+	// 12. Expires is measured from Date, not against the local clock: a
+	// 60-second lifetime received 2 minutes ago has run out, even though the
+	// local clock has not reached Expires, because the origin's clock is 5
+	// minutes fast.
+	if !expired(mkR(
+		"Expires", httpTime(5*time.Minute-2*time.Minute+time.Minute),
+		"Date", httpTime(5*time.Minute-2*time.Minute),
+		"X-Polipo-Date", httpTime(-2*time.Minute),
+	)) {
+		t.Error("Expires 60s after Date should be expired 2 minutes after receipt")
+	}
+}
+
+// TestStoreCountsAge checks that a response's Age - how long it had already
+// sat in a cache upstream - counts towards its current age (RFC 9111 section
+// 4.2.3), in both the disk and the memory cache, as Polipo's object->age did.
+func TestStoreCountsAge(t *testing.T) {
+	for _, memEntries := range []int{0, 1024} {
+		for _, tc := range []struct {
+			name, cc, age string
+			fresh         bool
+		}{
+			{"Age beyond max-age", "max-age=60", "100", false},
+			{"Age within max-age", "max-age=600", "100", true},
+			{"no Age", "max-age=60", "", true},
+			{"unparseable Age is ignored", "max-age=60", "soon", true},
+		} {
+			cfg := NewDefaultConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			cfg.MemoryCacheEntries = memEntries
+			cm := NewCacheManager(cfg)
+
+			url := "http://example.com/aged"
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			resp := mkResp("body", "Cache-Control", tc.cc, "Date", time.Now().UTC().Format(http.TimeFormat))
+			if tc.age != "" {
+				resp.Header.Set("Age", tc.age)
+			}
+			if err := storeNow(cm, req, resp); err != nil {
+				t.Fatalf("%s (memoryCacheEntries=%d): Store: %v", tc.name, memEntries, err)
+			}
+
+			// Both from wherever Lookup finds it first, and from disk alone.
+			for _, fromDisk := range []bool{false, true} {
+				if fromDisk {
+					cm.DiscardMemory()
+				}
+				got := cm.Lookup(req)
+				if got != nil {
+					got.Body.Close()
+				}
+				if (got != nil) != tc.fresh {
+					t.Errorf("%s (memoryCacheEntries=%d, fromDisk=%v): fresh = %v, want %v",
+						tc.name, memEntries, fromDisk, got != nil, tc.fresh)
+				}
+			}
+		}
+	}
+}
+
+// TestExpireCountsAge: `polipo -x` judges a disk entry's freshness by the
+// same age as Lookup, so an entry whose upstream Age already used up its
+// max-age is removed.
+func TestExpireCountsAge(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+
+	url := "http://example.com/aged"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	resp := mkResp("body", "Cache-Control", "max-age=60", "Age", "100", "Date", time.Now().UTC().Format(http.TimeFormat))
+	if err := storeNow(cm, req, resp); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	stats, err := cm.Expire()
+	if err != nil {
+		t.Fatalf("Expire: %v", err)
+	}
+	if stats.Removed != 1 || fileExistsForURL(t, cm, url) {
+		t.Errorf("Expire removed %d entries; want the aged-out entry removed", stats.Removed)
 	}
 }
 
