@@ -656,6 +656,11 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	if strings.Contains(cc, "no-store") || strings.Contains(cc, "private") {
 		return
 	}
+	// A request's no-store forbids storing the response to it too (RFC 9111
+	// section 5.2.1.5).
+	if _, ok := cacheControlDirectives(req.Header)["no-store"]; ok {
+		return
+	}
 
 	// go-polipo's cache key is the URL alone, so it cannot store more than one
 	// variant per URL or pick between them - a Vary response is still written

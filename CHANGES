@@ -99,7 +99,9 @@
     the old behaviour.  Responses to requests carrying an Authorization
     header are not cached unless the response is explicitly shareable
     (Cache-Control: public, s-maxage, or must-revalidate), per RFC 9111
-    section 3.5.  The disk cache can be disabled entirely with the new
+    section 3.5.  A response to a request carrying Cache-Control:
+    no-store is not cached either (RFC 9111 section 5.2.1.5); Polipo
+    stored it.  The disk cache can be disabled entirely with the new
     noDiskCache variable, or by setting diskCacheRoot to the empty string
     (which previously misbehaved).  maxDiskCacheEntrySize caps how large
     a response may be before it is written to disk at all (default -1,
