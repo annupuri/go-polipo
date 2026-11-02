@@ -798,6 +798,14 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 		}
 	}
 
+	// only-if-cached: the client wants nothing from the origin, and nothing
+	// stored suits the request (RFC 9111 section 5.2.1.7). Polipo answered
+	// the same way, but served a stale entry first.
+	if requestOnlyIfCached(req) {
+		http.Error(w, "Object not in cache", http.StatusGatewayTimeout)
+		return
+	}
+
 	// Otherwise forward upstream; caching and error handling are wired into the
 	// ReverseProxy via ModifyResponse and ErrorHandler. When relaxTransparency
 	// is "maybe" or "true", the ErrorHandler falls back to a stale cache entry

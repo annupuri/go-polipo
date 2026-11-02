@@ -343,6 +343,68 @@ func TestStoreCountsAge(t *testing.T) {
 	}
 }
 
+// TestRequestCacheControlBoundsFreshness: a request's max-age, min-fresh and
+// max-stale narrow or widen which stored response it accepts (RFC 9111
+// section 5.2.1), as in Polipo's objectIsStale - in both the disk and the
+// memory cache. Every entry here is 100 seconds old.
+func TestRequestCacheControlBoundsFreshness(t *testing.T) {
+	for _, tc := range []struct {
+		respCC, reqCC string
+		fresh         bool
+	}{
+		{"max-age=600", "", true},
+		{"max-age=600", "max-age=0", false}, // a browser reload
+		{"max-age=600", "MAX-AGE=0", false},
+		{"max-age=600", "max-age=50", false},
+		{"max-age=600", "max-age=200", true},
+		{"max-age=600", `max-age="50"`, false},
+		{"max-age=600", "max-age=-1", true}, // invalid, ignored
+		{"max-age=600", "min-fresh=600", false},
+		{"max-age=600", "min-fresh=100", true},
+		{"max-age=60", "", false},
+		{"max-age=60", "max-stale", true},
+		{"max-age=60", "max-stale=60", true},
+		{"max-age=60", "max-stale=10", false},
+		{"max-age=60", "max-stale, max-age=50", false},
+		{"max-age=60", "max-stale, min-fresh=0", false}, // min-fresh wins
+		{"max-age=60, must-revalidate", "max-stale", false},
+		{"max-age=60, proxy-revalidate", "max-stale", false},
+		{"s-maxage=60", "max-stale", false},
+		{"max-age=600, no-cache", "max-stale", false},
+	} {
+		for _, memEntries := range []int{0, 1024} {
+			cfg := NewDefaultConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			cfg.MemoryCacheEntries = memEntries
+			cm := NewCacheManager(cfg)
+
+			url := "http://example.com/bounded"
+			resp := mkResp("body", "Cache-Control", tc.respCC, "Date", time.Now().UTC().Add(-100*time.Second).Format(http.TimeFormat))
+			if err := storeNow(cm, httptest.NewRequest(http.MethodGet, url, nil), resp); err != nil {
+				t.Fatalf("Store: %v", err)
+			}
+
+			for _, fromDisk := range []bool{false, true} {
+				if fromDisk {
+					cm.DiscardMemory()
+				}
+				req := httptest.NewRequest(http.MethodGet, url, nil)
+				if tc.reqCC != "" {
+					req.Header.Set("Cache-Control", tc.reqCC)
+				}
+				got := cm.Lookup(req)
+				if got != nil {
+					got.Body.Close()
+				}
+				if (got != nil) != tc.fresh {
+					t.Errorf("response %q, request %q (memoryCacheEntries=%d, fromDisk=%v): fresh = %v, want %v",
+						tc.respCC, tc.reqCC, memEntries, fromDisk, got != nil, tc.fresh)
+				}
+			}
+		}
+	}
+}
+
 // TestExpireCountsAge: `polipo -x` judges a disk entry's freshness by the
 // same age as Lookup, so an entry whose upstream Age already used up its
 // max-age is removed.
