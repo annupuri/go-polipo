@@ -158,6 +158,58 @@ func pragmaNoCache(h http.Header) bool {
 	return strings.Contains(pragma, "no-cache")
 }
 
+// cacheControlDirectives parses every Cache-Control line in h into a map of
+// lower-cased directive names to their values, unquoted ("" for a directive
+// without one).
+func cacheControlDirectives(h http.Header) map[string]string {
+	d := make(map[string]string)
+	for _, line := range h.Values("Cache-Control") {
+		for _, part := range strings.Split(line, ",") {
+			name, value, _ := strings.Cut(strings.TrimSpace(part), "=")
+			if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
+				d[name] = strings.Trim(strings.TrimSpace(value), `"`)
+			}
+		}
+	}
+	return d
+}
+
+// directiveSeconds reads a delta-seconds directive value, reporting false
+// when it is missing or not a non-negative integer.
+func directiveSeconds(d map[string]string, name string) (time.Duration, bool) {
+	v, ok := d[name]
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return time.Duration(min(n, maxAgeValue)) * time.Second, true
+}
+
+// requestOnlyIfCached reports whether req carries Cache-Control:
+// only-if-cached, under which the client wants nothing fetched from the
+// origin (RFC 9111 section 5.2.1.7).
+func requestOnlyIfCached(req *http.Request) bool {
+	_, ok := cacheControlDirectives(req.Header)["only-if-cached"]
+	return ok
+}
+
+// responseForbidsStale reports whether resp may not be served stale even when
+// the request's max-stale would accept it: must-revalidate (RFC 9111 section
+// 5.2.2.2), and, since this is a shared cache, proxy-revalidate and s-maxage
+// (sections 5.2.2.8 and 5.2.2.10).
+func responseForbidsStale(resp *http.Response) bool {
+	d := cacheControlDirectives(resp.Header)
+	for _, name := range []string{"must-revalidate", "proxy-revalidate", "s-maxage"} {
+		if _, ok := d[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // cacheControlAllowsAuthenticated reports whether a response Cache-Control value
 // carries a directive that, per RFC 9111 section 3.5 (RFC 2616 section 14.8),
 // lets a shared cache store the response to an authenticated request.
@@ -275,7 +327,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	if cm.memCache != nil {
 		if entry, ok := cm.memCache.Get(key); ok {
 			resp := entry.response(req)
-			stale := cm.isExpired(resp, entry.birth) || responseVaries(resp) || responseNoCache(resp)
+			stale := cm.isStaleFor(req, resp, entry.birth)
 			setAge(resp, entry.birth)
 			return resp, stale
 		}
@@ -328,7 +380,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// always stale for the same reason: only the origin may approve its
 	// reuse. See responseNoCache.
 	birth := storedBirth(resp)
-	stale = cm.isExpired(resp, birth) || responseVaries(resp) || responseNoCache(resp)
+	stale = cm.isStaleFor(req, resp, birth)
 
 	// Clean up X-Polipo headers before returning
 	resp.Header.Del("X-Polipo-Location")
@@ -527,6 +579,38 @@ func freshnessLifetime(resp *http.Response, birth time.Time) time.Duration {
 // freshness lifetime exceeds its current age.
 func (cm *CacheManager) isExpired(resp *http.Response, birth time.Time) bool {
 	return time.Since(birth) >= freshnessLifetime(resp, birth)
+}
+
+// isStaleFor reports whether resp, generated at birth, may not be used for req
+// without going to the origin. Beyond resp's own freshness, req's
+// Cache-Control narrows or widens what it accepts (RFC 9111 section 5.2.1),
+// as Polipo's objectIsStale did: max-age caps the age (a browser reload
+// sends max-age=0 to have the cache check with the origin), min-fresh asks
+// for that much freshness still left, and max-stale accepts that much
+// staleness, or any without a value - unless resp forbids serving it stale.
+// When a request has both min-fresh and max-stale, min-fresh wins, as in
+// Polipo. A Vary or no-cache response is always stale, whatever req says;
+// see responseVaries and responseNoCache.
+func (cm *CacheManager) isStaleFor(req *http.Request, resp *http.Response, birth time.Time) bool {
+	if responseVaries(resp) || responseNoCache(resp) {
+		return true
+	}
+	d := cacheControlDirectives(req.Header)
+	age := time.Since(birth)
+	if maxAge, ok := directiveSeconds(d, "max-age"); ok && age > maxAge {
+		return true
+	}
+	deadline := freshnessLifetime(resp, birth)
+	if minFresh, ok := directiveSeconds(d, "min-fresh"); ok {
+		deadline -= minFresh
+	} else if _, ok := d["max-stale"]; ok && !responseForbidsStale(resp) {
+		maxStale, ok := directiveSeconds(d, "max-stale")
+		if !ok {
+			return false
+		}
+		deadline += maxStale
+	}
+	return age >= deadline
 }
 
 // Store arranges for a cacheable response to be written to the disk and/or

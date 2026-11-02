@@ -1736,6 +1736,90 @@ func TestCacheHitSendsAge(t *testing.T) {
 	}
 }
 
+// TestOnlyIfCached: under Cache-Control: only-if-cached the origin is never
+// contacted; a fresh entry is served, and anything else is a 504 (RFC 9111
+// section 5.2.1.7).
+func TestOnlyIfCached(t *testing.T) {
+	hits := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Write([]byte("origin body"))
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	for path, cc := range map[string]string{"/fresh": "max-age=600", "/stale": "max-age=0"} {
+		resp := mkResp("cached body", "Cache-Control", cc, "Date", timeHeader(-time.Minute), "ETag", `"v1"`)
+		if err := storeNow(cm, httptest.NewRequest(http.MethodGet, backend.URL+path, nil), resp); err != nil {
+			t.Fatalf("seed Store: %v", err)
+		}
+	}
+
+	for _, tc := range []struct {
+		path, reqCC string
+		code        int
+	}{
+		{"/fresh", "only-if-cached", http.StatusOK},
+		{"/stale", "only-if-cached", http.StatusGatewayTimeout},
+		{"/stale", "only-if-cached, max-stale", http.StatusOK},
+		{"/missing", "only-if-cached", http.StatusGatewayTimeout},
+	} {
+		req := httptest.NewRequest(http.MethodGet, backend.URL+tc.path, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Cache-Control", tc.reqCC)
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != tc.code {
+			t.Errorf("%s with %q: status = %d, want %d", tc.path, tc.reqCC, rr.Code, tc.code)
+		}
+	}
+	if hits != 0 {
+		t.Errorf("origin hits = %d, want 0 under only-if-cached", hits)
+	}
+}
+
+// TestReloadRevalidatesFreshEntry: a browser reload (Cache-Control:
+// max-age=0) makes even a fresh entry go to the origin as a conditional
+// request, and a 304 serves the cached body.
+func TestReloadRevalidatesFreshEntry(t *testing.T) {
+	var gotINM string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotINM = r.Header.Get("If-None-Match")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Cache-Control", "max-age=600")
+		w.Header().Set("Date", timeHeader(0))
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := backend.URL + "/resource"
+	resp := mkResp("cached body", "Cache-Control", "max-age=600", "Date", timeHeader(-time.Minute), "ETag", `"v1"`)
+	if err := storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil), resp); err != nil {
+		t.Fatalf("seed Store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Cache-Control", "max-age=0")
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if got, _ := io.ReadAll(rr.Body); rr.Code != http.StatusOK || string(got) != "cached body" {
+		t.Errorf("got %d %q, want 200 with the cached body", rr.Code, got)
+	}
+	if gotINM != `"v1"` {
+		t.Errorf("If-None-Match sent = %q, want %q (the reload should revalidate)", gotINM, `"v1"`)
+	}
+}
+
 func TestConditionalRevalidationSendsIfModifiedSince(t *testing.T) {
 	lastModified := timeHeader(-48 * time.Hour)
 	var gotIMS string

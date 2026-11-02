@@ -47,7 +47,13 @@
     any Age header from a cache upstream (RFC 9111 section 4.2.3), and
     an Expires lifetime is measured from Date rather than against the
     local clock.  A response served from the cache carries its current
-    age in an Age header, as in Polipo.  A 200 with no Expires, max-age or s-maxage is given a
+    age in an Age header, as in Polipo.  A request's max-age, min-fresh
+    and max-stale bound which stored response it accepts (RFC 9111
+    section 5.2.1, as in Polipo), so a browser reload (max-age=0)
+    revalidates even a fresh entry; max-stale never extends a response
+    marked must-revalidate, proxy-revalidate or s-maxage.  Under
+    only-if-cached the origin is never contacted, and a request nothing
+    stored suits gets a 504.  A 200 with no Expires, max-age or s-maxage is given a
     heuristic lifetime -- min(10% of the time since Last-Modified, 24h),
     or a flat 24h with no Last-Modified -- instead of being served as
     fresh until diskCacheUnlinkTime.  This matches Polipo's default
