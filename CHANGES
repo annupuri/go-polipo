@@ -46,7 +46,8 @@
     such as "0" is treated as already expired.  A response's age counts
     any Age header from a cache upstream (RFC 9111 section 4.2.3), and
     an Expires lifetime is measured from Date rather than against the
-    local clock.  A 200 with no Expires, max-age or s-maxage is given a
+    local clock.  A response served from the cache carries its current
+    age in an Age header, as in Polipo.  A 200 with no Expires, max-age or s-maxage is given a
     heuristic lifetime -- min(10% of the time since Last-Modified, 24h),
     or a flat 24h with no Last-Modified -- instead of being served as
     fresh until diskCacheUnlinkTime.  This matches Polipo's default
