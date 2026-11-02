@@ -387,11 +387,10 @@ at the end groups findings by how much they matter before a public release.
   revision upward from an initial 256MB suggestion. Also decided along the
   way, not a side-effect: the memory cache is independent of
   `noDiskCache`/an empty `diskCacheRoot`, unlike Polipo's on-disk and
-  in-memory representations of an `Object`, which are tied together. Not
-  attempted: promoting a disk hit into the memory cache - only a fresh
-  `Store` populates it, so a cold-started process only ever holds in memory
-  what it has itself fetched since starting; a reasonable follow-up if a
-  cold start's unwarmed memory cache turns out to matter in practice.
+  in-memory representations of an `Object`, which are tied together.
+  Promoting a disk hit into the memory cache was left out at first, so a
+  cold-started process held in memory only what it had fetched since
+  starting; it was added on 2026-11-01 (see §10).
 - Partial instantiation / range assembly (§10) - originally filed under
   tier C as settled-by-design, but resurfaced (2026-09-14) while explaining
   why `diskCacheTruncateTime`/`diskCacheTruncateSize` deletes rather than
