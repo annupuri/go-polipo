@@ -204,6 +204,13 @@
         (GET /polipo/...); a proxied http://example.com/polipo/... is
         forwarded to that site.  Any other request addressed to
         go-polipo itself (such as /favicon.ico) gets 404 Not Found.
+      - go-polipo adds itself to the Via of the requests and responses
+        it forwards, as RFC 9110 section 7.6.3 requires; Polipo's
+        default (disableVia = true) left it out.  Set disableVia to
+        true for the old behaviour.  The name used is a pseudonym,
+        go-polipo- plus a random part chosen at startup, rather than
+        the hostname.  A request whose Via already names the running
+        instance is a loop and gets a 504, as in Polipo.
       - Many low-level tuning variables from Polipo 1.x (chunk/object
         high marks, server slot counts, and similar) are no longer
         recognised; unknown variables are ignored (and now logged as a

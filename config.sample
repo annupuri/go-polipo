@@ -158,6 +158,12 @@
 #   true             - drop it unconditionally.
 # censorReferer = false
 
+# go-polipo adds itself to the Via header of what it forwards, as RFC 9110
+# requires, under a name chosen at startup ("go-polipo-" and a random part),
+# not the hostname; a request that comes back to it through a loop gets a
+# 504.  true leaves Via alone, as Polipo did by default.
+# disableVia = false
+
 
 ### HTTPS tunnelling (CONNECT)
 

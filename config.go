@@ -157,6 +157,11 @@ type Config struct {
 	// value - see PARITY_AUDIT for what is actually at stake in each
 	// direction.
 	DontTrustVaryETag int
+
+	// DisableVia stops go-polipo adding itself to the Via of the requests and
+	// responses it forwards. RFC 9110 section 7.6.3 requires a proxy to add
+	// it, so the default is false, unlike Polipo's true.
+	DisableVia bool
 }
 
 // defaultTunnelAllowedPorts is Polipo's default tunnelAllowedPorts (http.c):
@@ -205,6 +210,7 @@ func NewDefaultConfig() *Config {
 		ProxyOffline:            false,
 		RelaxTransparency:       0,
 		DontTrustVaryETag:       1,
+		DisableVia:              false,
 	}
 }
 
@@ -256,6 +262,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{"proxyOffline", strconv.FormatBool(c.ProxyOffline)},
 		{"relaxTransparency", tristateString(c.RelaxTransparency)},
 		{"dontTrustVaryETag", tristateString(c.DontTrustVaryETag)},
+		{"disableVia", strconv.FormatBool(c.DisableVia)},
 	}
 }
 
@@ -504,6 +511,8 @@ func (c *Config) Set(key, val string) error {
 		c.DontCacheCookies = strings.ToLower(val) == "true" || val == "1"
 	case "proxyOffline":
 		c.ProxyOffline = strings.ToLower(val) == "true" || val == "1"
+	case "disableVia":
+		c.DisableVia = strings.ToLower(val) == "true" || val == "1"
 	case "relaxTransparency":
 		level, err := parseTristate(val)
 		if err != nil {

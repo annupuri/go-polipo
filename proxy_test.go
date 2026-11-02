@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2973,5 +2974,124 @@ func TestNoTransparentCompression(t *testing.T) {
 				t.Errorf("%s: body = %q, want the origin's bytes", path, got)
 			}
 		}
+	}
+}
+
+// TestVia: go-polipo adds itself to the Via of the requests and responses it
+// forwards (RFC 9110 section 7.6.3), once, keeping what is already there; a
+// cache hit carries the same Via; disableVia turns it off.
+func TestVia(t *testing.T) {
+	for _, disable := range []bool{false, true} {
+		var gotVia []string
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotVia = r.Header.Values("Via")
+			w.Header().Set("Via", "1.1 upstream-cache")
+			w.Header().Set("Cache-Control", "max-age=600")
+			io.WriteString(w, "body")
+		}))
+
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cfg.DisableVia = disable
+		ph := newTestHandler(cfg)
+		own := "1.1 " + ph.viaName
+
+		wantReq := []string{"1.0 client-side-proxy", own}
+		wantResp := []string{"1.1 upstream-cache", own}
+		if disable {
+			wantReq, wantResp = wantReq[:1], wantResp[:1]
+		}
+		for i := 0; i < 2; i++ { // a miss, then a hit
+			req := httptest.NewRequest(http.MethodGet, backend.URL+"/resource", nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set("Via", "1.0 client-side-proxy")
+			rr := httptest.NewRecorder()
+			ph.ServeHTTP(rr, req)
+			if i == 0 && !slices.Equal(gotVia, wantReq) {
+				t.Errorf("disableVia=%v: origin got Via %q, want %q", disable, gotVia, wantReq)
+			}
+			if got := rr.Header().Values("Via"); !slices.Equal(got, wantResp) {
+				t.Errorf("disableVia=%v, request %d: client got Via %q, want %q", disable, i, got, wantResp)
+			}
+		}
+		backend.Close()
+	}
+}
+
+// TestViaLoopDetected: a request whose Via shows it already went through
+// this instance is a loop and gets a 504, as in Polipo, without being
+// forwarded; one that went through another go-polipo instance is not.
+func TestViaLoopDetected(t *testing.T) {
+	hits := 0
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		io.WriteString(w, "body")
+	}))
+	defer backend.Close()
+
+	ph := newTestHandler(NewDefaultConfig())
+	other := newTestHandler(NewDefaultConfig())
+	for _, tc := range []struct {
+		via  string
+		code int
+	}{
+		{"1.1 " + ph.viaName, http.StatusGatewayTimeout},
+		{"1.0 somewhere, 1.1 " + strings.ToUpper(ph.viaName) + " (comment)", http.StatusGatewayTimeout},
+		{"1.1 " + other.viaName, http.StatusOK},
+	} {
+		hits = 0
+		req := httptest.NewRequest(http.MethodGet, backend.URL+"/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("Via", tc.via)
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != tc.code {
+			t.Errorf("Via %q: status = %d, want %d", tc.via, rr.Code, tc.code)
+		}
+		if wantHits := map[bool]int{true: 1, false: 0}[tc.code == http.StatusOK]; hits != wantHits {
+			t.Errorf("Via %q: origin hits = %d, want %d", tc.via, hits, wantHits)
+		}
+	}
+}
+
+// TestViaAfterRevalidation: a 304 without a Via leaves the stored Via as it
+// was; one with a Via replaces it, with this instance added.
+func TestViaAfterRevalidation(t *testing.T) {
+	for _, via304 := range []string{"", "1.1 other-cache"} {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("ETag", `"v1"`)
+			w.Header().Set("Cache-Control", "max-age=600")
+			if r.Header.Get("If-None-Match") == "" {
+				w.Header().Set("Via", "1.1 upstream-cache")
+				w.Header().Set("Cache-Control", "max-age=0")
+				io.WriteString(w, "body")
+				return
+			}
+			if via304 != "" {
+				w.Header().Set("Via", via304)
+			}
+			w.WriteHeader(http.StatusNotModified)
+		}))
+
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		ph := newTestHandler(cfg)
+		own := "1.1 " + ph.viaName
+		want := []string{"1.1 upstream-cache", own}
+		if via304 != "" {
+			want = []string{via304, own}
+		}
+		for i := 0; i < 2; i++ { // a miss, then a revalidation
+			req := httptest.NewRequest(http.MethodGet, backend.URL+"/resource", nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			rr := httptest.NewRecorder()
+			ph.ServeHTTP(rr, req)
+			if i == 1 {
+				if got := rr.Header().Values("Via"); !slices.Equal(got, want) {
+					t.Errorf("304 Via %q: client got Via %q, want %q", via304, got, want)
+				}
+			}
+		}
+		backend.Close()
 	}
 }

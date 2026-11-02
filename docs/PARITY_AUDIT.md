@@ -92,8 +92,8 @@ at the end groups findings by how much they matter before a public release.
 | :--- | :--- | :--: | :--- |
 | `censoredHeaders` | (empty) | ✅ | **Implemented (resolved 2026-09-13).** A list of header names, stripped from both the outgoing request (`Director`) and the incoming response (`cacheResponse`, before it is cached or returned) — the same list checked in both directions, matching Polipo's single header-copy filter (`http_parse.c`) rather than two separate lists. Applied once per response, at fetch time, so a later cache hit is already clean; matches Polipo's parse-time-once model. |
 | `censorReferer` | `false` | ⚠️ | **Implemented (resolved 2026-09-13).** Polipo's three levels, confirmed from the vendored C history (`http_parse.c`) rather than guessed: `false` (default) forwards `Referer` unchanged; `maybe` drops it only when it names a different host than the request's own target; `true` drops it unconditionally. The cross-origin check goes through `net/url` rather than replicating Polipo's `urlSameHost` — an ASCII prefix compare that only recognises a literal `http://` scheme and so never treats *any* `https://` referrer as same-host — a deliberate, documented improvement over the letter of the C source. |
-| `disableVia` | `true` (no Via) | ⚠️ | go-polipo never emits `Via` — matches Polipo's *default* — but there is no way to turn it **on**, and therefore no proxy-loop detection. |
-| `proxyName` / `displayName` | hostname / `Polipo` | ❌ | No configurable proxy identity; error bodies are Go's plain-text `http.Error`. |
+| `disableVia` | `true` (no Via) | ✅ | **Done (2026-11-03), default deliberately `false`.** go-polipo adds itself to the `Via` of every request and response it forwards, as RFC 9110 §7.6.3 requires (Polipo's default left it out); `disableVia = true` turns that off. It names itself by a pseudonym, `go-polipo-` plus a random part chosen at startup, rather than Polipo's `proxyName` (the hostname), so the machine name is not revealed to every site, which the RFC allows. A forwarded request whose `Via` already names this instance is a loop (for instance a `parentProxy` leading back here) and gets `504 Proxy loop detected`, as in Polipo (`checkVia`); because the name is unique to the running instance, a chain of two go-polipo instances is not mistaken for one. Polipo also checked the `Via` of responses; a loop always shows up first as a request, so go-polipo checks only those. A cache hit carries the `Via` the response was first passed on with; a `304` that brings its own `Via` replaces it. CONNECT tunnels carry no `Via`. It used to be missing, with no way to turn it on and no loop detection. |
+| `proxyName` / `displayName` | hostname / `Polipo` | ❌ | No configurable proxy identity (`Via` uses a per-instance pseudonym instead, see `disableVia`); error bodies are Go's plain-text `http.Error`. |
 | `X-Forwarded-For` | — | ✅ | Explicitly nilled so the client IP is not forwarded (`Director`). |
 | Missing `Date` | — | ✅ | **Done (2026-11-03).** A response from upstream without a `Date` gets one recording when it was received, before it is cached or passed on (`cacheResponse`; RFC 9110 §6.6.1), as Polipo did (`server.c`). It used to be stored without one; a `304` without one left the stored, older `Date` in place, so the entry it had just revalidated counted as stale at once. |
 | Hop-by-hop header stripping | — | ✅ | Handled by `httputil.ReverseProxy` per RFC 7230. |
@@ -464,7 +464,7 @@ at the end groups findings by how much they matter before a public release.
 
 ### D. Cosmetic / low value
 
-- `proxyName` / `displayName`, `disableVia` toggle (§7).
+- `proxyName` / `displayName` (§7). (`disableVia` was done on 2026-11-03.)
 - `forbiddenUrl` / `forbiddenRedirectCode` (§4).
 - `redirector` (§4).
 - `localDocumentRoot` / `disableProxy`, cache-index pages (§13).
