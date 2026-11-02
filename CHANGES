@@ -46,7 +46,9 @@
     such as "0" is treated as already expired.  A response's age counts
     any Age header from a cache upstream (RFC 9111 section 4.2.3), and
     an Expires lifetime is measured from Date rather than against the
-    local clock.  A response served from the cache carries its current
+    local clock.  A response that arrives without a Date gets one
+    recording when it was received (RFC 9110 section 6.6.1, as in
+    Polipo).  A response served from the cache carries its current
     age in an Age header, as in Polipo.  A request's max-age, min-fresh
     and max-stale bound which stored response it accepts (RFC 9111
     section 5.2.1, as in Polipo), so a browser reload (max-age=0)
