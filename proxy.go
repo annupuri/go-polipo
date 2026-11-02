@@ -113,15 +113,18 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
-			// error when the origin cannot be reached at all.
+			// error when the origin cannot be reached at all, unless the
+			// entry forbids being served stale (see staleServable).
 			if ph.config.RelaxTransparency >= 1 {
-				if staleResp, _ := ph.cacheManager.LookupStale(r); staleResp != nil {
+				if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
 					defer staleResp.Body.Close()
-					w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
-					copyHeader(w.Header(), staleResp.Header)
-					w.WriteHeader(staleResp.StatusCode)
-					io.Copy(w, staleResp.Body)
-					return
+					if !stale || staleServable(staleResp) {
+						w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
+						copyHeader(w.Header(), staleResp.Header)
+						w.WriteHeader(staleResp.StatusCode)
+						io.Copy(w, staleResp.Body)
+						return
+					}
 				}
 			}
 			logf(ph.config.LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
@@ -862,16 +865,19 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	}
 
 	// relaxTransparency "true": an existing entry, even if stale, is served
-	// without even attempting to reach the origin - only a true miss below
-	// falls through to the network.
+	// without even attempting to reach the origin - only a true miss, or an
+	// entry that forbids being served stale (see staleServable), falls
+	// through to the network.
 	if ph.config.RelaxTransparency >= 2 {
 		if staleResp, stale := ph.cacheManager.LookupStale(req); staleResp != nil {
 			defer staleResp.Body.Close()
-			if stale {
-				w.Header().Set("Warning", `110 go-polipo "Object is stale"`)
+			if !stale || staleServable(staleResp) {
+				if stale {
+					w.Header().Set("Warning", `110 go-polipo "Object is stale"`)
+				}
+				ph.serveCached(w, req, staleResp)
+				return
 			}
-			ph.serveCached(w, req, staleResp)
-			return
 		}
 	}
 
@@ -892,7 +898,9 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 
 // serveOffline answers a forwarded request under proxyOffline, which never
 // dials the origin: a cached entry (fresh or stale) is served as-is, and a
-// true miss becomes a 502 rather than a network attempt.
+// true miss becomes a 502 rather than a network attempt. A stale entry that
+// forbids being served stale (see staleServable) is a 504, as RFC 9111
+// section 5.2.2.2 asks of a disconnected cache.
 func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 	resp, stale := ph.cacheManager.LookupStale(req)
 	if resp == nil {
@@ -900,6 +908,10 @@ func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	if stale && !staleServable(resp) {
+		http.Error(w, "Disconnected operation and object must be revalidated", http.StatusGatewayTimeout)
+		return
+	}
 	if stale {
 		w.Header().Set("Warning", `112 go-polipo "Disconnected operation"`)
 	}

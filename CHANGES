@@ -143,6 +143,10 @@
     (Warning: 112 "Disconnected operation" if stale) or a 502
     "Disconnected operation and object not in cache" on a true miss.
     Both are scoped to GET/HEAD; CONNECT is unaffected, matching Polipo.
+    Unlike Polipo, neither serves a stale entry that carries
+    must-revalidate, proxy-revalidate, s-maxage or no-cache (RFC 9111
+    sections 4.2.4 and 5.2.2); proxyOffline answers such a request with
+    a 504.
   * Parent proxies: HTTP via parentProxy, SOCKS5 via socksParentProxy
     (golang.org/x/net/proxy), each with its own optional credentials
     (parentAuthCredentials, socksAuthCredentials).  socksProxyType
