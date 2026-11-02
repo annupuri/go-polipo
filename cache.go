@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -278,6 +279,25 @@ func (cm *CacheManager) GetCachePath(rawURL string) (string, error) {
 func (cm *CacheManager) DiscardMemory() {
 	if cm.memCache != nil {
 		cm.memCache.Purge()
+	}
+}
+
+// Invalidate removes whatever is cached for rawURL, from memory and disk.
+func (cm *CacheManager) Invalidate(rawURL string) {
+	if cm.memCache != nil {
+		cm.memCache.Remove(rawURL)
+	}
+	if cm.diskCacheDisabled() {
+		return
+	}
+	path, err := cm.GetCachePath(rawURL)
+	if err != nil {
+		return
+	}
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		logf(cm.config.LogLevel, LogWarn, "Cache invalidate warning: %s: couldn't remove %s: %v", rawURL, path, err)
 	}
 }
 
