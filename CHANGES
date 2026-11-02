@@ -53,15 +53,18 @@
     revalidates even a fresh entry; max-stale never extends a response
     marked must-revalidate, proxy-revalidate or s-maxage.  Under
     only-if-cached the origin is never contacted, and a request nothing
-    stored suits gets a 504.  A 200 with no Expires, max-age or s-maxage is given a
-    heuristic lifetime -- min(10% of the time since Last-Modified, 24h),
-    or a flat 24h with no Last-Modified -- instead of being served as
-    fresh until diskCacheUnlinkTime.  This matches Polipo's default
-    maxAgeFraction and maxAge, which were config variables in Polipo but
-    are hard-coded here on purpose (see the comment in cache.go): they
-    act as RFC constants, and a permissive value would re-open the
-    over-serving.  Polipo's maxExpiresAge and maxNoModifiedAge are not
-    carried over.
+    stored suits gets a 504.  A 200 with no Expires, max-age or
+    s-maxage is given a heuristic lifetime of min(10% of the time since
+    Last-Modified, 24h) instead of being served as fresh until
+    diskCacheUnlinkTime.  The
+    fraction matches Polipo's default maxAgeFraction; both it and the
+    cap, config variables in Polipo, are hard-coded here on purpose (see
+    the comment in cache.go): they act as RFC constants, and a
+    permissive value would re-open the over-serving.  With no
+    Last-Modified either, a response gets no heuristic lifetime at all
+    and is revalidated on every use, as browsers and Squid do, where
+    Polipo's maxNoModifiedAge gave it 23 minutes.  Polipo's
+    maxExpiresAge is not carried over.
   * A stale entry with a validator (ETag and/or Last-Modified) is
     revalidated with a conditional request to the origin instead of being
     re-fetched in full; a 304 is merged into the stored entry (RFC 9111

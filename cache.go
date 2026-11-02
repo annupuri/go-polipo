@@ -455,9 +455,11 @@ func (b fileBody) Close() error {
 // permissive value here would re-open the same over-serving of header-less
 // responses that this heuristic exists to close. If a real need turns up, one
 // "cap, or 0 to disable" duration is the knob to add - not the full Polipo set.
+// A response with no Last-Modified gets no heuristic lifetime at all; see
+// heuristicLifetime.
 const (
 	heuristicFraction    = 0.1
-	heuristicMaxLifetime = 24 * time.Hour // cap, and the value used with no Last-Modified
+	heuristicMaxLifetime = 24 * time.Hour
 )
 
 // responseDate returns the response's Date, or the current time when the header
@@ -534,12 +536,15 @@ func ccFreshnessLifetime(cc string) (life time.Duration, ok bool) {
 
 // heuristicLifetime derives a freshness lifetime for a response with no explicit
 // expiration. With a Last-Modified it is a fraction of the document's age at
-// fetch time, capped; without one it is a flat default. This keeps a header-less
-// 200 from being served as fresh until diskCacheUnlinkTime (32 days).
+// fetch time, capped. Without one there is nothing to base a guess on, and
+// it is zero: the response is stored but revalidated (or re-fetched) on
+// every use, as browsers and Squid's default refresh_pattern do. Polipo
+// gave it maxNoModifiedAge, 23 minutes, which left pages generated afresh
+// on every request served stale for that long.
 func heuristicLifetime(resp *http.Response, date time.Time) time.Duration {
 	lm, err := http.ParseTime(resp.Header.Get("Last-Modified"))
 	if err != nil {
-		return heuristicMaxLifetime
+		return 0
 	}
 	age := date.Sub(lm)
 	if age <= 0 {
