@@ -151,7 +151,7 @@ func serve(config *Config, reopenLog func() error) int {
 	setupReloadSignals(config.LogLevel, reopenLog, handler.Reload, cacheMgr.DiscardMemory)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))
-	server := &http.Server{Addr: addr, Handler: handler}
+	server := newServer(config, addr, handler)
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
@@ -167,6 +167,20 @@ func serve(config *Config, reopenLog func() error) int {
 		return 1
 	}
 	return 0
+}
+
+// newServer builds the client-facing server. clientTimeout bounds a client's
+// request headers and its idle time between requests, as Polipo's did. It
+// does not bound a request or response body, which may legitimately take
+// longer, nor a CONNECT tunnel: the server clears the header deadline once
+// the headers are read, before the tunnel takes the connection over.
+func newServer(config *Config, addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: config.ClientTimeout,
+		IdleTimeout:       config.ClientTimeout,
+	}
 }
 
 func printVersionAndConfig(w io.Writer, config *Config) {

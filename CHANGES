@@ -142,6 +142,13 @@
     accepts only "socks5"; a "socks4a" value (which Polipo allowed, and
     which earlier go-polipo stored but then ignored, dialing SOCKS5
     anyway) is now a configuration error.
+  * Polipo's timeouts are carried over with its defaults: clientTimeout
+    (120s) bounds a client's request headers and its idle time between
+    requests; serverTimeout (90s) bounds connecting upstream, waiting
+    for response headers and any silence mid-exchange, and running out
+    is a 504; serverIdleTimeout (45s) is how long an unused upstream
+    connection is kept.  An established CONNECT tunnel has no timeout,
+    as in Polipo.
   * Client access control (allowedClients) accepts bare IPs, CIDR ranges
     and "all"; the check uses the real TCP peer address and ignores
     forwarding headers.

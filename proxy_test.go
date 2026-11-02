@@ -2501,3 +2501,223 @@ func TestStoreStreamsBodyWhileCaching(t *testing.T) {
 		t.Errorf("cached body = %q, want %q", body, first+rest)
 	}
 }
+
+// stallingOrigin accepts connections, reads each request's headers, writes
+// reply (possibly nothing) and then sends nothing more until the test ends.
+func stallingOrigin(t *testing.T, reply string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done); ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				br := bufio.NewReader(c)
+				for {
+					line, err := br.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if line == "\r\n" {
+						break
+					}
+				}
+				io.WriteString(c, reply)
+				<-done
+			}()
+		}
+	}()
+	return "http://" + ln.Addr().String()
+}
+
+// TestServerTimeoutAwaitingHeaders: an origin that accepts a request but
+// never answers it gets a 504 after serverTimeout, as in Polipo, instead of
+// holding the request (and its maxConcurrentRequests slot) indefinitely.
+func TestServerTimeoutAwaitingHeaders(t *testing.T) {
+	origin := stallingOrigin(t, "")
+	cfg := NewDefaultConfig()
+	cfg.ServerTimeout = 200 * time.Millisecond
+	ph := newTestHandler(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, origin+"/", nil).WithContext(ctx)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	start := time.Now()
+	ph.ServeHTTP(rr, req)
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("gave up after %s, want about serverTimeout", elapsed)
+	}
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Errorf("status = %d, want 504", rr.Code)
+	}
+}
+
+// TestServerTimeoutMidBody: an origin that stops sending partway through a
+// body has its connection dropped after serverTimeout of silence, and the
+// client's connection is closed. (Whether the client already has the
+// headers by then depends on buffering; either way the response fails.)
+func TestServerTimeoutMidBody(t *testing.T) {
+	origin := stallingOrigin(t, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n0123456789")
+	cfg := NewDefaultConfig()
+	cfg.ServerTimeout = 200 * time.Millisecond
+	proxySrv := httptest.NewServer(newTestHandler(cfg))
+	defer proxySrv.Close()
+
+	proxyURL, _ := url.Parse(proxySrv.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}, Timeout: 5 * time.Second}
+	start := time.Now()
+	resp, err := client.Get(origin + "/")
+	if err == nil {
+		_, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("gave up after %s (%v), want about serverTimeout", elapsed, err)
+	}
+	if err == nil {
+		t.Error("the truncated response should fail")
+	}
+}
+
+// TestServerTimeoutOnReusedConnection: a connection to the origin that sat
+// in the idle pool does not bring a running deadline with it - the next
+// request on it still gets a full serverTimeout to be answered.
+func TestServerTimeoutOnReusedConnection(t *testing.T) {
+	var n atomic.Int32
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 2 {
+			time.Sleep(250 * time.Millisecond)
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		io.WriteString(w, "ok")
+	}))
+	var conns atomic.Int32
+	backend.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	backend.Start()
+	defer backend.Close()
+
+	cfg := NewDefaultConfig()
+	cfg.ServerTimeout = 400 * time.Millisecond
+	ph := newTestHandler(cfg)
+	for i := 0; i < 2; i++ {
+		if i == 1 {
+			time.Sleep(250 * time.Millisecond) // idle: 250ms + 250ms > 400ms
+		}
+		req := httptest.NewRequest(http.MethodGet, backend.URL+"/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("request %d: status = %d, want 200", i, rr.Code)
+		}
+	}
+	if conns := conns.Load(); conns != 1 {
+		t.Errorf("origin saw %d connections, want 1 (the second request should reuse the first)", conns)
+	}
+}
+
+// TestClientTimeout: a client that connects and sends nothing is
+// disconnected after clientTimeout.
+func TestClientTimeout(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.ClientTimeout = 200 * time.Millisecond
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newServer(cfg, ln.Addr().String(), newTestHandler(cfg))
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	start := time.Now()
+	if _, err := c.Read(make([]byte, 1)); err != io.EOF {
+		t.Errorf("read = %v, want EOF from the server closing the connection", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("disconnected after %s, want about clientTimeout", elapsed)
+	}
+}
+
+// TestTunnelOutlivesTimeouts: a CONNECT tunnel may sit idle for longer than
+// clientTimeout and serverTimeout, as in Polipo, which set no timeout on
+// tunnels.
+func TestTunnelOutlivesTimeouts(t *testing.T) {
+	backend, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	go func() {
+		c, err := backend.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		io.Copy(c, c)
+	}()
+	_, portStr, _ := net.SplitHostPort(backend.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+
+	cfg := NewDefaultConfig()
+	cfg.TunnelAllowedPorts = PortSet{{port, port}}
+	cfg.ClientTimeout = 100 * time.Millisecond
+	cfg.ServerTimeout = 100 * time.Millisecond
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newServer(cfg, ln.Addr().String(), newTestHandler(cfg))
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	pc, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	target := backend.Addr().String()
+	fmt.Fprintf(pc, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", target, target)
+	br := bufio.NewReader(pc)
+	if line, err := br.ReadString('\n'); err != nil || !strings.Contains(line, "200") {
+		t.Fatalf("CONNECT status line = %q, err = %v", line, err)
+	}
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("reading CONNECT headers: %v", err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+
+	time.Sleep(400 * time.Millisecond)
+	if _, err := io.WriteString(pc, "ping"); err != nil {
+		t.Fatal(err)
+	}
+	pc.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(br, buf); err != nil || string(buf) != "ping" {
+		t.Errorf("tunnelled echo = %q, err = %v; want %q after sitting idle", buf, err, "ping")
+	}
+}

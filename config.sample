@@ -169,6 +169,16 @@
 ### Misc
 
 # maxConcurrentRequests = 100   # 0 = unlimited
+
+# Timeouts, with Polipo's defaults; 0 disables one.  clientTimeout bounds how
+# long a client may take to send request headers, and its idle time between
+# requests.  serverTimeout bounds connecting upstream, waiting for response
+# headers, and any silence mid-exchange (a 504 when it runs out).
+# serverIdleTimeout is how long an unused upstream connection is kept for
+# reuse.  An established CONNECT tunnel has no timeout.
+# clientTimeout = 120s
+# serverTimeout = 90s
+# serverIdleTimeout = 45s
 # disableLocalInterface = false # disables /polipo/ and /polipo/config
 
 # Bitmask of message categories to log (hex), matching Polipo's own bits:
