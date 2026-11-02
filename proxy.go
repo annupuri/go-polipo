@@ -186,11 +186,29 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 		resp.Header.Del(h)
 	}
 	req := resp.Request
+	// A request that may have changed the resource (POST, PUT, DELETE, ...)
+	// and succeeded makes whatever is cached for its URL out of date (RFC
+	// 9111 section 4.4). Polipo dropped the entry as soon as such a request
+	// came in, whatever came of it, and counted OPTIONS among them, which
+	// RFC 9110 section 9.2.1 makes safe.
+	if !safeMethod(req.Method) && resp.StatusCode < 400 {
+		ph.cacheManager.Invalidate(req.URL.String())
+	}
 	if ph.uncachable.Load().Match(req.URL.String(), req.URL.Host) {
 		return nil
 	}
 	ph.cacheManager.Store(req, resp)
 	return nil
+}
+
+// safeMethod reports whether method is one RFC 9110 section 9.2.1 defines as
+// safe: one that does not ask the origin to change anything.
+func safeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	}
+	return false
 }
 
 // revalidationHeaders are the response headers RFC 9111 section 3.4 and

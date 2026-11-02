@@ -88,6 +88,9 @@
     matching Polipo).  Pragma: no-cache counts as Cache-Control:
     no-cache when there is no Cache-Control header, in requests (RFC
     9111 section 5.4) and in responses (as in Polipo).
+  * A successful POST, PUT, DELETE or other unsafe request removes what
+    is cached for its URL (RFC 9111 section 4.4).  Polipo did so as soon
+    as the request came in, whatever came of it, and for OPTIONS too.
   * The disk cache write policy is stricter than Polipo's in a few ways.
     Responses that carry a Set-Cookie header are no longer written to
     disk by default; set the new dontCacheCookies variable to false for

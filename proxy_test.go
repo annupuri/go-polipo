@@ -2721,3 +2721,55 @@ func TestTunnelOutlivesTimeouts(t *testing.T) {
 		t.Errorf("tunnelled echo = %q, err = %v; want %q after sitting idle", buf, err, "ping")
 	}
 }
+
+// TestUnsafeRequestInvalidatesCache: a successful POST, PUT, DELETE, PATCH
+// (or other unsafe method) removes what is cached for its URL, from memory
+// and disk (RFC 9111 section 4.4); a failed one, or a safe OPTIONS, leaves
+// it alone.
+func TestUnsafeRequestInvalidatesCache(t *testing.T) {
+	for _, tc := range []struct {
+		method      string
+		status      int
+		invalidated bool
+	}{
+		{http.MethodPost, http.StatusOK, true},
+		{http.MethodPut, http.StatusNoContent, true},
+		{http.MethodDelete, http.StatusOK, true},
+		{http.MethodPatch, http.StatusSeeOther, true},
+		{"PROPPATCH", http.StatusOK, true},
+		{http.MethodPost, http.StatusNotFound, false},
+		{http.MethodDelete, http.StatusInternalServerError, false},
+		{http.MethodOptions, http.StatusOK, false},
+	} {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.status)
+		}))
+
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+		ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+		target := backend.URL + "/resource"
+		resp := mkResp("cached body", "Cache-Control", "max-age=600", "Date", timeHeader(0))
+		if err := storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil), resp); err != nil {
+			t.Fatalf("seed Store: %v", err)
+		}
+
+		req := httptest.NewRequest(tc.method, target, strings.NewReader("data"))
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != tc.status {
+			t.Fatalf("%s -> %d: proxy status = %d", tc.method, tc.status, rr.Code)
+		}
+
+		inMemory := cm.memCache.Contains(target)
+		onDisk := fileExistsForURL(t, cm, target)
+		if inMemory == tc.invalidated || onDisk == tc.invalidated {
+			t.Errorf("%s -> %d: entry in memory = %v, on disk = %v; want both %v",
+				tc.method, tc.status, inMemory, onDisk, !tc.invalidated)
+		}
+		backend.Close()
+	}
+}
