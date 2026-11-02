@@ -1698,6 +1698,44 @@ func TestRevalidation304ReplacesStoredAge(t *testing.T) {
 	}
 }
 
+// TestCacheHitSendsAge: a response served from the cache carries its current
+// age (RFC 9111 section 4) - the upstream Age it arrived with plus the time
+// since - from memory and from disk alike.
+func TestCacheHitSendsAge(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+	target := "http://example.com/aged"
+	resp := mkResp("cached body", "Cache-Control", "max-age=600", "Age", "20", "Date", timeHeader(-30*time.Second))
+	if err := storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil), resp); err != nil {
+		t.Fatalf("seed Store: %v", err)
+	}
+
+	for _, fromDisk := range []bool{false, true} {
+		if fromDisk {
+			cm.DiscardMemory()
+		}
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("fromDisk=%v: status = %d, want 200", fromDisk, rr.Code)
+		}
+		// Date was 30s before the request was made, which beats the
+		// request time less Age (20s); allow a few seconds for the test.
+		ages := rr.Header().Values("Age")
+		if len(ages) != 1 {
+			t.Fatalf("fromDisk=%v: Age = %q, want exactly one", fromDisk, ages)
+		}
+		if age, err := strconv.Atoi(ages[0]); err != nil || age < 29 || age > 35 {
+			t.Errorf("fromDisk=%v: Age = %q, want about 30", fromDisk, ages[0])
+		}
+	}
+}
+
 func TestConditionalRevalidationSendsIfModifiedSince(t *testing.T) {
 	lastModified := timeHeader(-48 * time.Hour)
 	var gotIMS string

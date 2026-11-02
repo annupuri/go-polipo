@@ -275,7 +275,9 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	if cm.memCache != nil {
 		if entry, ok := cm.memCache.Get(key); ok {
 			resp := entry.response(req)
-			return resp, cm.isExpired(resp, entry.birth) || responseVaries(resp) || responseNoCache(resp)
+			stale := cm.isExpired(resp, entry.birth) || responseVaries(resp) || responseNoCache(resp)
+			setAge(resp, entry.birth)
+			return resp, stale
 		}
 	}
 
@@ -343,7 +345,16 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 		cm.promote(key, resp, birth)
 	}
 
+	setAge(resp, birth)
 	return resp, stale
+}
+
+// setAge replaces whatever Age resp was stored with by its current age, which
+// RFC 9111 section 4 requires on every response served from the cache.
+// Polipo (client.c) sent it too, though only once it reached a second.
+func setAge(resp *http.Response, birth time.Time) {
+	age := max(int64(time.Since(birth)/time.Second), 0)
+	resp.Header.Set("Age", strconv.FormatInt(age, 10))
 }
 
 // promote copies a disk hit into the memory cache, subject to the same
