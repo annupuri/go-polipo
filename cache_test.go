@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"io/fs"
@@ -401,6 +402,48 @@ func TestRequestCacheControlBoundsFreshness(t *testing.T) {
 						tc.respCC, tc.reqCC, memEntries, fromDisk, got != nil, tc.fresh)
 				}
 			}
+		}
+	}
+}
+
+// TestDiskEntryTimesAreUTC: the times Store writes into a disk entry are
+// real GMT, as http.TimeFormat says, whatever the local time zone. In a zone
+// ahead of UTC, a local clock reading labelled GMT puts X-Polipo-Access in
+// the future, and `polipo -x` then keeps unused entries that much longer.
+func TestDiskEntryTimesAreUTC(t *testing.T) {
+	saved := time.Local
+	time.Local = time.FixedZone("JST", 9*60*60)
+	t.Cleanup(func() { time.Local = saved })
+
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+
+	url := "http://example.com/zoned"
+	resp := mkResp("body", "Cache-Control", "max-age=600", "Date", time.Now().UTC().Format(http.TimeFormat))
+	if err := storeNow(cm, httptest.NewRequest(http.MethodGet, url, nil), resp); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	p, err := cm.GetCachePath(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(raw)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"X-Polipo-Date", "X-Polipo-Access"} {
+		got, err := http.ParseTime(stored.Header.Get(name))
+		if err != nil {
+			t.Errorf("%s = %q: %v", name, stored.Header.Get(name), err)
+			continue
+		}
+		if d := time.Since(got); d < -time.Minute || d > time.Minute {
+			t.Errorf("%s = %q, %s away from now; want the current time in GMT", name, stored.Header.Get(name), -d)
 		}
 	}
 }
