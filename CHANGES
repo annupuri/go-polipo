@@ -69,11 +69,12 @@
     maxExpiresAge is not carried over.
   * A stale entry with a validator (ETag and/or Last-Modified) is
     revalidated with a conditional request to the origin instead of being
-    re-fetched in full; a 304 is merged into the stored entry (RFC 9111
-    section 4.3.4) and re-stored, so the refreshed freshness lifetime
-    takes effect immediately.  This is origin-facing only -- go-polipo
-    does not itself satisfy a client's own conditional request from the
-    cache (RFC 9111 section 4.3.5).  A client-sent If-None-Match or
+    re-fetched in full; a 304 updates the stored entry's header fields,
+    all but those describing the body (RFC 9111 sections 3.2 and
+    4.3.4), and the entry is re-stored, so the refreshed freshness
+    lifetime takes effect immediately.  This is origin-facing only --
+    go-polipo does not itself satisfy a client's own conditional request
+    from the cache (RFC 9111 section 4.3.5).  A client-sent If-None-Match or
     If-Modified-Since rides along to the origin untouched, and a 304
     answering it is passed back to the client as-is rather than merged
     into the cache.
