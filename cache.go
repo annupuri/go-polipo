@@ -283,6 +283,15 @@ func (cm *CacheManager) GetCachePath(rawURL string) (string, error) {
 	return filepath.Join(dir, encoded), nil
 }
 
+// MemoryEntries reports how many entries the in-memory cache holds (0 when
+// it is disabled).
+func (cm *CacheManager) MemoryEntries() int {
+	if cm.memCache == nil {
+		return 0
+	}
+	return cm.memCache.Len()
+}
+
 // DiscardMemory empties the memory cache, leaving the disk cache untouched -
 // the counterpart of Polipo's discardObjects on SIGUSR2. Nothing is lost
 // beyond memory: every entry that fit on disk was written there by Store

@@ -50,6 +50,8 @@ type ProxyHandler struct {
 	// a request that comes back through it is a loop, while a chain of two
 	// go-polipo instances is not mistaken for one.
 	viaName string
+
+	stats *proxyStats
 }
 
 // NewProxyHandler creates a new ProxyHandler.
@@ -58,6 +60,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		config:       config,
 		cacheManager: cacheManager,
 		viaName:      "go-polipo-" + strings.ToLower(rand.Text()[:8]),
+		stats:        newProxyStats(),
 	}
 	ph.forbidden.Store(forbidden)
 	ph.uncachable.Store(uncachable)
@@ -133,11 +136,14 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 						w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
 						copyHeader(w.Header(), staleResp.Header)
 						w.WriteHeader(staleResp.StatusCode)
-						io.Copy(w, staleResp.Body)
+						n, _ := io.Copy(w, staleResp.Body)
+						ph.stats.cacheHits.Add(1)
+						ph.stats.cacheHitBytes.Add(uint64(n))
 						return
 					}
 				}
 			}
+			ph.stats.upstreamErrors.Add(1)
 			logf(ph.config.LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
 			// A serverTimeout running out is a 504 (RFC 9110 section
 			// 15.6.5), as in Polipo; any other failure is a 502.
@@ -209,6 +215,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 		if err := ph.reviveFromCache(resp); err != nil {
 			return err
 		}
+		ph.stats.revalidated.Add(1)
 	} else {
 		needVia = true
 	}
@@ -539,6 +546,7 @@ func (t *parentProxyAuthTransport) RoundTrip(req *http.Request) (*http.Response,
 func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// 1. Allowed Clients verification
 	if !ph.isClientAllowed(req.RemoteAddr) {
+		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: client %s not allowed", req.RemoteAddr)
 		http.Error(w, "Access Denied: Client IP not allowed", http.StatusForbidden)
 		return
@@ -546,6 +554,7 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// 1.4 Proxy authentication (authCredentials)
 	if !ph.isAuthorized(req) {
+		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
 		if isLocalForm(req) {
 			w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
@@ -581,6 +590,7 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// 2. Forbidden URL verification
 	if url := targetURL(req); ph.forbidden.Load().Match(url, req.Host) {
+		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s is blacklisted", url)
 		http.Error(w, "Forbidden: URL is blacklisted", http.StatusForbidden)
 		return
@@ -626,6 +636,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 <h1>go-polipo Local Interface</h1>
 <p>Welcome to go-polipo version %s.</p>
 <ul>
+<li><a href="/polipo/status">Status</a></li>
 <li><a href="/polipo/config">Configuration variables</a></li>
 </ul>
 <form method="post" action="/polipo/reload">
@@ -679,6 +690,13 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 		}
 		logf(ph.config.LogLevel, LogInfo, "Reloaded forbidden/uncachable lists")
 		http.Redirect(w, req, "/polipo/", http.StatusSeeOther)
+		return
+	}
+
+	if path == "/polipo/status" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		ph.writeStatus(w)
 		return
 	}
 
@@ -813,6 +831,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	}
 
 	if !ph.config.TunnelAllowedPorts.Contains(port) {
+		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: port %d not allowed (target=%s)", port, req.RequestURI)
 		http.Error(w, "CONNECT port not allowed", http.StatusForbidden)
 		return
@@ -827,6 +846,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// never applies forbiddenFile to CONNECT at all (client.c dispatches to
 	// do_tunnel before ever calling urlForbidden).
 	if ph.forbiddenTunnels.Load().MatchTunnel(req.RequestURI, host) {
+		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: %s is on forbiddenTunnelsFile", req.RequestURI)
 		http.Error(w, "Forbidden: tunnel target is blacklisted", http.StatusForbidden)
 		return
@@ -851,6 +871,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// Dial target server (via SOCKS if configured)
 	destConn, err := ph.dialContext(req.Context(), "tcp", req.RequestURI)
 	if err != nil {
+		ph.stats.tunnelFailures.Add(1)
 		logf(ph.config.LogLevel, LogError, "CONNECT failed: dial %s: %v", req.RequestURI, err)
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
@@ -858,6 +879,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	defer destConn.Close()
 
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	ph.stats.tunnels.Add(1)
 	tunnel(clientConn, destConn)
 }
 
@@ -898,6 +920,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// can be driven to arbitrary TCP services (SMTP relay, SSRF to internal
 	// ports). CONNECT is filtered separately by tunnelAllowedPorts.
 	if port := requestPort(req); !ph.config.AllowedPorts.Contains(port) {
+		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: port %d not in allowedPorts (target=%s)", port, req.URL)
 		http.Error(w, "Forbidden: target port not allowed", http.StatusForbidden)
 		return
@@ -915,6 +938,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	if ph.answerMaxForwards(w, req) {
 		return
 	}
+	ph.stats.requests.Add(1)
 
 	// proxyOffline: never contact the origin. Whatever is cached (fresh or
 	// stale) is served as-is; a true miss is a 502, not a network attempt.
@@ -959,6 +983,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// ReverseProxy via ModifyResponse and ErrorHandler. When relaxTransparency
 	// is "maybe" or "true", the ErrorHandler falls back to a stale cache entry
 	// instead of a raw error if the origin cannot be reached.
+	ph.stats.upstream.Add(1)
 	ph.reverseProxy.ServeHTTP(w, req)
 }
 
@@ -1031,7 +1056,12 @@ func copyHeader(dst, src http.Header) {
 // Accept-Ranges is set unconditionally: every cached hit this proxy serves,
 // whether sliced by this request or not, is this same complete entity, so
 // the client may always follow up with a Range request against it.
-func (ph *ProxyHandler) serveCached(w http.ResponseWriter, req *http.Request, resp *http.Response) {
+func (ph *ProxyHandler) serveCached(rw http.ResponseWriter, req *http.Request, resp *http.Response) {
+	w := &countingWriter{ResponseWriter: rw}
+	defer func() {
+		ph.stats.cacheHits.Add(1)
+		ph.stats.cacheHitBytes.Add(w.n)
+	}()
 	copyHeader(w.Header(), resp.Header)
 	w.Header().Set("Accept-Ranges", "bytes")
 
