@@ -26,7 +26,9 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
   壊れたエントリ、(HTTP 鮮度ルール上)古くなったエントリ、長期間アクセスの
   ないエントリ(`diskCacheUnlinkTime`、既定 32 日)を削除し、空になった
   ディレクトリを整理します。
-- **ローカル Web インターフェース**: `/polipo/config` で設定内容を確認でき、
+- **ローカル Web インターフェース**: `/polipo/config` で設定内容を、
+  `/polipo/status` で起動以降の統計（リクエスト数、キャッシュヒット数、
+  304 による再検証の数、CONNECT トンネル数、エラー数など）を確認でき、
   再起動不要のランタイム操作として `/polipo/reload`（`forbiddenFile` /
   `uncachableFile` / `forbiddenTunnelsFile` の再読み込み）と
   `/polipo/flush`（`-x` と同じディスクキャッシュの期限切れ処理を実行）を
