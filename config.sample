@@ -135,6 +135,21 @@
 # SMTP (25), POP (110), IMAP (143), NNTP (119) and similar services.
 # allowedPorts = 80-100, 1024-65535
 
+# Refuse forwarded requests and CONNECT tunnels to this machine or its link:
+# loopback (127.0.0.0/8, ::1), unspecified (0.0.0.0/8, ::), link-local
+# (169.254.0.0/16, fe80::/10) and multicast.  The address checked is the one
+# actually dialled, after DNS, so a hostname that resolves to 127.0.0.1 (DNS
+# rebinding) is refused too; the client gets a 403.  This keeps web pages from
+# reaching, through the proxy, services that listen only on this machine.
+# Not checked when a parentProxy or socksParentProxy does the connecting.
+# Polipo had no such check.
+# forbidLocalDestinations = true
+
+# Also refuse private addresses (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+# fc00::/7) and 100.64.0.0/10.  Off by default: reaching a router or another
+# machine on the LAN through the proxy is ordinary use.
+# forbidPrivateDestinations = false
+
 
 ### Parent proxies
 

@@ -52,6 +52,7 @@ at the end groups findings by how much they matter before a public release.
 | Variable | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
 | `serverTimeout` / `serverIdleTimeout` | `90s` / `45s` | ✅ | **Done (2026-11-03).** `serverTimeout` bounds connecting to the origin, SOCKS or parent proxy (CONNECT tunnels included), waiting for response headers (`ResponseHeaderTimeout`), and any silence while an exchange is under way (`idleTimeoutConn`, which rearms a deadline on every read and write, as Polipo did in `server.c`). Running out is a `504`, as in Polipo; other upstream failures stay `502`. An established CONNECT tunnel has no timeout, as in Polipo. `serverIdleTimeout` is how long an unused connection to the origin is kept for reuse (`IdleConnTimeout`, which used to be a fixed 90s). `0` disables either. They used to be missing, so an origin that accepted a request and then stalled held its `maxConcurrentRequests` slot for as long as the client kept waiting. |
+| `forbidLocalDestinations` / `forbidPrivateDestinations` | — (no such check) | ✅ | **Added (2026-11-06), go-polipo only; defaults `true` / `false`.** Polipo forwarded to any address a name resolved to. So, with only `allowedPorts` and `tunnelAllowedPorts` in the way, a web page could use a hostname of its own that resolves to 127.0.0.1 (DNS rebinding) to reach, through the proxy, services listening only on this machine, which the browser itself keeps pages away from. `forbidLocalDestinations` refuses loopback, unspecified (`0.0.0.0/8`, `::`), link-local (`169.254.0.0/16`, including the cloud metadata address, and `fe80::/10`) and multicast addresses. `forbidPrivateDestinations` adds RFC 1918, `fc00::/7` and `100.64.0.0/10`; it is off by default because reaching a router or a LAN machine is ordinary use. The check is a `net.Dialer` `Control` function, so it sees each address actually dialled after resolution; a name with both a refused and an allowed address connects to the allowed one. A refused forwarded request or CONNECT gets a `403` that does not say what the name resolved to, counts under "Denied by policy" and is logged as forbidden. Not applied when a `parentProxy` (forwarded requests) or `socksParentProxy` does the connecting, since the proxy is then not dialling the origin. |
 | `proxyOutgoingAddress` | OS default | ❌ | Cannot bind the upstream socket to a chosen source address (multi-homed hosts). |
 | `useTemporarySourceAddress` | `maybe` | 🔷 | RFC 3041 temp IPv6 source selection — left to the OS. |
 | `allowedPorts` | `80-100, 1024-65535` | ✅ | **Enforced (resolved 2026-09-11).** `handleForward` derives the target port (`requestPort`) and rejects any not in `AllowedPorts` (`PortSet.Contains`) with a `403`, before the cache lookup or any upstream dial. The default now matches Polipo (`80-100, 1024-65535`), so privileged ports other than 80–100 (25, 110, 119, 143, …) are refused. `parsePortSet` accepts Polipo's `lo-hi` range syntax (open ends too: `-100`, `1024-`). CONNECT is still filtered by `tunnelAllowedPorts` only, as in Polipo — the two lists are not combined. |
@@ -222,6 +223,11 @@ at the end groups findings by how much they matter before a public release.
    zero since 2026-11-03),
    matching Polipo's default fraction/cap, hard-coded. `s-maxage` and invalid
    `Expires` are now handled correctly in the same pass.
+5. ~~**No check on the destination address (§3).**~~ **Done (2026-11-06):**
+   `forbidLocalDestinations` (default on) refuses connections to this machine
+   and its link after DNS resolution, so DNS rebinding can no longer reach
+   services that listen only on loopback; `forbidPrivateDestinations` (default
+   off) adds private addresses. A deliberate addition; Polipo had neither.
 
 ### B. Feature gaps — decide "port later" vs "won't port", then document
 

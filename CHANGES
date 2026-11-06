@@ -220,6 +220,16 @@
         go-polipo- plus a random part chosen at startup, rather than
         the hostname.  A request whose Via already names the running
         instance is a loop and gets a 504, as in Polipo.
+      - Forwarded requests and CONNECT tunnels to this machine or its
+        link (loopback, unspecified, link-local such as 169.254.169.254,
+        multicast) are refused with 403 (forbidLocalDestinations,
+        default true); Polipo forwarded to any address.  The address
+        checked is the one dialled after DNS resolution, so a web page
+        can no longer use a hostname that resolves to 127.0.0.1 (DNS
+        rebinding) to reach services that listen only on this machine.
+        forbidPrivateDestinations (default false) also refuses private
+        addresses.  Neither applies when a parent proxy does the
+        connecting.
       - Many low-level tuning variables from Polipo 1.x (chunk/object
         high marks, server slot counts, and similar) are no longer
         recognised; unknown variables are ignored (and now logged as a

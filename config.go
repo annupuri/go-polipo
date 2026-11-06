@@ -162,6 +162,23 @@ type Config struct {
 	// responses it forwards. RFC 9110 section 7.6.3 requires a proxy to add
 	// it, so the default is false, unlike Polipo's true.
 	DisableVia bool
+
+	// ForbidLocalDestinations refuses forwarded requests and CONNECT tunnels
+	// to an address on this machine or its link: loopback (127.0.0.0/8,
+	// ::1), unspecified (0.0.0.0/8, ::), link-local (169.254.0.0/16,
+	// fe80::/10) and multicast. The address checked is the one dialled, after
+	// the name is resolved, so a hostname that resolves to 127.0.0.1 is
+	// refused too. Without it any web page can, through a hostname of its
+	// own that resolves to 127.0.0.1 (DNS rebinding), reach services that
+	// listen only on this machine, which the browser itself would keep it
+	// away from. Polipo had no such check; the default is true.
+	ForbidLocalDestinations bool
+
+	// ForbidPrivateDestinations also refuses private addresses (10.0.0.0/8,
+	// 172.16.0.0/12, 192.168.0.0/16, fc00::/7) and the shared address space
+	// 100.64.0.0/10. Off by default, because reaching a router or another
+	// machine on the LAN through the proxy is ordinary use.
+	ForbidPrivateDestinations bool
 }
 
 // defaultTunnelAllowedPorts is Polipo's default tunnelAllowedPorts (http.c):
@@ -211,6 +228,9 @@ func NewDefaultConfig() *Config {
 		RelaxTransparency:       0,
 		DontTrustVaryETag:       1,
 		DisableVia:              false,
+		// Not in Polipo: see ForbidLocalDestinations.
+		ForbidLocalDestinations:   true,
+		ForbidPrivateDestinations: false,
 	}
 }
 
@@ -263,6 +283,8 @@ func (c *Config) Entries() []ConfigEntry {
 		{"relaxTransparency", tristateString(c.RelaxTransparency)},
 		{"dontTrustVaryETag", tristateString(c.DontTrustVaryETag)},
 		{"disableVia", strconv.FormatBool(c.DisableVia)},
+		{"forbidLocalDestinations", strconv.FormatBool(c.ForbidLocalDestinations)},
+		{"forbidPrivateDestinations", strconv.FormatBool(c.ForbidPrivateDestinations)},
 	}
 }
 
@@ -513,6 +535,10 @@ func (c *Config) Set(key, val string) error {
 		c.ProxyOffline = strings.ToLower(val) == "true" || val == "1"
 	case "disableVia":
 		c.DisableVia = strings.ToLower(val) == "true" || val == "1"
+	case "forbidLocalDestinations":
+		c.ForbidLocalDestinations = strings.ToLower(val) == "true" || val == "1"
+	case "forbidPrivateDestinations":
+		c.ForbidPrivateDestinations = strings.ToLower(val) == "true" || val == "1"
 	case "relaxTransparency":
 		level, err := parseTristate(val)
 		if err != nil {

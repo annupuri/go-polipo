@@ -25,8 +25,12 @@ import (
 
 // newTestConfig returns the configuration the proxy tests start from: the
 // defaults, adjusted where a default would stand in the way of a test.
+// forbidLocalDestinations is off because the tests' origins are httptest
+// servers on the loopback address; destination_test.go tests it on its own.
 func newTestConfig() *Config {
-	return NewDefaultConfig()
+	cfg := NewDefaultConfig()
+	cfg.ForbidLocalDestinations = false
+	return cfg
 }
 
 func newTestHandler(cfg *Config) *ProxyHandler {

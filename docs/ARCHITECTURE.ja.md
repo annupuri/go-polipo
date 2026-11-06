@@ -19,7 +19,7 @@ Go言語版は、並行処理 (Goroutines) や標準ライブラリの利点を�
 | `dns.c` | *(Go標準 `net.Resolver`)* | **DNS解決**<br>Goの標準ライブラリ `net.Resolver` に委ねられるため、非同期DNS処理や独自のDNSキャッシュの実装は不要。 |
 | `event.c` | *(Goroutines / 標準ライブラリ)* | **イベントループ**<br>C言語版のシングルスレッド・ノンブロッキングイベントループは、Goの Goroutine や `net/http` が提供する並行接続処理に置き換えられたため不要。 |
 | `dirent_compat.c`<br>`fts_compat.c`<br>`ftsimport.c`<br>`mingw.c` | *(Go標準 `os` / `path/filepath`)* | **OS互換性レイヤー / ディレクトリ巡回**<br>Windows/POSIX互換、ディレクトリ巡回用のコードは、Goが言語レベルでクロスプラットフォームに抽象化しているため不要。 |
-| `forbidden.c` | `forbidden.go` | **アクセス制限フィルタ**<br>禁止URLリストの読み込み。ドメインの後方一致および正規表現マッチングによるアクセス可否判定。 |
+| `forbidden.c` | `forbidden.go`<br>`destination.go` | **アクセス制限フィルタ**<br>禁止URLリストの読み込み。ドメインの後方一致および正規表現マッチングによるアクセス可否判定。`destination.go` は Polipo に対応するものが無く、このマシンやそのリンクのアドレス、設定によってはプライベートアドレスへの接続を拒否する（`forbidLocalDestinations`、`forbidPrivateDestinations`）。判定は `net.Dialer` の `Control` 関数で行うので、名前解決した後に実際に接続するアドレスを見る。 |
 | `io.c` | *(Go標準 `net` / `bufio`)* | **ソケットI/O制御**<br>ソケットバッファリングやタイムアウトなどの非同期I/O制御は、Goの標準ライブラリ（`net.Conn`, `bufio` 等）と Goroutine が自動的に行うため、独自の I/O レイヤーは不要。 |
 | `local.c` | `proxy.go` | **ローカルWebインターフェース**<br>`local.c` の設定変数表示や動的設定などのローカルWebインターフェース（`/polipo/`, `/polipo/config`）は、`proxy.go` 内の `handleLocal` メソッドにて簡略化して再実装・統合。状態表示（`/polipo/status`）は `stats.go` が描画し、プロキシがリクエストを処理しながら更新するトラフィックの統計もここで保持する。 |
 | `log.c` | *(Go標準 `log`)* / `logging.go` | **ロギング**<br>Go標準の `log` パッケージを利用して簡略化。`logLevel` はPolipo自身と同じ、エラー・警告・情報・ポリシーによる拒否という独立したメッセージ種別を表すビットマスクであり、順序付きの重大度しきい値ではない — `logging.go` の `logf` が各呼び出し箇所をカテゴリビットで判定する（Go標準の `log` パッケージにはそれに対応する「レベル」という概念自体が無いため、自前で実装）。`logSyslog`/`logFacility` に相当するものは今も無く、syslog への出力先も無い。 |

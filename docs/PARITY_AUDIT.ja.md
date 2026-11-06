@@ -52,6 +52,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | 変数 | v1.1.x 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
 | `serverTimeout` / `serverIdleTimeout` | `90s` / `45s` | ✅ | **実装済み（2026-11-03）。** `serverTimeout` は、オリジン・SOCKS・親プロキシへの接続（CONNECT トンネルの接続も含む）、レスポンスヘッダの待ち（`ResponseHeaderTimeout`）、やり取りの途中の無通信（`idleTimeoutConn`。Polipo の `server.c` と同じく、読み書きのたびに期限を延ばす）の上限。時間切れは Polipo と同じく `504`、それ以外の上流の失敗はこれまでどおり `502`。確立した CONNECT トンネルには、Polipo と同じくタイムアウトを設けない。`serverIdleTimeout` は、使っていないオリジンへの接続を再利用のために残しておく時間（`IdleConnTimeout`。以前は 90s 固定だった）。どちらも `0` で無効。以前はこの設定が無く、リクエストを受け付けたまま止まったオリジンが、クライアントが待ち続ける限り `maxConcurrentRequests` の枠を占有していた。 |
+| `forbidLocalDestinations` / `forbidPrivateDestinations` | —（該当する検査なし） | ✅ | **追加（2026-11-06）。go-polipo 独自。既定は `true` / `false`。** Polipo は、名前を解決した結果がどのアドレスでも中継していた。そのため、`allowedPorts` と `tunnelAllowedPorts` 以外に歯止めがなく、Web ページが 127.0.0.1 に解決される自前のホスト名（DNS リバインディング）を使うと、このマシンだけで待ち受けているサービスにプロキシ経由で届いてしまった。ブラウザ自身はページをそうしたサービスから遠ざけているのに、それを迂回できた。`forbidLocalDestinations` は、ループバック、未指定アドレス（`0.0.0.0/8`、`::`）、リンクローカル（`169.254.0.0/16`。クラウドのメタデータのアドレスを含む。と `fe80::/10`）、マルチキャストを拒否する。`forbidPrivateDestinations` は、RFC 1918、`fc00::/7`、`100.64.0.0/10` も拒否する。ルーターや LAN 内のマシンへの接続は普通の使い方なので、既定では無効。判定は `net.Dialer` の `Control` 関数で行うので、名前解決した後に実際に接続する各アドレスを見る。拒否するアドレスと許可するアドレスの両方を持つ名前は、許可する方に接続する。拒否した転送や CONNECT には、名前の解決結果を含まない `403` を返し、状態表示の「Denied by policy」に数え、forbidden としてログに残す。`parentProxy`（転送の場合）や `socksParentProxy` が接続するときは、プロキシ自身がオリジンに接続するわけではないので判定しない。 |
 | `proxyOutgoingAddress` | OS 既定 | ❌ | 上流ソケットの送信元アドレスを指定できない（マルチホーム環境）。 |
 | `useTemporarySourceAddress` | `maybe` | 🔷 | RFC 3041 の一時 IPv6 送信元選択 — OS 任せ。 |
 | `allowedPorts` | `80-100, 1024-65535` | ✅ | **強制済み（2026-09-11 解決）。** `handleForward` が対象ポートを求め（`requestPort`）、`AllowedPorts` に無ければ（`PortSet.Contains`）キャッシュ参照や上流ダイヤルの前に `403` で拒否する。既定は Polipo と同じ（`80-100, 1024-65535`）に戻したので、80–100 以外の特権ポート（25, 110, 119, 143, …）は拒否される。`parsePortSet` は Polipo の `lo-hi` レンジ構文（`-100`・`1024-` の開区間も）を受け付ける。CONNECT は Polipo 同様 `tunnelAllowedPorts` のみで判定し、2 つのリストは併用しない。 |
@@ -217,6 +218,11 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
    `200` は `min(0.1 × Last-Modified 経過時間, 24h)`（`Last-Modified` 無しは 24h
    固定。2026-11-03 からは 0）を得る。Polipo の既定の割合／上限に一致、ハードコード。同じ処理で
    `s-maxage` と不正 `Expires` も正しく扱うようにした。
+5. ~~**宛先アドレスの検査なし（§3）。**~~ **完了（2026-11-06）:**
+   `forbidLocalDestinations`（既定で有効）が、名前解決した後のアドレスで、
+   このマシンやそのリンクへの接続を拒否する。DNS リバインディングで、ループバック
+   だけで待ち受けるサービスに届くことはなくなった。`forbidPrivateDestinations`
+   （既定で無効）はプライベートアドレスも拒否する。Polipo にはどちらも無く、意図的な追加。
 
 ### B. 機能ギャップ — 「後で移植」か「移植しない」を決め、文書化する
 
