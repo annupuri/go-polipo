@@ -39,9 +39,12 @@ type ProxyHandler struct {
 
 	// Precomputed at construction so the request path stays allocation-free.
 	socksDialer proxy.Dialer // nil unless a SOCKS parent proxy is configured
-	allowAll    bool
-	allowIPs    []net.IP
-	allowNets   []*net.IPNet
+	// viaParent is true when the Transport sends forwarded requests to an
+	// HTTP parent proxy, so its dials reach the parent, not the origin.
+	viaParent bool
+	allowAll  bool
+	allowIPs  []net.IP
+	allowNets []*net.IPNet
 
 	// viaName is how this instance names itself in Via (RFC 9110 section
 	// 7.6.3). Polipo used the machine's hostname (proxyName); this is a
@@ -126,6 +129,15 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		},
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// A refused destination is a policy decision, not an origin
+			// failure: no stale fallback, and the body does not say what
+			// the name resolved to.
+			if errors.Is(err, errForbiddenDestination) {
+				ph.stats.denied.Add(1)
+				logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s: %v", r.Method, r.URL, err)
+				http.Error(w, "Forbidden: destination address not allowed", http.StatusForbidden)
+				return
+			}
 			// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
 			// error when the origin cannot be reached at all, unless the
 			// entry forbids being served stale (see staleServable).
@@ -438,10 +450,18 @@ func (ph *ProxyHandler) parseAllowedClients() {
 	}
 }
 
-// dialContext connects to addr, through the SOCKS parent proxy if there is
-// one, giving up after serverTimeout. Both forwarded requests and CONNECT
-// tunnels dial through it.
+// dialContext connects to the origin at addr for a CONNECT tunnel; see dial.
 func (ph *ProxyHandler) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return ph.dial(ctx, network, addr, true)
+}
+
+// dial connects to addr, through the SOCKS parent proxy if there is one,
+// giving up after serverTimeout. Both forwarded requests and CONNECT tunnels
+// dial through it. toOrigin says addr is the origin rather than an HTTP
+// parent proxy; only then is the address checked against
+// forbidLocalDestinations and forbidPrivateDestinations. Through SOCKS the
+// parent resolves the name, so there is no address here to check.
+func (ph *ProxyHandler) dial(ctx context.Context, network, addr string, toOrigin bool) (net.Conn, error) {
 	if t := ph.config.ServerTimeout; t > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t)
@@ -455,6 +475,9 @@ func (ph *ProxyHandler) dialContext(ctx context.Context, network, addr string) (
 	}
 
 	var d net.Dialer
+	if toOrigin && (ph.config.ForbidLocalDestinations || ph.config.ForbidPrivateDestinations) {
+		d.Control = ph.checkDestination
+	}
 	return d.DialContext(ctx, network, addr)
 }
 
@@ -462,7 +485,7 @@ func (ph *ProxyHandler) dialContext(ctx context.Context, network, addr string) (
 // requests (never CONNECT tunnels), and applies serverTimeout to it for as
 // long as it lives; see idleTimeoutConn.
 func (ph *ProxyHandler) dialUpstream(ctx context.Context, network, addr string) (net.Conn, error) {
-	conn, err := ph.dialContext(ctx, network, addr)
+	conn, err := ph.dial(ctx, network, addr, !ph.viaParent)
 	if err != nil || ph.config.ServerTimeout <= 0 {
 		return conn, err
 	}
@@ -509,6 +532,7 @@ func (ph *ProxyHandler) createTransport() *http.Transport {
 	if ph.config.ParentProxy != "" {
 		if parentURL, err := normalizeProxyURL(ph.config.ParentProxy); err == nil {
 			tr.Proxy = http.ProxyURL(parentURL)
+			ph.viaParent = true
 		} else {
 			logf(ph.config.LogLevel, LogWarn, "Warning: invalid parentProxy URL: %s", ph.config.ParentProxy)
 		}
@@ -870,6 +894,12 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 
 	// Dial target server (via SOCKS if configured)
 	destConn, err := ph.dialContext(req.Context(), "tcp", req.RequestURI)
+	if errors.Is(err, errForbiddenDestination) {
+		ph.stats.denied.Add(1)
+		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: %v (target=%s)", err, req.RequestURI)
+		clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\n\r\n"))
+		return
+	}
 	if err != nil {
 		ph.stats.tunnelFailures.Add(1)
 		logf(ph.config.LogLevel, LogError, "CONNECT failed: dial %s: %v", req.RequestURI, err)

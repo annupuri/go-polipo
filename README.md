@@ -14,6 +14,10 @@ Features
 - **CONNECT Tunneling**: Support for HTTPS tunneling (with port filtering configuration).
 - **SOCKS Parent Proxy**: Support for forwarding upstream requests via SOCKS5 proxy.
 - **Forbidden Filter**: Host/Domain and regular expression blacklists.
+- **Destination Filter**: Forwarded requests and CONNECT tunnels to this machine or its link
+  (loopback, link-local, unspecified, multicast) are refused with a 403 (`forbidLocalDestinations`,
+  on by default). The address is checked after DNS resolution, so a hostname that resolves to
+  127.0.0.1 (DNS rebinding) is refused too. `forbidPrivateDestinations` also refuses private LAN addresses.
 - **Disk Cache**: Polipo-compatible disk caching directory layout and filename hashing (MD5 + Custom Base64 table).
   `Set-Cookie` responses are kept out of the cache by default (`dontCacheCookies`), responses to
   authenticated requests are cached only when explicitly shareable (RFC 9111 §3.5), and the disk
