@@ -155,7 +155,9 @@
     a 504.
   * Parent proxies: HTTP via parentProxy, SOCKS5 via socksParentProxy
     (golang.org/x/net/proxy), each with its own optional credentials
-    (parentAuthCredentials, socksAuthCredentials).  A password written
+    (parentAuthCredentials, socksAuthCredentials).  As in Polipo, CONNECT
+    tunnels go through parentProxy too; a parent that refuses the CONNECT
+    gives the client a 502 rather than its own reply.  A password written
     into parentProxy itself ("user:password@host:port", which Go's
     Transport also honours) is shown as xxxxx on -v, /polipo/config and
     in the log.  socksProxyType
