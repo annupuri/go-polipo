@@ -1011,6 +1011,12 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	ph.stats.tunnels.Add(1)
+	if t := ph.config.TunnelIdleTimeout; t > 0 {
+		if tunnelWithIdleTimeout(clientConn, destConn, t) {
+			logf(ph.config.LogLevel, LogInfo, "CONNECT %s closed after %v without traffic", req.RequestURI, t)
+		}
+		return
+	}
 	tunnel(clientConn, destConn)
 }
 
@@ -1044,6 +1050,67 @@ func tunnel(a, b net.Conn) {
 		}
 	}()
 	wg.Wait()
+}
+
+// tunnelWithIdleTimeout runs tunnel between a and b, closing both once
+// neither direction has read a byte for timeout (tunnelIdleTimeout), and
+// reports whether that is how it ended. Reads are what count: every byte a
+// direction moves is read first, and a peer that stops reading leaves the
+// other direction blocked in a write with no new reads, so it times out too.
+// Watching the reads means wrapping the connections, which takes the copy off
+// the kernel's splice path; that is why tunnel without a timeout keeps the
+// raw connections.
+func tunnelWithIdleTimeout(a, b net.Conn, timeout time.Duration) bool {
+	start := time.Now()
+	var last atomic.Int64 // nanoseconds since start, on the monotonic clock
+	done := make(chan struct{})
+	var expired atomic.Bool
+	go func() {
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				idle := time.Since(start) - time.Duration(last.Load())
+				if idle >= timeout {
+					expired.Store(true)
+					a.Close()
+					b.Close()
+					return
+				}
+				t.Reset(timeout - idle)
+			}
+		}
+	}()
+	tunnel(&activityConn{Conn: a, start: start, last: &last}, &activityConn{Conn: b, start: start, last: &last})
+	close(done)
+	return expired.Load()
+}
+
+// activityConn records when it last read anything, for tunnelWithIdleTimeout.
+type activityConn struct {
+	net.Conn
+	start time.Time
+	last  *atomic.Int64
+}
+
+func (c *activityConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.last.Store(int64(time.Since(c.start)))
+	}
+	return n, err
+}
+
+// CloseWrite passes a half-close through, so that tunnel can still signal
+// EOF to the peer.
+func (c *activityConn) CloseWrite() error {
+	if hc, ok := c.Conn.(halfCloser); ok {
+		return hc.CloseWrite()
+	}
+	return nil
 }
 
 func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) {

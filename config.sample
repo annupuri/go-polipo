@@ -196,10 +196,16 @@
 # requests.  serverTimeout bounds connecting upstream, waiting for response
 # headers, and any silence mid-exchange (a 504 when it runs out).
 # serverIdleTimeout is how long an unused upstream connection is kept for
-# reuse.  An established CONNECT tunnel has no timeout.
+# reuse.  An established CONNECT tunnel has no timeout unless
+# tunnelIdleTimeout is set: it closes a tunnel once neither direction has
+# carried a byte for that long.  It is off by default, as in Polipo, because
+# some tunnels are rightly silent for a long time (IMAP IDLE re-issues its
+# command only every 29 minutes; an idle SSH session may send nothing at all).
+# A peer that has gone away is found by TCP keepalive regardless.
 # clientTimeout = 120s
 # serverTimeout = 90s
 # serverIdleTimeout = 45s
+# tunnelIdleTimeout = 0
 # disableLocalInterface = false # disables /polipo/ and /polipo/config
 
 # Bitmask of message categories to log (hex), matching Polipo's own bits:
