@@ -188,7 +188,7 @@ at the end groups findings by how much they matter before a public release.
 | :--- | :--: | :--- |
 | `logLevel` | ✅ | **Done (2026-09-14):** enforced. `logLevel` is a bitmask of independent message categories (`log.h`'s `L_ERROR`/`L_WARN`/`L_INFO`/`L_FORBIDDEN`/...), not an ordered severity threshold - `logging.go`'s `logf` gates each existing call site on the one category it belongs to, same as Polipo's own `do_log` call sites (`if (type & LOGGING_MAX & logLevel) ...`). Default `0x07` (`LogError\|LogWarn\|LogInfo`) matches Polipo's `LOGGING_DEFAULT` exactly. Behavioural note: this default does *not* include `LogForbidden`, so the "Denied: ..." access-denial lines added throughout this audit are opt-in from here on, not unconditional - matching Polipo, but a real change from how go-polipo behaved a moment earlier in this same audit. **Deliberate difference (2026-11-01):** only the four categories go-polipo actually logs are defined (`LogError`/`LogWarn`/`LogInfo`/`LogForbidden`). Polipo's `L_UNCACHEABLE` (0x10), `L_SUPERSEDED` (0x20), `L_VARY` (0x40) and `L_TUNNEL` (0x80, "tunnel host:port allowed/blocked" in `tunnel.c`) have no go-polipo messages; a `logLevel` that sets them is accepted, so a Polipo config still loads, and those bits are ignored. A rejected CONNECT is logged under `LogForbidden` like every other policy denial; an accepted one is not logged. The unused constants used to be defined "for parity", and `config.sample` wrongly said 0x80 showed tunnel messages. |
 | `logFile` | ✅ | Redirects `log` output; append mode. Reopened on `SIGUSR1`/`SIGUSR2` (Unix) so log rotation works, as Polipo's `reopenLog` did (§15). |
-| `logFilePermissions` | ⚠️ | Hard-coded `0644` (v1.1.x default is `0640`). |
+| `logFilePermissions` | ✅ | **Done (2026-11-06).** Octal, default `0640` as in Polipo, applied when the log file is created (less the umask); an existing file keeps its mode, as with Polipo's `open(2)`. It used to be hard-coded `0644`, so other users on the machine could read the log, which names every URL fetched. |
 | `logSyslog`, `logFacility` | ❌ | No syslog sink. |
 | `scrubLogs` | ❌ | No log scrubbing of private data. |
 
@@ -487,5 +487,5 @@ at the end groups findings by how much they matter before a public release.
 - `forbiddenUrl` / `forbiddenRedirectCode` (§4).
 - `redirector` (§4).
 - `localDocumentRoot` / `disableProxy`, cache-index pages (§13).
-- `diskCache*Permissions`, `logFilePermissions` configurability (§11, §14).
+- `diskCache*Permissions` configurability (§11). (`logFilePermissions` was done on 2026-11-06.)
 - `proxyOutgoingAddress`, `useTemporarySourceAddress` (§3).

@@ -188,7 +188,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | :--- | :--: | :--- |
 | `logLevel` | ✅ | **完了（2026-09-14）:** 強制するようにした。`logLevel` はPolipo自身と同じ、独立したメッセージ種別のビットマスク（`log.h`の`L_ERROR`/`L_WARN`/`L_INFO`/`L_FORBIDDEN`等）であり、順序付きの重大度しきい値ではない — `logging.go`の`logf`が各既存呼び出し箇所を該当する1カテゴリで判定する、Polipo自身の`do_log`呼び出し（`if (type & LOGGING_MAX & logLevel) ...`）と同じ方式。既定値`0x07`（`LogError|LogWarn|LogInfo`）はPolipoの`LOGGING_DEFAULT`と完全一致する。挙動上の注意点: この既定値には`LogForbidden`が含まれないため、これまでの監査作業で追加してきた「Denied: ...」系のアクセス拒否ログは、ここからは既定では出力されないオプトイン扱いになる — Polipoに合わせた結果だが、この監査の少し前までのgo-polipoの挙動からは実質的な変更である。**意図的な差分（2026-11-01）:** 定義するのは go-polipo が実際に出力する4種類（`LogError`/`LogWarn`/`LogInfo`/`LogForbidden`）だけ。Polipo の `L_UNCACHEABLE`（0x10）、`L_SUPERSEDED`（0x20）、`L_VARY`（0x40）、`L_TUNNEL`（0x80、`tunnel.c` の「tunnel host:port allowed/blocked」）に当たるメッセージは go-polipo には無い。これらのビットを含む `logLevel` もエラーにはせず受け付け（Polipo の設定ファイルをそのまま読めるように）、そのビットは無視する。拒否した CONNECT はほかのポリシーによる拒否と同じく `LogForbidden` で記録し、許可した CONNECT は記録しない。以前は使われていない定数を「整合性のため」に定義しており、`config.sample` には 0x80 でトンネルのメッセージが出ると誤って書かれていた。 |
 | `logFile` | ✅ | `log` の出力先を切り替え。追記モード。Polipo の `reopenLog` と同じく `SIGUSR1`/`SIGUSR2`（Unix）で開き直すので、ログローテーションができる（§15）。 |
-| `logFilePermissions` | ⚠️ | `0644` にハードコード（v1.1.x 既定は `0640`）。 |
+| `logFilePermissions` | ✅ | **実装済み（2026-11-06）。** 8進数で、既定は Polipo と同じ `0640`。ログファイルを作るときに使う（umask が差し引かれる）。既にあるファイルの権限は、Polipo の `open(2)` と同じく変えない。以前は `0644` にハードコードしていたので、マシンの他のユーザーがログを読めた。ログには取得したすべての URL が残る。 |
 | `logSyslog`, `logFacility` | ❌ | syslog 出力なし。 |
 | `scrubLogs` | ❌ | ログからの個人情報スクラブなし。 |
 
@@ -473,5 +473,5 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 - `forbiddenUrl` / `forbiddenRedirectCode`（§4）。
 - `redirector`（§4）。
 - `localDocumentRoot` / `disableProxy`、キャッシュインデックスページ（§13）。
-- `diskCache*Permissions`、`logFilePermissions` の設定可能化（§11, §14）。
+- `diskCache*Permissions` の設定可能化（§11）。（`logFilePermissions` は 2026-11-06 に実装済み。）
 - `proxyOutgoingAddress`、`useTemporarySourceAddress`（§3）。

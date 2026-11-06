@@ -31,6 +31,11 @@ type Config struct {
 	// missing, appended otherwise). Empty keeps logging on standard error.
 	LogFile string
 
+	// LogFilePermissions is the mode logFile is created with, less the
+	// umask; an existing file keeps its own. Polipo's default, 0640, keeps
+	// the log - which names every URL visited - from other users.
+	LogFilePermissions os.FileMode
+
 	// ClientTimeout, ServerTimeout and ServerIdleTimeout are Polipo's
 	// timeouts of the same names; 0 disables one. ClientTimeout bounds how
 	// long a client may take to send a request's headers, and how long its
@@ -216,6 +221,7 @@ func NewDefaultConfig() *Config {
 		DisableLocalInterface:   false,
 		MaxConcurrentRequests:   100,
 		LogFile:                 "",
+		LogFilePermissions:      0o640,             // Polipo's default (log.c)
 		ClientTimeout:           120 * time.Second, // Polipo's defaults
 		ServerTimeout:           90 * time.Second,
 		ServerIdleTimeout:       45 * time.Second,
@@ -283,6 +289,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{"allowedPorts", c.AllowedPorts.String()},
 		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
 		{"logFile", c.LogFile},
+		{"logFilePermissions", fmt.Sprintf("%#o", c.LogFilePermissions)},
 		{"disableLocalInterface", strconv.FormatBool(c.DisableLocalInterface)},
 		{"maxConcurrentRequests", strconv.Itoa(c.MaxConcurrentRequests)},
 		{"clientTimeout", c.ClientTimeout.String()},
@@ -535,6 +542,13 @@ func (c *Config) Set(key, val string) error {
 		c.LogLevel = level
 	case "logFile":
 		c.LogFile = val
+	case "logFilePermissions":
+		// Octal, as in Polipo's CONFIG_OCTAL: "0640" or "640".
+		mode, err := strconv.ParseUint(strings.TrimSpace(val), 8, 32)
+		if err != nil || mode > 0o777 {
+			return fmt.Errorf("invalid logFilePermissions '%s': want an octal mode such as 0640", val)
+		}
+		c.LogFilePermissions = os.FileMode(mode)
 	case "disableLocalInterface":
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
 	case "noDiskCache":

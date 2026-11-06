@@ -83,6 +83,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `tunnelIdleTimeout` | `0`(無効) | CONNECT トンネルの両方向とも、この時間データが流れなければトンネルを閉じる。IMAP IDLE や放置した SSH のように長く黙る接続があるので、既定は Polipo と同じく無効 (Polipo には無い設定) |
 | `disableVia` | `false` | `true` にすると、転送するリクエストとレスポンスに `Via` を付けない。既定では RFC 9110 に従って付ける (Polipo の既定は付けない) |
 | `logFile` | (なし) | ログの出力先ファイル。未指定なら標準エラー出力 |
+| `logFilePermissions` | `0640` | ログファイルを作るときの権限 (8進数。umask が差し引かれる)。既にあるファイルの権限は変えない |
 
 ドキュメント
 ------------
