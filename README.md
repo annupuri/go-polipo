@@ -26,6 +26,9 @@ Features
   (per HTTP freshness), and long-untouched entries (`diskCacheUnlinkTime`, default 32d),
   pruning emptied directories.
 - **Local Web Interface**: Configuration inspection at `/polipo/config`, traffic statistics since the last start (requests, cache hits and 304 revalidations, CONNECT tunnels, errors) at `/polipo/status`, plus runtime operations at `/polipo/reload` (reload `forbiddenFile`/`uncachableFile`/`forbiddenTunnelsFile`) and `/polipo/flush` (run the same disk-cache expiry as `-x`) without restarting.
+  It answers only requests whose Host names this machine (an IP address, `localhost`, the
+  hostname or `proxyAddress`), and refuses POSTs from other sites, so web pages cannot read
+  or operate it through DNS rebinding or a forged form.
 
 Command-line options
 --------------------

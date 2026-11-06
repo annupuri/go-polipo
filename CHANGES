@@ -213,6 +213,11 @@
         (GET /polipo/...); a proxied http://example.com/polipo/... is
         forwarded to that site.  Any other request addressed to
         go-polipo itself (such as /favicon.ico) gets 404 Not Found.
+        Unlike Polipo, such requests are answered only when their Host
+        names this machine (an IP address, localhost, the hostname or
+        proxyAddress), and a POST from another site is refused, so a
+        web page cannot read or operate the interface through DNS
+        rebinding or a forged form.
       - go-polipo adds itself to the Via of the requests and responses
         it forwards, as RFC 9110 section 7.6.3 requires; Polipo's
         default (disableVia = true) left it out.  Set disableVia to
