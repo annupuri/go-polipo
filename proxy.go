@@ -168,17 +168,36 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 			}
 			ph.stats.upstreamErrors.Add(1)
 			logf(ph.config.LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
-			// A serverTimeout running out is a 504 (RFC 9110 section
-			// 15.6.5), as in Polipo; any other failure is a 502.
-			code := http.StatusBadGateway
-			var ne net.Error
-			if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout() {
-				code = http.StatusGatewayTimeout
-			}
-			http.Error(w, err.Error(), code)
+			code, msg := upstreamErrorReply(err)
+			http.Error(w, msg, code)
 		},
 	}
 	return ph
+}
+
+// upstreamErrorReply chooses the status and body for a forwarded request the
+// origin could not answer. A serverTimeout running out is a 504 (RFC 9110
+// section 15.6.5), as in Polipo; any other failure is a 502.
+//
+// The body is the browser's to show, and to the page that made the request,
+// which reads it as its own origin. Go's error text names the address the
+// host resolved to, the port, the DNS server and whether the connection was
+// refused, so a page that points a hostname of its own at addresses on the
+// LAN could use it to map which machines and ports answer. The body
+// therefore says only what kind of failure it was, and the full error goes
+// to the log. A host that does not exist gets its own message, since that is
+// the failure a user most often needs to tell apart (a mistyped address) and
+// it reveals nothing the page does not already know.
+func upstreamErrorReply(err error) (int, string) {
+	var ne net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout() {
+		return http.StatusGatewayTimeout, "Gateway Timeout: the origin server did not respond in time"
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+		return http.StatusBadGateway, "Bad Gateway: the host name was not found"
+	}
+	return http.StatusBadGateway, "Bad Gateway: could not get a response from the origin server"
 }
 
 // Reload re-reads forbiddenFile, uncachableFile and forbiddenTunnelsFile from

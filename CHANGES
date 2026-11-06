@@ -218,6 +218,13 @@
         proxyAddress), and a POST from another site is refused, so a
         web page cannot read or operate the interface through DNS
         rebinding or a forged form.
+      - When the origin cannot be reached, the 502 or 504 body says only
+        what kind of failure it was (timed out, host name not found, or
+        a generic failure).  Polipo's error page gave the host, port and
+        system error; Go's error text would also name the resolved
+        address and the DNS server, which a web page reading its own
+        error responses could use to map the LAN.  The full error is
+        still logged.
       - go-polipo adds itself to the Via of the requests and responses
         it forwards, as RFC 9110 section 7.6.3 requires; Polipo's
         default (disableVia = true) left it out.  Set disableVia to
