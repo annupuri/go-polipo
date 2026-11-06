@@ -681,9 +681,21 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Limit concurrent requests (CONNECT tunnels are excluded, see above).
+	// A client that goes away while its request waits for a slot cancels
+	// the request's context; stop waiting then, rather than holding the
+	// connection and the goroutine until a slot frees up and fetching a
+	// response nobody will read. When the slot and the cancellation are
+	// ready together, select picks either, so check the context again.
 	if ph.semaphore != nil {
-		ph.semaphore <- struct{}{}
+		select {
+		case ph.semaphore <- struct{}{}:
+		case <-req.Context().Done():
+			return
+		}
 		defer func() { <-ph.semaphore }()
+		if req.Context().Err() != nil {
+			return
+		}
 	}
 
 	ph.handleForward(w, req)
