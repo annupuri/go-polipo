@@ -162,11 +162,22 @@ func serve(config *Config, reopenLog func() error) int {
 	}()
 
 	logf(config.LogLevel, LogInfo, "go-polipo version %s starting on http://%s", Version, addr)
+	warnIfOpenProxy(config)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logf(config.LogLevel, LogError, "Server error: %v", err)
 		return 1
 	}
 	return 0
+}
+
+// warnIfOpenProxy logs a warning when anyone who can reach the port may use
+// the proxy; see Config.IsOpenProxy.
+func warnIfOpenProxy(config *Config) {
+	if config.IsOpenProxy() {
+		logf(config.LogLevel, LogWarn, "Warning: listening on %q with allowedClients = %s and no authCredentials: "+
+			"anyone who can reach port %d can use this proxy",
+			config.ProxyAddress, strings.Join(config.AllowedClients, ", "), config.ProxyPort)
+	}
 }
 
 // newServer builds the client-facing server. clientTimeout bounds a client's

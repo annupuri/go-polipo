@@ -72,7 +72,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `forbiddenTunnelsFile` | (なし) | CONNECT (HTTPS トンネル) 用のホスト単位ブロックリスト。`forbiddenFile` とは別扱いで、こちらはサブドメインに広がらない完全一致のみ |
 | `socksParentProxy` | (なし) | 親 SOCKS プロキシ (`host:port`) |
 | `parentProxy` | (なし) | 親 HTTP プロキシ (`host:port`) |
-| `allowedClients` | `127.0.0.1, ::1` | 接続を許可するクライアント (IP / CIDR / `all`) |
+| `allowedClients` | `127.0.0.1, ::1` | 接続を許可するクライアント (IP / CIDR / `all`)。ループバック以外で待ち受け、`all` を指定し、`authCredentials` を設定していないと、ポートに届く人なら誰でも使えるため、起動時に警告を出す |
 | `tunnelAllowedPorts` | `22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418` | CONNECT を許可するポート |
 | `forbidLocalDestinations` | `true` | このマシンやそのリンク(127.0.0.0/8、::1、0.0.0.0/8、169.254.0.0/16、fe80::/10、マルチキャスト)への転送と CONNECT を拒否する。名前解決した後のアドレスで判定する。親プロキシ経由のときは判定しない (Polipo には無い設定) |
 | `forbidPrivateDestinations` | `false` | `true` にすると、プライベートアドレス(10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、fc00::/7、100.64.0.0/10)への転送と CONNECT も拒否する |
