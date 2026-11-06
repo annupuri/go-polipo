@@ -73,7 +73,7 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
-| `parentProxy` | (unset) | ✅ | HTTP parent via `http.Transport.Proxy`. |
+| `parentProxy` | (unset) | ✅ | HTTP parent via `http.Transport.Proxy`. Polipo took a bare `host:port`; Go's Transport also accepts `user:password@host:port` and sends those credentials, so since 2026-11-06 the password in such a value (and in `socksParentProxy`) is shown as `xxxxx` on `-v`, `/polipo/config` and in the log (`redactProxyURL`). It used to be shown as written. |
 | `parentAuthCredentials` | (unset) | ✅ | **Implemented (resolved 2026-09-13).** A `"user:password"` string is base64-encoded as-is and sent as `Proxy-Authorization: Basic ...` on every request forwarded through `parentProxy`, matching Polipo's `buildServerAuthHeaders` (`auth.c`) exactly - confirmed from the vendored C history, not guessed. Added via a wrapping `http.RoundTripper` rather than `ReverseProxy`'s `Director`, since `Director`-set headers are discarded: `ReverseProxy` strips hop-by-hop headers (`Proxy-Authorization` included) immediately after `Director` returns. |
 | `socksParentProxy` | (unset) | ✅ | Via `golang.org/x/net/proxy`. |
 | `socksProxyType` | `socks5` | ✅ | **Only `socks5` accepted (resolved 2026-09-11).** `golang.org/x/net/proxy` speaks SOCKS5 only; `Config.Set` now rejects any other value (`socks4a`, typos) with a startup error instead of storing it and dialing SOCKS5 regardless. SOCKS4/4a is deliberately not implemented — no RFC, no IPv6/auth, and no modern SOCKS proxy needs it. |

@@ -388,6 +388,33 @@ func TestPasswordEntriesAreRedacted(t *testing.T) {
 	}
 }
 
+// A parent proxy written with credentials works (Go's Transport takes them
+// from the URL), so its password must not show on -v or the config page.
+func TestParentProxyPasswordHidden(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"user:secret@squid.example:3128", "user:xxxxx@squid.example:3128"},
+		{"http://user:secret@squid.example:3128", "http://user:xxxxx@squid.example:3128"},
+		{"http://user:p@ss@squid.example:3128", "http://user:xxxxx@squid.example:3128"},
+		{"user@squid.example:3128", "user@squid.example:3128"},
+		{"squid.example:3128", "squid.example:3128"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := redactProxyURL(tt.raw); got != tt.want {
+			t.Errorf("redactProxyURL(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+
+	c := NewDefaultConfig()
+	c.ParentProxy = "http://bob:hunter2@squid.example:3128"
+	c.SocksParentProxy = "carol:s3cret@socks.example:1080"
+	for _, e := range c.Entries() {
+		if strings.Contains(e.Value, "hunter2") || strings.Contains(e.Value, "s3cret") {
+			t.Errorf("%s entry = %q shows the password", e.Name, e.Value)
+		}
+	}
+}
+
 func TestRelaxTransparencyTristate(t *testing.T) {
 	c := NewDefaultConfig()
 

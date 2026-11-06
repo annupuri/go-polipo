@@ -154,6 +154,8 @@
 ### Parent proxies
 
 # parentProxy = "squid.example.org:3128"      # upstream HTTP proxy
+# Credentials belong in parentAuthCredentials.  "user:password@host:port"
+# also works; its password is shown as xxxxx on -v and /polipo/config.
 # parentAuthCredentials = user:password       # Basic credentials for parentProxy
 # socksParentProxy = "localhost:9050"         # upstream SOCKS5 proxy
 # socksAuthCredentials = user:password        # username/password for socksParentProxy

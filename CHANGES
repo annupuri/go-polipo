@@ -155,7 +155,10 @@
     a 504.
   * Parent proxies: HTTP via parentProxy, SOCKS5 via socksParentProxy
     (golang.org/x/net/proxy), each with its own optional credentials
-    (parentAuthCredentials, socksAuthCredentials).  socksProxyType
+    (parentAuthCredentials, socksAuthCredentials).  A password written
+    into parentProxy itself ("user:password@host:port", which Go's
+    Transport also honours) is shown as xxxxx on -v, /polipo/config and
+    in the log.  socksProxyType
     accepts only "socks5"; a "socks4a" value (which Polipo allowed, and
     which earlier go-polipo stored but then ignored, dialing SOCKS5
     anyway) is now a configuration error.
