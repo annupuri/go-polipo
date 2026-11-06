@@ -957,7 +957,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	clientConn, _, err := hijacker.Hijack()
+	clientConn, brw, err := hijacker.Hijack()
 	if err != nil {
 		logf(ph.config.LogLevel, LogError, "CONNECT failed: hijack error (target=%s): %v", req.RequestURI, err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -980,6 +980,22 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	defer destConn.Close()
+
+	// A client may send the first bytes of the tunnel (a TLS ClientHello,
+	// say) right behind the CONNECT headers without waiting for the 200.
+	// The server has then already read them into brw, past the headers;
+	// they must go to the destination first, as Polipo's tunnel did with
+	// what was left in its buffer. The tunnel then copies between the raw
+	// connections, which keeps the kernel's splice path open.
+	if n := brw.Reader.Buffered(); n > 0 {
+		early, _ := brw.Reader.Peek(n)
+		if _, err := destConn.Write(early); err != nil {
+			ph.stats.tunnelFailures.Add(1)
+			logf(ph.config.LogLevel, LogError, "CONNECT failed: write to %s: %v", req.RequestURI, err)
+			clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+			return
+		}
+	}
 
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	ph.stats.tunnels.Add(1)
