@@ -27,7 +27,7 @@ func TestStatsCountHitMissAndRevalidation(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -61,7 +61,7 @@ func TestStatsCountHitMissAndRevalidation(t *testing.T) {
 }
 
 func TestStatsCountDeniedAndOriginErrors(t *testing.T) {
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 
 	serveOnce(ph, http.MethodGet, "http://example.com:25/")         // port not in allowedPorts
 	serveOnce(ph, http.MethodGet, "http://"+deadLoopback+":9999/x") // origin unreachable
@@ -78,7 +78,7 @@ func TestStatsCountDeniedAndOriginErrors(t *testing.T) {
 }
 
 func TestStatusPage(t *testing.T) {
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	ph.stats.requests.Add(4)
 	ph.stats.cacheHits.Add(1)
 

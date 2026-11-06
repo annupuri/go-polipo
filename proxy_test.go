@@ -23,12 +23,18 @@ import (
 	"time"
 )
 
+// newTestConfig returns the configuration the proxy tests start from: the
+// defaults, adjusted where a default would stand in the way of a test.
+func newTestConfig() *Config {
+	return NewDefaultConfig()
+}
+
 func newTestHandler(cfg *Config) *ProxyHandler {
 	return NewProxyHandler(cfg, NewCacheManager(cfg), NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 }
 
 func TestProxyAllowedClients(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.AllowedClients = []string{"192.168.1.1"}
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
@@ -63,7 +69,7 @@ func TestProxyAllowedClients(t *testing.T) {
 }
 
 func TestProxyLocalInterface(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	uncachable := NewForbiddenList()
@@ -122,7 +128,7 @@ func TestProxyLocalInterfaceNotForProxiedURLs(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/polipo/"},
 		{http.MethodGet, "/polipo/config"},
@@ -150,7 +156,7 @@ func TestProxyOtherLocalFormIsNotFound(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 
-	disabled := NewDefaultConfig()
+	disabled := newTestConfig()
 	disabled.DisableLocalInterface = true
 	for _, tc := range []struct {
 		name   string
@@ -158,9 +164,9 @@ func TestProxyOtherLocalFormIsNotFound(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"favicon", NewDefaultConfig(), http.MethodGet, "/favicon.ico"},
-		{"root", NewDefaultConfig(), http.MethodGet, "/"},
-		{"POST elsewhere", NewDefaultConfig(), http.MethodPost, "/form"},
+		{"favicon", newTestConfig(), http.MethodGet, "/favicon.ico"},
+		{"root", newTestConfig(), http.MethodGet, "/"},
+		{"POST elsewhere", newTestConfig(), http.MethodPost, "/form"},
 		{"local interface disabled", disabled, http.MethodGet, "/polipo/"},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
@@ -177,7 +183,7 @@ func TestProxyOtherLocalFormIsNotFound(t *testing.T) {
 }
 
 func TestProxyForbiddenFiltering(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
 	forbidden.Domains = []string{"badsite.com"}
@@ -200,7 +206,7 @@ func TestProxyForbiddenFiltering(t *testing.T) {
 // site is ever moved to a place without ph in scope.
 func TestProxyLogLevelGatesDenialLogging(t *testing.T) {
 	newHandler := func(logLevel int) *ProxyHandler {
-		cfg := NewDefaultConfig()
+		cfg := newTestConfig()
 		cfg.LogLevel = logLevel
 		forbidden := NewForbiddenList()
 		forbidden.Domains = []string{"badsite.com"}
@@ -234,7 +240,7 @@ func TestProxyReload(t *testing.T) {
 	uncachablePath := dir + "/uncachable"
 	forbiddenTunnelsPath := dir + "/forbiddenTunnels"
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ForbiddenFile = forbiddenPath
 	cfg.UncachableFile = uncachablePath
 	cfg.ForbiddenTunnelsFile = forbiddenTunnelsPath
@@ -294,7 +300,7 @@ func TestProxyReloadEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	forbiddenPath := dir + "/forbidden"
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ForbiddenFile = forbiddenPath
 	ph := newTestHandler(cfg)
 
@@ -330,7 +336,7 @@ func TestProxyReloadEndpoint(t *testing.T) {
 
 func TestProxyFlushEndpoint(t *testing.T) {
 	dir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = dir
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -376,7 +382,7 @@ func TestProxyFlushEndpoint(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg2 := NewDefaultConfig()
+	cfg2 := newTestConfig()
 	cfg2.DiskCacheRoot = t.TempDir()
 	cfg2.DisableLocalInterface = true
 	ph2 := newTestHandler(cfg2)
@@ -390,7 +396,7 @@ func TestProxyFlushEndpoint(t *testing.T) {
 }
 
 func TestProxyFlushEndpointErrorWhenNoDiskCache(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = "" // disk cache disabled -> Expire() errors
 	ph := newTestHandler(cfg)
 
@@ -416,7 +422,7 @@ func TestProxyHandleForward(t *testing.T) {
 
 	// 2. Setup ProxyHandler
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
@@ -448,7 +454,7 @@ func TestProxyHandleForward(t *testing.T) {
 }
 
 func TestProxyHandleConnectInvalidPort(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.TunnelAllowedPorts = PortSet{{443, 443}} // only allow 443
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
@@ -468,7 +474,7 @@ func TestProxyHandleConnectInvalidPort(t *testing.T) {
 }
 
 func TestProxyAllowedClientsCIDR(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.AllowedClients = []string{"192.168.2.0/24", "10.1.0.0/16"}
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
@@ -498,7 +504,7 @@ func TestProxyAllowedClientsCIDR(t *testing.T) {
 }
 
 func TestProxyConnectFailureCases(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.TunnelAllowedPorts = PortSet{{443, 443}}
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
@@ -540,7 +546,7 @@ func TestProxyConnectFailureCases(t *testing.T) {
 }
 
 func TestProxyForbiddenConnect(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.TunnelAllowedPorts = PortSet{{443, 443}}
 	cm := NewCacheManager(cfg)
 	forbidden := NewForbiddenList()
@@ -560,7 +566,7 @@ func TestProxyForbiddenConnect(t *testing.T) {
 }
 
 func TestProxyForbiddenTunnelsFile(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.TunnelAllowedPorts = PortSet{{443, 443}}
 	cm := NewCacheManager(cfg)
 	forbiddenTunnels := NewForbiddenList()
@@ -662,7 +668,7 @@ func TestNormalizeProxyURL(t *testing.T) {
 }
 
 func TestCreateTransportParentProxy(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ParentProxy = "127.0.0.1:3128"
 	ph := newTestHandler(cfg)
 
@@ -675,7 +681,7 @@ func TestCreateTransportParentProxy(t *testing.T) {
 	}
 
 	// A malformed parent proxy leaves Proxy unset rather than crashing.
-	cfg2 := NewDefaultConfig()
+	cfg2 := newTestConfig()
 	cfg2.ParentProxy = "http://%zz"
 	if newTestHandler(cfg2).transport.Proxy != nil {
 		t.Error("expected transport.Proxy to stay nil for malformed parentProxy")
@@ -690,7 +696,7 @@ func TestParentProxyAuthCredentials(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ParentProxy = strings.TrimPrefix(backend.URL, "http://")
 	cfg.ParentAuthCredentials = "alice:secret"
 	ph := newTestHandler(cfg)
@@ -720,7 +726,7 @@ func TestParentProxyNoAuthHeaderWithoutCredentials(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ParentProxy = strings.TrimPrefix(backend.URL, "http://")
 	// ParentAuthCredentials left empty.
 	ph := newTestHandler(cfg)
@@ -751,7 +757,7 @@ func TestDialContextDirect(t *testing.T) {
 		}
 	}()
 
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	conn, err := ph.dialContext(context.Background(), "tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatalf("dialContext direct failed: %v", err)
@@ -767,7 +773,7 @@ func TestDialContextDirect(t *testing.T) {
 const deadLoopback = "[::1]"
 
 func TestDialContextSocks(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.SocksParentProxy = deadLoopback + ":1" // nothing listening
 	ph := newTestHandler(cfg)
 	if ph.socksDialer == nil {
@@ -839,7 +845,7 @@ func TestSocksAuthCredentials(t *testing.T) {
 		done <- authResult{user: string(userBuf), pass: string(passBuf)}
 	}()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.SocksParentProxy = ln.Addr().String()
 	cfg.SocksAuthCredentials = "alice:s3cret"
 	ph := newTestHandler(cfg)
@@ -859,7 +865,7 @@ func TestSocksAuthCredentials(t *testing.T) {
 }
 
 func TestProxyAllowAll(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.AllowedClients = []string{"all"}
 	ph := newTestHandler(cfg)
 	if !ph.isClientAllowed("203.0.113.9:40000") {
@@ -869,7 +875,7 @@ func TestProxyAllowAll(t *testing.T) {
 
 func TestProxyServedFromCache(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -916,7 +922,7 @@ func TestCensoredHeadersStrippedFromRequest(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.CensoredHeaders = []string{"X-Secret"}
 	ph := newTestHandler(cfg)
 
@@ -948,7 +954,7 @@ func TestCensoredHeadersStrippedFromResponseAndCache(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cfg.CensoredHeaders = []string{"X-Secret"}
 	cm := NewCacheManager(cfg)
@@ -986,7 +992,7 @@ func TestCensorRefererFalseForwardsUnchanged(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	ph := newTestHandler(NewDefaultConfig()) // CensorReferer left at its default (0/"false")
+	ph := newTestHandler(newTestConfig()) // CensorReferer left at its default (0/"false")
 
 	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -1007,7 +1013,7 @@ func TestCensorRefererTrueDropsAlways(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.CensorReferer = 2 // true
 	ph := newTestHandler(cfg)
 
@@ -1034,7 +1040,7 @@ func TestCensorRefererMaybeDropsOnlyCrossOrigin(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.CensorReferer = 1 // maybe
 	ph := newTestHandler(cfg)
 
@@ -1067,7 +1073,7 @@ func TestProxyForwardUncachable(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	uncachable := NewForbiddenList()
@@ -1092,7 +1098,7 @@ func TestProxyForwardUncachable(t *testing.T) {
 }
 
 func TestProxyForwardRoundTripError(t *testing.T) {
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	// Port 9999 is in the default allowedPorts range but nothing listens there.
 	req := httptest.NewRequest(http.MethodGet, "http://"+deadLoopback+":9999/", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -1104,7 +1110,7 @@ func TestProxyForwardRoundTripError(t *testing.T) {
 }
 
 func TestProxyForwardPortNotAllowed(t *testing.T) {
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	// Port 25 (SMTP) is outside the default allowedPorts: the proxy must not
 	// open the connection, so this never reaches a backend.
 	req := httptest.NewRequest(http.MethodGet, "http://example.com:25/", nil)
@@ -1145,7 +1151,7 @@ func seedCacheEntry(t *testing.T, cm *CacheManager, target, body string, fresh b
 
 func TestProxyOfflineServesStaleFromCache(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cfg.ProxyOffline = true
 	cm := NewCacheManager(cfg)
@@ -1172,7 +1178,7 @@ func TestProxyOfflineServesStaleFromCache(t *testing.T) {
 
 func TestProxyOfflineServesFreshWithoutWarning(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cfg.ProxyOffline = true
 	cm := NewCacheManager(cfg)
@@ -1206,7 +1212,7 @@ func TestProxyOfflineMissNeverDialsOrigin(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cfg.ProxyOffline = true
 	ph := newTestHandler(cfg)
@@ -1229,7 +1235,7 @@ func TestProxyOfflineMissNeverDialsOrigin(t *testing.T) {
 
 func TestRelaxTransparencyMaybeServesStaleOnFailure(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cfg.RelaxTransparency = 1 // maybe
 	cm := NewCacheManager(cfg)
@@ -1258,7 +1264,7 @@ func TestRelaxTransparencyMaybeServesStaleOnFailure(t *testing.T) {
 
 func TestRelaxTransparencyFalseStillErrorsOnFailure(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	// RelaxTransparency left at its default (0/"false").
 	cm := NewCacheManager(cfg)
@@ -1286,7 +1292,7 @@ func TestRelaxTransparencyTrueServesStaleWithoutContactingOrigin(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cfg.RelaxTransparency = 2 // true
 	cm := NewCacheManager(cfg)
@@ -1325,7 +1331,7 @@ func TestStaleForbiddenEntryNotServedStale(t *testing.T) {
 			live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				io.WriteString(w, "live body")
 			}))
-			cfg := NewDefaultConfig()
+			cfg := newTestConfig()
 			cfg.DiskCacheRoot = t.TempDir()
 			target := live.URL + "/resource"
 			switch mode {
@@ -1374,7 +1380,7 @@ func TestRelaxTransparencyMaybeStillContactsOriginWhenStale(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cfg.RelaxTransparency = 1 // maybe: only failures fall back to stale
 	cm := NewCacheManager(cfg)
@@ -1470,7 +1476,7 @@ func TestAddConditionalHeadersVaryTrustsOnlyETag(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig() // DontTrustVaryETag defaults to 1 ("maybe")
+	cfg := newTestConfig() // DontTrustVaryETag defaults to 1 ("maybe")
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1503,7 +1509,7 @@ func TestAddConditionalHeadersVaryNoETagMeansFullRefetch(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1534,7 +1540,7 @@ func TestAddConditionalHeadersDontTrustVaryETagTrue(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cfg.DontTrustVaryETag = 2 // "true": never trust an ETag on a Vary'd entry
 	cm := NewCacheManager(cfg)
@@ -1566,7 +1572,7 @@ func TestVaryEntryNeverServedWithoutRevalidation(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1612,7 +1618,7 @@ func TestNoCacheEntryNeverServedWithoutRevalidation(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1664,7 +1670,7 @@ func TestConditionalRevalidation304ServesCachedBodyAndRefreshes(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1718,7 +1724,7 @@ func TestRevalidation304ReplacesStoredAge(t *testing.T) {
 			w.WriteHeader(http.StatusNotModified)
 		}))
 
-		cfg := NewDefaultConfig()
+		cfg := newTestConfig()
 		cfg.DiskCacheRoot = t.TempDir()
 		cm := NewCacheManager(cfg)
 		ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1754,7 +1760,7 @@ func TestRevalidation304ReplacesStoredAge(t *testing.T) {
 // age (RFC 9111 section 4) - the upstream Age it arrived with plus the time
 // since - from memory and from disk alike.
 func TestCacheHitSendsAge(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1799,7 +1805,7 @@ func TestOnlyIfCached(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1848,7 +1854,7 @@ func TestReloadRevalidatesFreshEntry(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1882,7 +1888,7 @@ func TestConditionalRevalidationSendsIfModifiedSince(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1915,7 +1921,7 @@ func TestConditionalRevalidation200ReplacesCache(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1955,7 +1961,7 @@ func TestNoConditionalHeadersWithoutValidators(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1982,7 +1988,7 @@ func TestClientConditionalHeaderNotOverridden(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -2016,7 +2022,7 @@ func TestClient304PassesThroughWithoutCachedEntry(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	ph := newTestHandler(cfg)
 
@@ -2038,7 +2044,7 @@ func TestRevalidation304WithoutCachedEntryIsAnError(t *testing.T) {
 	defer backend.Close()
 
 	tmpDir := t.TempDir()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
 	ph := newTestHandler(cfg)
 
@@ -2071,7 +2077,7 @@ func TestProxyConnectTunnel(t *testing.T) {
 	_, portStr, _ := net.SplitHostPort(backend.Addr().String())
 	port, _ := strconv.Atoi(portStr)
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.TunnelAllowedPorts = PortSet{{port, port}}
 	proxySrv := httptest.NewServer(newTestHandler(cfg))
 	defer proxySrv.Close()
@@ -2113,7 +2119,7 @@ func TestProxyConnectTunnel(t *testing.T) {
 }
 
 func TestProxyAuthCredentialsUnsetByDefault(t *testing.T) {
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	if !ph.isAuthorized(req) {
@@ -2122,7 +2128,7 @@ func TestProxyAuthCredentialsUnsetByDefault(t *testing.T) {
 }
 
 func TestProxyAuthCredentials(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.AuthCredentials = "alice:secret"
 	cfg.AuthRealm = "go-polipo"
 	ph := newTestHandler(cfg)
@@ -2205,7 +2211,7 @@ func TestProxyAuthCredentials(t *testing.T) {
 }
 
 func TestProxyConnectDialFailure(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.TunnelAllowedPorts = PortSet{{1, 1}}
 	proxySrv := httptest.NewServer(newTestHandler(cfg))
 	defer proxySrv.Close()
@@ -2298,7 +2304,7 @@ func TestIfRangeMatches(t *testing.T) {
 // would fail the test).
 func seedRangeTestCache(t *testing.T, body string) (ph *ProxyHandler, target string) {
 	t.Helper()
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph = NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -2448,7 +2454,7 @@ func TestRangeIgnoredForHead(t *testing.T) {
 
 func TestRangeServedViaProxyOffline(t *testing.T) {
 	const body = "0123456789"
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cfg.ProxyOffline = true
 	cm := NewCacheManager(cfg)
@@ -2500,7 +2506,7 @@ func TestStoreStreamsBodyWhileCaching(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	proxy := httptest.NewServer(NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList()))
@@ -2595,7 +2601,7 @@ func stallingOrigin(t *testing.T, reply string) string {
 // holding the request (and its maxConcurrentRequests slot) indefinitely.
 func TestServerTimeoutAwaitingHeaders(t *testing.T) {
 	origin := stallingOrigin(t, "")
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ServerTimeout = 200 * time.Millisecond
 	ph := newTestHandler(cfg)
 
@@ -2620,7 +2626,7 @@ func TestServerTimeoutAwaitingHeaders(t *testing.T) {
 // headers by then depends on buffering; either way the response fails.)
 func TestServerTimeoutMidBody(t *testing.T) {
 	origin := stallingOrigin(t, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n0123456789")
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ServerTimeout = 200 * time.Millisecond
 	proxySrv := httptest.NewServer(newTestHandler(cfg))
 	defer proxySrv.Close()
@@ -2662,7 +2668,7 @@ func TestServerTimeoutOnReusedConnection(t *testing.T) {
 	backend.Start()
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ServerTimeout = 400 * time.Millisecond
 	ph := newTestHandler(cfg)
 	for i := 0; i < 2; i++ {
@@ -2685,7 +2691,7 @@ func TestServerTimeoutOnReusedConnection(t *testing.T) {
 // TestClientTimeout: a client that connects and sends nothing is
 // disconnected after clientTimeout.
 func TestClientTimeout(t *testing.T) {
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.ClientTimeout = 200 * time.Millisecond
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -2730,7 +2736,7 @@ func TestTunnelOutlivesTimeouts(t *testing.T) {
 	_, portStr, _ := net.SplitHostPort(backend.Addr().String())
 	port, _ := strconv.Atoi(portStr)
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.TunnelAllowedPorts = PortSet{{port, port}}
 	cfg.ClientTimeout = 100 * time.Millisecond
 	cfg.ServerTimeout = 100 * time.Millisecond
@@ -2797,7 +2803,7 @@ func TestUnsafeRequestInvalidatesCache(t *testing.T) {
 			w.WriteHeader(tc.status)
 		}))
 
-		cfg := NewDefaultConfig()
+		cfg := newTestConfig()
 		cfg.DiskCacheRoot = t.TempDir()
 		cm := NewCacheManager(cfg)
 		ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -2843,7 +2849,7 @@ func TestMissingDateIsAppended(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -2897,7 +2903,7 @@ func TestRevalidation304UpdatesStoredHeaders(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := NewDefaultConfig()
+	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -2957,7 +2963,7 @@ func TestNoTransparentCompression(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	for _, path := range []string{"/plain", "/gzip"} {
 		req := httptest.NewRequest(http.MethodGet, backend.URL+path, nil)
 		req.RemoteAddr = "127.0.0.1:12345"
@@ -2990,7 +2996,7 @@ func TestVia(t *testing.T) {
 			io.WriteString(w, "body")
 		}))
 
-		cfg := NewDefaultConfig()
+		cfg := newTestConfig()
 		cfg.DiskCacheRoot = t.TempDir()
 		cfg.DisableVia = disable
 		ph := newTestHandler(cfg)
@@ -3029,8 +3035,8 @@ func TestViaLoopDetected(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	ph := newTestHandler(NewDefaultConfig())
-	other := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
+	other := newTestHandler(newTestConfig())
 	for _, tc := range []struct {
 		via  string
 		code int
@@ -3073,7 +3079,7 @@ func TestViaAfterRevalidation(t *testing.T) {
 			w.WriteHeader(http.StatusNotModified)
 		}))
 
-		cfg := NewDefaultConfig()
+		cfg := newTestConfig()
 		cfg.DiskCacheRoot = t.TempDir()
 		ph := newTestHandler(cfg)
 		own := "1.1 " + ph.viaName
@@ -3109,7 +3115,7 @@ func TestMaxForwards(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	ph := newTestHandler(NewDefaultConfig())
+	ph := newTestHandler(newTestConfig())
 	for _, tc := range []struct {
 		method, mf string
 		code       int
