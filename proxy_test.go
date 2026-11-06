@@ -33,6 +33,15 @@ func newTestConfig() *Config {
 	return cfg
 }
 
+// newLocalRequest builds a request addressed to go-polipo itself, as a
+// browser that opened http://127.0.0.1:8123/ sends it. httptest.NewRequest
+// alone would give it Host "example.com", which the local interface refuses.
+func newLocalRequest(method, target string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	req.Host = "127.0.0.1:8123"
+	return req
+}
+
 func newTestHandler(cfg *Config) *ProxyHandler {
 	return NewProxyHandler(cfg, NewCacheManager(cfg), NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 }
@@ -80,7 +89,7 @@ func TestProxyLocalInterface(t *testing.T) {
 	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
 	// Access /polipo/
-	req := httptest.NewRequest(http.MethodGet, "/polipo/", nil)
+	req := newLocalRequest(http.MethodGet, "/polipo/")
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 
@@ -95,7 +104,7 @@ func TestProxyLocalInterface(t *testing.T) {
 	}
 
 	// Access /polipo/config
-	reqConfig := httptest.NewRequest(http.MethodGet, "/polipo/config", nil)
+	reqConfig := newLocalRequest(http.MethodGet, "/polipo/config")
 	reqConfig.RemoteAddr = "127.0.0.1:12345"
 	rrConfig := httptest.NewRecorder()
 
@@ -173,7 +182,7 @@ func TestProxyOtherLocalFormIsNotFound(t *testing.T) {
 		{"POST elsewhere", newTestConfig(), http.MethodPost, "/form"},
 		{"local interface disabled", disabled, http.MethodGet, "/polipo/"},
 	} {
-		req := httptest.NewRequest(tc.method, tc.path, nil)
+		req := newLocalRequest(tc.method, tc.path)
 		req.RemoteAddr = "127.0.0.1:12345"
 		rr := httptest.NewRecorder()
 		newTestHandler(tc.cfg).ServeHTTP(rr, req)
@@ -309,7 +318,7 @@ func TestProxyReloadEndpoint(t *testing.T) {
 	ph := newTestHandler(cfg)
 
 	// GET must not trigger a reload (avoids prefetch/crawler side effects).
-	getReq := httptest.NewRequest(http.MethodGet, "/polipo/reload", nil)
+	getReq := newLocalRequest(http.MethodGet, "/polipo/reload")
 	getReq.RemoteAddr = "127.0.0.1:12345"
 	getRR := httptest.NewRecorder()
 	ph.ServeHTTP(getRR, getReq)
@@ -321,7 +330,7 @@ func TestProxyReloadEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	postReq := httptest.NewRequest(http.MethodPost, "/polipo/reload", nil)
+	postReq := newLocalRequest(http.MethodPost, "/polipo/reload")
 	postReq.RemoteAddr = "127.0.0.1:12345"
 	postRR := httptest.NewRecorder()
 	ph.ServeHTTP(postRR, postReq)
@@ -346,7 +355,7 @@ func TestProxyFlushEndpoint(t *testing.T) {
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
 	// GET must not trigger a flush (avoids prefetch/crawler side effects).
-	getReq := httptest.NewRequest(http.MethodGet, "/polipo/flush", nil)
+	getReq := newLocalRequest(http.MethodGet, "/polipo/flush")
 	getReq.RemoteAddr = "127.0.0.1:12345"
 	getRR := httptest.NewRecorder()
 	ph.ServeHTTP(getRR, getReq)
@@ -364,7 +373,7 @@ func TestProxyFlushEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	postReq := httptest.NewRequest(http.MethodPost, "/polipo/flush", nil)
+	postReq := newLocalRequest(http.MethodPost, "/polipo/flush")
 	postReq.RemoteAddr = "127.0.0.1:12345"
 	postRR := httptest.NewRecorder()
 	ph.ServeHTTP(postRR, postReq)
@@ -404,7 +413,7 @@ func TestProxyFlushEndpointErrorWhenNoDiskCache(t *testing.T) {
 	cfg.DiskCacheRoot = "" // disk cache disabled -> Expire() errors
 	ph := newTestHandler(cfg)
 
-	req := httptest.NewRequest(http.MethodPost, "/polipo/flush", nil)
+	req := newLocalRequest(http.MethodPost, "/polipo/flush")
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 	ph.ServeHTTP(rr, req)
@@ -2183,7 +2192,7 @@ func TestProxyAuthCredentials(t *testing.T) {
 	// configured to use it as a proxy): challenged with 401/WWW-Authenticate,
 	// against Authorization rather than Proxy-Authorization, matching
 	// Polipo's urlIsLocal split.
-	reqLocal := httptest.NewRequest(http.MethodGet, "/polipo/", nil)
+	reqLocal := newLocalRequest(http.MethodGet, "/polipo/")
 	reqLocal.RemoteAddr = "127.0.0.1:12345"
 	rrLocal := httptest.NewRecorder()
 	ph.ServeHTTP(rrLocal, reqLocal)
@@ -2194,7 +2203,7 @@ func TestProxyAuthCredentials(t *testing.T) {
 		t.Errorf("WWW-Authenticate = %q", got)
 	}
 
-	reqLocalOK := httptest.NewRequest(http.MethodGet, "/polipo/", nil)
+	reqLocalOK := newLocalRequest(http.MethodGet, "/polipo/")
 	reqLocalOK.RemoteAddr = "127.0.0.1:12345"
 	reqLocalOK.Header.Set("Authorization", basic("alice", "secret"))
 	rrLocalOK := httptest.NewRecorder()
