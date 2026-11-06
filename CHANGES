@@ -165,7 +165,9 @@
     for response headers and any silence mid-exchange, and running out
     is a 504; serverIdleTimeout (45s) is how long an unused upstream
     connection is kept.  An established CONNECT tunnel has no timeout,
-    as in Polipo.
+    as in Polipo, unless the new tunnelIdleTimeout (default 0, off) is
+    set: it closes a tunnel once neither direction has carried a byte
+    for that long.
   * Client access control (allowedClients) accepts bare IPs, CIDR ranges
     and "all"; the check uses the real TCP peer address and ignores
     forwarding headers.

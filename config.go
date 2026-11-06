@@ -39,10 +39,19 @@ type Config struct {
 	// send or accept the next bytes of an exchange. ServerIdleTimeout is how
 	// long an unused connection to the origin is kept for reuse. CONNECT
 	// tunnels, which may sit idle legitimately, are subject only to
-	// ServerTimeout's connect limit, as in Polipo.
+	// ServerTimeout's connect limit, as in Polipo, unless TunnelIdleTimeout
+	// is set.
 	ClientTimeout     time.Duration
 	ServerTimeout     time.Duration
 	ServerIdleTimeout time.Duration
+
+	// TunnelIdleTimeout, when non-zero, closes an established CONNECT tunnel
+	// once neither direction has carried a byte for that long. A peer that
+	// has gone away is already found by TCP keepalive; this is for peers
+	// that are alive but silent, or that stop reading. It is off by default,
+	// as Polipo had no such limit and some tunnels are rightly silent for a
+	// long time (IMAP IDLE, an idle SSH session). Not a Polipo variable.
+	TunnelIdleTimeout time.Duration
 
 	// DiskCacheUnlinkTime is the maximum age (since last access) a cached
 	// file may reach before `-x` removes it, regardless of HTTP freshness.
@@ -279,6 +288,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{"clientTimeout", c.ClientTimeout.String()},
 		{"serverTimeout", c.ServerTimeout.String()},
 		{"serverIdleTimeout", c.ServerIdleTimeout.String()},
+		{"tunnelIdleTimeout", c.TunnelIdleTimeout.String()},
 		{"proxyOffline", strconv.FormatBool(c.ProxyOffline)},
 		{"relaxTransparency", tristateString(c.RelaxTransparency)},
 		{"dontTrustVaryETag", tristateString(c.DontTrustVaryETag)},
@@ -575,6 +585,12 @@ func (c *Config) Set(key, val string) error {
 			return fmt.Errorf("invalid serverIdleTimeout '%s': %w", val, err)
 		}
 		c.ServerIdleTimeout = d
+	case "tunnelIdleTimeout":
+		d, err := parseDuration(val)
+		if err != nil {
+			return fmt.Errorf("invalid tunnelIdleTimeout '%s': %w", val, err)
+		}
+		c.TunnelIdleTimeout = d
 	case "diskCacheUnlinkTime":
 		d, err := parseDuration(val)
 		if err != nil {
