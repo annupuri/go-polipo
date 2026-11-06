@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -310,6 +311,35 @@ func (c *Config) Entries() []ConfigEntry {
 // credential is actually set (config.c never prints the value itself outside
 // of a machine-readable config dump, which go-polipo does not implement).
 const redactedPassword = "(hidden)"
+
+// IsOpenProxy reports whether anyone who can reach the proxy's port may use
+// it: it listens beyond the loopback interface, allowedClients admits every
+// address ("all", "*", 0.0.0.0/0 or ::/0) and authCredentials is unset.
+// That may be what the user wants on a trusted network, so go-polipo only
+// warns at startup; on an untrusted one it is an open relay for anyone's
+// traffic. Polipo had no warning, and with allowedClients unset it admitted
+// everyone, so changing proxyAddress alone was enough.
+func (c *Config) IsOpenProxy() bool {
+	if c.AuthCredentials != "" {
+		return false
+	}
+	if ip := net.ParseIP(c.ProxyAddress); ip != nil && ip.IsLoopback() ||
+		strings.EqualFold(c.ProxyAddress, "localhost") {
+		return false
+	}
+	for _, a := range c.AllowedClients {
+		a = strings.TrimSpace(a)
+		if a == "all" || a == "*" {
+			return true
+		}
+		if _, n, err := net.ParseCIDR(a); err == nil {
+			if ones, _ := n.Mask.Size(); ones == 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // redactProxyURL hides the password in a parent proxy setting written with
 // credentials, "user:password@host:port" or "http://user:password@host:port".

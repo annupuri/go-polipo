@@ -173,7 +173,10 @@
     for that long.
   * Client access control (allowedClients) accepts bare IPs, CIDR ranges
     and "all"; the check uses the real TCP peer address and ignores
-    forwarding headers.
+    forwarding headers.  The default is 127.0.0.1 and ::1, where Polipo's
+    unset default admitted everyone.  A warning is logged at startup when
+    the proxy listens beyond loopback, admits every client and requires
+    no authentication, so that anyone who can reach the port can use it.
   * Proxy authentication (authCredentials, authRealm) is now enforced;
     earlier go-polipo parsed and displayed these but never checked them.
     An unauthenticated or wrongly authenticated request is rejected with

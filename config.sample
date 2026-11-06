@@ -20,6 +20,9 @@
 # The check uses the real TCP peer address; forwarding headers are ignored.
 # allowedClients = 127.0.0.1, ::1
 # allowedClients = 127.0.0.1, 192.168.0.0/24
+# With a proxyAddress other than loopback, "all" (or 0.0.0.0/0, ::/0) and no
+# authCredentials, anyone who can reach the port can use the proxy;
+# go-polipo logs a warning at startup when that is the case.
 
 # Require clients to authenticate with these Basic credentials before using
 # the proxy.  Unset (the default) requires no authentication.  A request
