@@ -7,9 +7,13 @@ import (
 	"testing"
 )
 
-// serveOnce runs one request through ph from an allowed client.
+// serveOnce runs one request through ph from an allowed client. A bare path
+// is addressed to go-polipo itself; see newLocalRequest.
 func serveOnce(ph *ProxyHandler, method, target string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, nil)
+	if strings.HasPrefix(target, "/") {
+		req = newLocalRequest(method, target)
+	}
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 	ph.ServeHTTP(rr, req)
