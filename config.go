@@ -275,9 +275,9 @@ func (c *Config) Entries() []ConfigEntry {
 		{"forbiddenFile", c.ForbiddenFile},
 		{"uncachableFile", c.UncachableFile},
 		{"forbiddenTunnelsFile", c.ForbiddenTunnelsFile},
-		{"socksParentProxy", c.SocksParentProxy},
+		{"socksParentProxy", redactProxyURL(c.SocksParentProxy)},
 		{"socksProxyType", c.SocksProxyType},
-		{"parentProxy", c.ParentProxy},
+		{"parentProxy", redactProxyURL(c.ParentProxy)},
 		{"allowedClients", strings.Join(c.AllowedClients, ", ")},
 		{"authCredentials", redactedPassword},
 		{"authRealm", c.AuthRealm},
@@ -310,6 +310,27 @@ func (c *Config) Entries() []ConfigEntry {
 // credential is actually set (config.c never prints the value itself outside
 // of a machine-readable config dump, which go-polipo does not implement).
 const redactedPassword = "(hidden)"
+
+// redactProxyURL hides the password in a parent proxy setting written with
+// credentials, "user:password@host:port" or "http://user:password@host:port".
+// Polipo's parentProxy was a bare host:port, with the credentials in
+// parentAuthCredentials, but Go's Transport also takes them from the URL, so
+// such a setting works and its password must not reach the config page, -v
+// or the log. The user name stays, as in url.URL.Redacted.
+func redactProxyURL(raw string) string {
+	at := strings.LastIndex(raw, "@")
+	if at < 0 {
+		return raw
+	}
+	start := 0
+	if i := strings.Index(raw, "://"); i >= 0 && i < at {
+		start = i + len("://")
+	}
+	if user, _, ok := strings.Cut(raw[start:at], ":"); ok {
+		return raw[:start] + user + ":xxxxx" + raw[at:]
+	}
+	return raw
+}
 
 // tristateString renders a Polipo CONFIG_TRISTATE value (0/1/2) the way `-v`
 // and the config page show it: "false", "maybe", "true".

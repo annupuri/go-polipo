@@ -73,7 +73,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 | 変数 | v1.1.x 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
-| `parentProxy` | (未設定) | ✅ | `http.Transport.Proxy` 経由の HTTP 親プロキシ。 |
+| `parentProxy` | (未設定) | ✅ | `http.Transport.Proxy` 経由の HTTP 親プロキシ。Polipo は `host:port` だけを受け付けたが、Go の Transport は `user:password@host:port` も受け付けて、その認証情報を送る。そのため 2026-11-06 から、このような値（と `socksParentProxy`）のパスワードは、`-v`、`/polipo/config`、ログで `xxxxx` と表示する（`redactProxyURL`）。以前は書いたとおりに表示していた。 |
 | `parentAuthCredentials` | (未設定) | ✅ | **実装済み（2026-09-13 解決）。** `"user:password"` 文字列をそのまま（ユーザー名/パスワードに分割せず）base64 エンコードし、`parentProxy` 経由の全リクエストに `Proxy-Authorization: Basic ...` として付与する。推測ではなくベンダリングされた C 版の履歴（`auth.c` の `buildServerAuthHeaders`）そのままの挙動。`ReverseProxy` の `Director` ではなく、それをラップする `http.RoundTripper` 経由で付与している — `Director` はホップバイホップヘッダ（`Proxy-Authorization` を含む）が返却直後に剥がされてしまうため、そこで設定しても実際の通信には乗らない。 |
 | `socksParentProxy` | (未設定) | ✅ | `golang.org/x/net/proxy` 経由。 |
 | `socksProxyType` | `socks5` | ✅ | **`socks5` のみ受理（2026-09-11 解決）。** `golang.org/x/net/proxy` は SOCKS5 専用。`Config.Set` が `socks4a` やタイプミスを起動時エラーで弾くようにした（従来は保持だけして結局 SOCKS5 で接続）。SOCKS4/4a は意図的に非実装 — RFC が無く、認証も IPv6 も無く、現代の SOCKS プロキシで必要とされない。 |

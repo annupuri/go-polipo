@@ -96,7 +96,7 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		}
 		dialer, err := proxy.SOCKS5("tcp", config.SocksParentProxy, auth, proxy.Direct)
 		if err != nil {
-			logf(config.LogLevel, LogWarn, "Warning: invalid socksParentProxy %q: %v", config.SocksParentProxy, err)
+			logf(config.LogLevel, LogWarn, "Warning: invalid socksParentProxy %q: %v", redactProxyURL(config.SocksParentProxy), err)
 		} else {
 			ph.socksDialer = dialer
 		}
@@ -564,7 +564,7 @@ func (ph *ProxyHandler) createTransport() *http.Transport {
 			tr.Proxy = http.ProxyURL(parentURL)
 			ph.viaParent = true
 		} else {
-			logf(ph.config.LogLevel, LogWarn, "Warning: invalid parentProxy URL: %s", ph.config.ParentProxy)
+			logf(ph.config.LogLevel, LogWarn, "Warning: invalid parentProxy URL: %s", redactProxyURL(ph.config.ParentProxy))
 		}
 	}
 

@@ -3163,3 +3163,20 @@ func TestMaxForwards(t *testing.T) {
 		}
 	}
 }
+
+// An invalid parentProxy is reported in the log without its password.
+func TestInvalidParentProxyWarningHidesPassword(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(io.Discard)
+
+	cfg := newTestConfig()
+	cfg.ParentProxy = "http://bob:hunter2@[not-a-host"
+	newTestHandler(cfg)
+	if !strings.Contains(buf.String(), "invalid parentProxy") {
+		t.Fatalf("no warning logged: %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "hunter2") {
+		t.Errorf("warning shows the password: %q", buf.String())
+	}
+}
