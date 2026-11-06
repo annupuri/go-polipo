@@ -194,6 +194,8 @@
   * On Unix, SIGUSR1 and SIGUSR2 reopen logFile, as in Polipo, so log
     rotation works.  If the file cannot be opened again, go-polipo keeps
     logging to the old one instead of exiting as Polipo did.
+    logFilePermissions (default 0640, as in Polipo) sets the mode a new
+    log file is created with.
   * Incompatible changes from Polipo 1.x:
       - Build system is "go build" / the provided Makefile; the autoconf
         style options and PLATFORM_DEFINES are gone.

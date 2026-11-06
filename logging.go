@@ -43,19 +43,23 @@ func logf(logLevel, category int, format string, args ...any) {
 type logFileWriter struct {
 	mu   sync.Mutex
 	path string
+	perm os.FileMode
 	f    *os.File
 }
 
-func openLogFileWriter(path string) (*logFileWriter, error) {
-	f, err := openLogFile(path)
+func openLogFileWriter(path string, perm os.FileMode) (*logFileWriter, error) {
+	f, err := openLogFile(path, perm)
 	if err != nil {
 		return nil, err
 	}
-	return &logFileWriter{path: path, f: f}, nil
+	return &logFileWriter{path: path, perm: perm, f: f}, nil
 }
 
-func openLogFile(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+// openLogFile opens path for appending. perm (logFilePermissions) applies
+// only when the file is created, less the umask, as with Polipo's open(2);
+// an existing file keeps its mode.
+func openLogFile(path string, perm os.FileMode) (*os.File, error) {
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, perm)
 }
 
 func (w *logFileWriter) Write(p []byte) (int, error) {
@@ -68,7 +72,7 @@ func (w *logFileWriter) Write(p []byte) (int, error) {
 // logging carries on in the current file and the error is returned - unlike
 // Polipo, which exited, so a failed log rotation does not take the proxy down.
 func (w *logFileWriter) Reopen() error {
-	f, err := openLogFile(w.path)
+	f, err := openLogFile(w.path, w.perm)
 	if err != nil {
 		return err
 	}

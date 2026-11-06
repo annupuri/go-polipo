@@ -110,7 +110,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// use on Windows, where a -H windowsgui build has no console for stderr.
 	var reopenLog func() error
 	if config.LogFile != "" {
-		w, err := openLogFileWriter(config.LogFile)
+		w, err := openLogFileWriter(config.LogFile, config.LogFilePermissions)
 		if err != nil {
 			fmt.Fprintf(stderr, "Cannot open logFile %q: %v\n", config.LogFile, err)
 			return 1

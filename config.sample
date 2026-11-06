@@ -220,3 +220,8 @@
 # background use on Windows (a "-H windowsgui" build has no console).
 # On Unix, SIGUSR1 or SIGUSR2 reopens it, for use with log rotation.
 # logFile = "C:/Users/you/AppData/Local/go-polipo/polipo.log"
+
+# Mode the log file is created with (octal, less the umask).  The log names
+# every URL fetched, so other users should not read it.  An existing file
+# keeps its mode; chmod it yourself to tighten it.  Ignored on Windows.
+# logFilePermissions = 0640

@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -51,7 +52,7 @@ func TestLogDefaultLevelMatchesPolipo(t *testing.T) {
 func TestLogFileWriterReopen(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "polipo.log")
-	w, err := openLogFileWriter(path)
+	w, err := openLogFileWriter(path, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,7 @@ func TestLogFileWriterReopenFailureKeepsLogging(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "polipo.log")
-	w, err := openLogFileWriter(path)
+	w, err := openLogFileWriter(path, 0o640)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,5 +106,45 @@ func TestLogFileWriterReopenFailureKeepsLogging(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(filepath.Join(moved, "polipo.log")); string(got) != "kept\n" {
 		t.Errorf("old file = %q, want logging to continue there", got)
+	}
+}
+
+// TestLogFilePermissions: a new log file gets logFilePermissions (Polipo's
+// 0640 by default), not 0644; an existing file keeps its own mode.
+func TestLogFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes")
+	}
+	if got := NewDefaultConfig().LogFilePermissions; got != 0o640 {
+		t.Errorf("default logFilePermissions = %#o, want 0640", got)
+	}
+	cfg := NewDefaultConfig()
+	if err := cfg.Set("logFilePermissions", "600"); err != nil || cfg.LogFilePermissions != 0o600 {
+		t.Errorf("Set 600: mode = %#o, err = %v", cfg.LogFilePermissions, err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "polipo.log")
+	w, err := openLogFileWriter(path, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("new log file mode = %v, err = %v; want 0600", fi.Mode().Perm(), err)
+	}
+
+	existing := filepath.Join(dir, "existing.log")
+	if err := os.WriteFile(existing, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(existing, 0o644)
+	w, err = openLogFileWriter(existing, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if fi, _ := os.Stat(existing); fi.Mode().Perm() != 0o644 {
+		t.Errorf("existing log file mode = %v, want it left at 0644", fi.Mode().Perm())
 	}
 }
