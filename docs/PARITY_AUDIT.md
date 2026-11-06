@@ -87,6 +87,7 @@ at the end groups findings by how much they matter before a public release.
 | Bytes sent right behind the CONNECT headers | forwarded | ✅ | **Fixed (2026-11-06).** A client may send the first tunnel bytes (a TLS ClientHello, say) without waiting for the `200`. The server has then already read them past the headers, and go-polipo used to drop them along with the rest of the hijacked connection's read buffer, so such a tunnel hung. They are now written to the destination before the tunnel starts, as Polipo's `makeTunnel` did with what was left in its buffer. The tunnel itself still copies between the raw connections. |
 | Bidirectional half-close tunnelling | — | ✅ | `tunnel()` waits for both directions; handles HTTP/2-over-CONNECT. |
 | CONNECT vs. request-concurrency limit | — | ✅ | CONNECT deliberately excluded from `maxConcurrentRequests` (recent fix). |
+| Client leaving while waiting for a `maxConcurrentRequests` slot | — | ✅ | **Fixed (2026-11-06).** `maxConcurrentRequests` is go-polipo's own global limit; Polipo had none. A request waiting for a slot now stops as soon as its client hangs up (the request's context is cancelled). It used to hold its connection and goroutine until a slot freed, then went on to the Transport, which failed on the cancelled context and counted and logged it as an origin error. |
 
 ## 7. HTTP header handling & privacy
 
