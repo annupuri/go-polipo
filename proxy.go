@@ -40,9 +40,11 @@ type ProxyHandler struct {
 
 	// Precomputed at construction so the request path stays allocation-free.
 	socksDialer proxy.Dialer // nil unless a SOCKS parent proxy is configured
-	// viaParent is true when the Transport sends forwarded requests to an
-	// HTTP parent proxy, so its dials reach the parent, not the origin.
+	// viaParent is true when an HTTP parent proxy is configured (parentURL):
+	// the Transport sends forwarded requests to it, so its dials reach the
+	// parent, not the origin, and CONNECT tunnels go through it too.
 	viaParent bool
+	parentURL *url.URL
 	allowAll  bool
 	allowIPs  []net.IP
 	allowNets []*net.IPNet
@@ -563,6 +565,7 @@ func (ph *ProxyHandler) createTransport() *http.Transport {
 		if parentURL, err := normalizeProxyURL(ph.config.ParentProxy); err == nil {
 			tr.Proxy = http.ProxyURL(parentURL)
 			ph.viaParent = true
+			ph.parentURL = parentURL
 		} else {
 			logf(ph.config.LogLevel, LogWarn, "Warning: invalid parentProxy URL: %s", redactProxyURL(ph.config.ParentProxy))
 		}
@@ -977,8 +980,16 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	}
 	defer clientConn.Close()
 
-	// Dial target server (via SOCKS if configured)
-	destConn, err := ph.dialContext(req.Context(), "tcp", req.RequestURI)
+	// Dial the target, or have the HTTP parent proxy do it (as Polipo did);
+	// either may go through the SOCKS parent. parentEarly is what the parent
+	// sent past its reply, for the client.
+	var destConn net.Conn
+	var parentEarly []byte
+	if ph.viaParent {
+		destConn, parentEarly, err = ph.dialViaParent(req.Context(), req.RequestURI)
+	} else {
+		destConn, err = ph.dialContext(req.Context(), "tcp", req.RequestURI)
+	}
 	if errors.Is(err, errForbiddenDestination) {
 		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: %v (target=%s)", err, req.RequestURI)
@@ -1010,6 +1021,11 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	}
 
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	if len(parentEarly) > 0 {
+		if _, err := clientConn.Write(parentEarly); err != nil {
+			return
+		}
+	}
 	ph.stats.tunnels.Add(1)
 	if t := ph.config.TunnelIdleTimeout; t > 0 {
 		if tunnelWithIdleTimeout(clientConn, destConn, t) {

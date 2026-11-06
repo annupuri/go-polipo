@@ -157,6 +157,8 @@
 ### Parent proxies
 
 # parentProxy = "squid.example.org:3128"      # upstream HTTP proxy
+# HTTPS (CONNECT) tunnels go through it too, as in Polipo: go-polipo sends
+# the parent "CONNECT host:port" with parentAuthCredentials.
 # Credentials belong in parentAuthCredentials.  "user:password@host:port"
 # also works; its password is shown as xxxxx on -v and /polipo/config.
 # parentAuthCredentials = user:password       # Basic credentials for parentProxy
