@@ -1,4 +1,4 @@
-4 September 2026: go-polipo 2.0.0:
+18 November 2026: go-polipo 2.0.0:
 
   * Complete rewrite in Go (requires Go 1.27.3 or later), forked from
     Polipo 1.1.1.  The single-threaded select/poll event loop is replaced
