@@ -37,6 +37,9 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
   `uncachableFile` / `forbiddenTunnelsFile` の再読み込み）と
   `/polipo/flush`（`-x` と同じディスクキャッシュの期限切れ処理を実行）を
   用意しています。
+  Host がこのマシンを指している(IP アドレス、`localhost`、ホスト名、`proxyAddress`)
+  リクエストにだけ応答し、ほかのサイトからの POST は拒否するので、Web ページが
+  DNS リバインディングや偽のフォームで管理画面を読んだり操作したりすることはできません。
 
 コマンドラインオプション
 ------------------------

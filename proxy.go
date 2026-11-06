@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,6 +55,12 @@ type ProxyHandler struct {
 	// go-polipo instances is not mistaken for one.
 	viaName string
 
+	// hostname is the machine's name, lower-cased, one of the Host values a
+	// request addressed to go-polipo itself may carry; see localHostAllowed.
+	hostname string
+	// crossOrigin refuses cross-site POSTs to the local interface.
+	crossOrigin *http.CrossOriginProtection
+
 	stats *proxyStats
 }
 
@@ -63,7 +70,11 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		config:       config,
 		cacheManager: cacheManager,
 		viaName:      "go-polipo-" + strings.ToLower(rand.Text()[:8]),
+		crossOrigin:  http.NewCrossOriginProtection(),
 		stats:        newProxyStats(),
+	}
+	if name, err := os.Hostname(); err == nil {
+		ph.hostname = strings.ToLower(name)
 	}
 	ph.forbidden.Store(forbidden)
 	ph.uncachable.Store(uncachable)
@@ -590,6 +601,27 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 1.4.5 A request addressed to go-polipo itself must name this machine
+	// in its Host, and a POST must not come from another site. Otherwise a
+	// web page could point a hostname of its own at this machine (DNS
+	// rebinding) and read /polipo/config or /polipo/status as same-origin,
+	// or have the browser submit a form to /polipo/flush. Polipo checked
+	// neither.
+	if isLocalForm(req) {
+		if !ph.localHostAllowed(req.Host) {
+			ph.stats.denied.Add(1)
+			logf(ph.config.LogLevel, LogForbidden, "Denied: %s asked for %s with Host %q", req.RemoteAddr, req.URL.Path, req.Host)
+			http.Error(w, "Forbidden: Host does not name this proxy", http.StatusForbidden)
+			return
+		}
+		if err := ph.crossOrigin.Check(req); err != nil {
+			ph.stats.denied.Add(1)
+			logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s from %s: %v", req.Method, req.URL.Path, req.RemoteAddr, err)
+			http.Error(w, "Forbidden: cross-site request", http.StatusForbidden)
+			return
+		}
+	}
+
 	// 1.5 Local Interface handle (Polipo local web page). Only a local-form
 	// request is addressed to go-polipo itself; an absolute-form
 	// http://example.com/polipo/... belongs to that origin and must be
@@ -782,6 +814,28 @@ func (ph *ProxyHandler) isClientAllowed(remoteAddr string) bool {
 // everything else with 407/Proxy-Authenticate.
 func isLocalForm(req *http.Request) bool {
 	return req.Method != http.MethodConnect && !req.URL.IsAbs()
+}
+
+// localHostAllowed reports whether host, the Host of a request addressed to
+// go-polipo itself, names this machine in a way a web page cannot choose: an
+// IP address, localhost, the machine's hostname or proxyAddress. A page that
+// points a hostname of its own at this machine sends that hostname, so it is
+// refused. An empty Host (an HTTP/1.0 client, never a browser) is allowed.
+func (ph *ProxyHandler) localHostAllowed(host string) bool {
+	if host == "" {
+		return true
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.Trim(host, "[]"), ".")
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	host = strings.ToLower(host)
+	return host == "localhost" ||
+		ph.hostname != "" && host == ph.hostname ||
+		host == strings.ToLower(ph.config.ProxyAddress)
 }
 
 // isAuthorized reports whether req carries valid proxy credentials. It
