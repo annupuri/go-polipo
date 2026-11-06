@@ -13,8 +13,8 @@
     already up is harmless: `true` just exits.
 
 .EXAMPLE
-    .\register-wsl-task.ps1 -User lyo
-    .\register-wsl-task.ps1 -Distro Debian -User alice
+    .\register-wsl-task.ps1 -User alice
+    .\register-wsl-task.ps1 -Distro Debian -User bob
 #>
 param(
     [string]$Distro = "Ubuntu",
