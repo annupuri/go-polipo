@@ -4,7 +4,9 @@
 # optional.  To use one, copy this to ~/.polipo or /etc/polipo/config and
 # uncomment the lines you want, or pass a path with "polipo -c <file>".
 #
-# Values may be quoted with " or '.  A '#' starts a comment.  Trailing
+# Values may be quoted with " or '.  A '#' starts a comment, except
+# inside quotes; inside "..." a backslash escapes the next character, as
+# in "a\"b".  Each element of a list may be quoted separately.  Trailing
 # "var=val" arguments on the command line override the file, e.g.
 #   polipo -c ~/.polipo proxyPort=8080
 #

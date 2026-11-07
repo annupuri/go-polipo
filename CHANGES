@@ -204,6 +204,12 @@
     logging to the old one instead of exiting as Polipo did.
     logFilePermissions (default 0640, as in Polipo) sets the mode a new
     log file is created with.
+  * Quoted values in the configuration file and in "var=val" arguments
+    are read as in Polipo: a '#' inside "..." is part of the value, not
+    a comment, a backslash there escapes the next character, and each
+    element of a list may be quoted on its own.  Earlier go-polipo cut
+    a quoted password such as "user:pa#ss" at the '#'.  '...' quotes,
+    which Polipo did not have, are also accepted and taken literally.
   * Incompatible changes from Polipo 1.x:
       - Build system is "go build" / the provided Makefile; the autoconf
         style options and PLATFORM_DEFINES are gone.
