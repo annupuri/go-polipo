@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -21,18 +23,51 @@ func NewForbiddenList() *ForbiddenList {
 	}
 }
 
-// Load reads and parses the domain file. logLevel gates the warning logged
-// for an invalid regex line (see logf); pass the owning Config's LogLevel.
-func (f *ForbiddenList) Load(filePath string, logLevel int) error {
-	if filePath == "" {
+// Load reads and parses the domain file. As in Polipo's parseDomainFile, a
+// directory stands for every file under it, read in lexical order; a file
+// in it that cannot be read is logged and skipped. A symbolic link to a
+// file is read, but a symbolic link to a directory is not followed. logLevel
+// gates the warnings logged for such files and for an invalid regex line
+// (see logf); pass the owning Config's LogLevel.
+func (f *ForbiddenList) Load(path string, logLevel int) error {
+	if path == "" {
 		return nil
 	}
 
-	file, err := os.Open(filePath)
+	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // It's fine if the file doesn't exist
 		}
+		return err
+	}
+	if !info.IsDir() {
+		return f.loadFile(path, logLevel)
+	}
+	return filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			logf(logLevel, LogWarn, "Warning: skipping %s: %v", p, err)
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			if target, err := os.Stat(p); err == nil && target.IsDir() {
+				return nil
+			}
+		}
+		if err := f.loadFile(p, logLevel); err != nil {
+			logf(logLevel, LogWarn, "Warning: skipping %s: %v", p, err)
+		}
+		return nil
+	})
+}
+
+// loadFile reads one domain file into f.
+func (f *ForbiddenList) loadFile(filePath string, logLevel int) error {
+	file, err := os.Open(filePath)
+	if err != nil {
 		return err
 	}
 	defer file.Close()

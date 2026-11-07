@@ -61,7 +61,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 
 | 変数 / 機能 | v1.1.x 既定 | 状態 | 備考 |
 | :--- | :--- | :--: | :--- |
-| `forbiddenFile` | `~/.polipo-forbidden` | ✅ | ドメインサフィックス + POSIX 風正規表現 → `403`（`forbidden.go`）。 |
+| `forbiddenFile` | `~/.polipo-forbidden` | ✅ | ドメインサフィックス + POSIX 風正規表現 → `403`（`forbidden.go`）。Polipo と同じく、パスにはディレクトリも指定でき、その場合は配下のファイルをすべて（名前順に）読む。Polipo と違い、ディレクトリ内のディレクトリへのシンボリックリンクはたどらない。`uncachableFile` と `forbiddenTunnelsFile` も同様。**2026-11-08 修正:** 以前はディレクトリを指定すると警告を出すだけで読み込みに失敗し、何もブロックされなかった。 |
 | `uncachableFile` | `~/.polipo-uncachable` | ✅ | 同じマッチャ。該当 URL は転送するがキャッシュしない。 |
 | `forbiddenUrl` | (null) | ❌ | ブロックしたリクエストを案内ページへリダイレクトできず、常に素の `403`。 |
 | `forbiddenRedirectCode` | `302` | ❌ | 同上。 |

@@ -65,6 +65,46 @@ func TestForbiddenMatchTunnel(t *testing.T) {
 	}
 }
 
+// A directory stands for every file under it, as in Polipo's
+// parseDomainFile: before, it failed to load and nothing was forbidden.
+func TestForbiddenLoadDirectory(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"b-ads":            "ads.example.com\n",
+		"a-trackers":       "tracker.example.com\n\\.gif$\n",
+		"sub/c-more":       "more.example.com # comment\n",
+		"sub/deeper/empty": "",
+	}
+	for name, content := range files {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A link to a directory is not followed, so its files are not read twice.
+	if err := os.Symlink(filepath.Join(dir, "sub"), filepath.Join(dir, "link-to-sub")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	fl := NewForbiddenList()
+	if err := fl.Load(dir, 0x07); err != nil {
+		t.Fatalf("Load(%s) error = %v", dir, err)
+	}
+	want := []string{"tracker.example.com", "ads.example.com", "more.example.com"}
+	if diff := cmp.Diff(want, fl.Domains); diff != "" {
+		t.Errorf("domains mismatch (-want +got):\n%s", diff)
+	}
+	if len(fl.Regexps) != 1 {
+		t.Errorf("got %d regexps, want 1", len(fl.Regexps))
+	}
+	if !fl.Match("http://ads.example.com/", "ads.example.com") {
+		t.Error("a host listed in a file in the directory is not forbidden")
+	}
+}
+
 func TestForbiddenLoad(t *testing.T) {
 	// Create a temporary forbidden file
 	tmpDir := t.TempDir()
