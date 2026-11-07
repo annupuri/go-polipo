@@ -122,6 +122,41 @@ func TestParseLine(t *testing.T) {
 	}
 }
 
+// Quoted values follow Polipo's parseAtom: a '#' inside quotes is not a
+// comment, a backslash escapes the next character inside "...", and each
+// list element may be quoted on its own.
+func TestParseLineQuotedValues(t *testing.T) {
+	tests := []struct {
+		line string
+		get  func(*Config) any
+		want any
+	}{
+		{`parentAuthCredentials = "user:pa#ss"`, func(c *Config) any { return c.ParentAuthCredentials }, "user:pa#ss"},
+		{`parentAuthCredentials = "user:pa#ss" # comment`, func(c *Config) any { return c.ParentAuthCredentials }, "user:pa#ss"},
+		{`parentAuthCredentials = 'user:pa#ss'`, func(c *Config) any { return c.ParentAuthCredentials }, "user:pa#ss"},
+		{`parentAuthCredentials = "a\"b\\c"`, func(c *Config) any { return c.ParentAuthCredentials }, `a"b\c`},
+		{`parentAuthCredentials = user:pass # comment`, func(c *Config) any { return c.ParentAuthCredentials }, "user:pass"},
+		{`authRealm = " spaced "`, func(c *Config) any { return c.AuthRealm }, " spaced "},
+		{`censoredHeaders = "From", "Cookie" # comment`, func(c *Config) any { return c.CensoredHeaders }, []string{"From", "Cookie"}},
+	}
+	for _, tt := range tests {
+		c := NewDefaultConfig()
+		if err := c.ParseLine(tt.line); err != nil {
+			t.Errorf("ParseLine(%q) error = %v", tt.line, err)
+			continue
+		}
+		if got := tt.get(c); !cmp.Equal(got, tt.want) {
+			t.Errorf("ParseLine(%q) = %q, want %q", tt.line, got, tt.want)
+		}
+	}
+
+	for _, line := range []string{`authRealm = "open`, `authRealm = 'open`} {
+		if err := NewDefaultConfig().ParseLine(line); err == nil {
+			t.Errorf("ParseLine(%q) = nil error, want unterminated quote", line)
+		}
+	}
+}
+
 func TestSet(t *testing.T) {
 	c := NewDefaultConfig()
 

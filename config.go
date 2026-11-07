@@ -495,11 +495,6 @@ func (c *Config) ParseLine(line string) error {
 		return nil
 	}
 
-	// Remove trailing comments (e.g. key = value # comment)
-	if idx := strings.Index(line, "#"); idx != -1 {
-		line = strings.TrimSpace(line[:idx])
-	}
-
 	parts := strings.SplitN(line, "=", 2)
 	if len(parts) != 2 {
 		// Variable with no value, or malformed
@@ -507,15 +502,53 @@ func (c *Config) ParseLine(line string) error {
 	}
 
 	key := strings.TrimSpace(parts[0])
-	val := strings.TrimSpace(parts[1])
-
-	// Strip surrounding quotes if present
-	if (strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"")) ||
-		(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
-		val = val[1 : len(val)-1]
+	val, err := unquoteConfigValue(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return err
 	}
 
 	return c.Set(key, val)
+}
+
+// unquoteConfigValue removes quotes and any trailing comment from the value
+// part of a config line. As in Polipo's parseAtom, a '#' inside "..." is part
+// of the value and a backslash there escapes the next character, so
+// "user:pa#ss" and "a\"b" keep their '#' and '"'. Text inside '...' is taken
+// literally. Outside quotes a '#' starts a comment. Each element of a list
+// may be quoted on its own: "From", "Cookie".
+func unquoteConfigValue(raw string) (string, error) {
+	var b strings.Builder
+	quotedEnd := 0 // length of b up to the end of the last quoted part
+	for i := 0; i < len(raw); i++ {
+		q := raw[i]
+		if q == '#' {
+			break
+		}
+		if q != '"' && q != '\'' {
+			b.WriteByte(q)
+			continue
+		}
+		closed := false
+		for i++; i < len(raw); i++ {
+			ch := raw[i]
+			if ch == q {
+				closed = true
+				break
+			}
+			if q == '"' && ch == '\\' && i+1 < len(raw) {
+				i++
+				ch = raw[i]
+			}
+			b.WriteByte(ch)
+		}
+		if !closed {
+			return "", fmt.Errorf("unterminated %c quote in value", q)
+		}
+		quotedEnd = b.Len()
+	}
+	// Trim the blanks before a comment, but not blanks inside quotes.
+	s := b.String()
+	return s[:quotedEnd] + strings.TrimRight(s[quotedEnd:], " \t"), nil
 }
 
 // Set parses value and sets it to the corresponding key.
