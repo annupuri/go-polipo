@@ -119,6 +119,9 @@
 
 # forbiddenFile = "/etc/polipo/forbidden"     # URLs to reject with 403
 # uncachableFile = "/etc/polipo/uncachable"   # URLs to forward but never cache
+#
+# Each of these files, and forbiddenTunnelsFile below, may also be a
+# directory: every file under it is then read.
 
 # Per-host blocklist for CONNECT (HTTPS tunnels). Independent of
 # forbiddenFile, which is also checked for CONNECT targets but matches

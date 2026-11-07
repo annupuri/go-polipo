@@ -135,6 +135,9 @@
     forbidden/uncachable lists, plus forbiddenTunnelsFile, can be reloaded
     on a running server via SIGUSR1/SIGUSR2 (Unix) or POST /polipo/reload
     (every platform, including Windows, which has neither signal).
+    As in Polipo, each of these may be a directory, and every file under
+    it is then read; earlier go-polipo failed to load a directory and
+    forbade nothing.
   * censoredHeaders strips a configured list of header names from both
     the outgoing request and the incoming response.  censorReferer
     (false/maybe/true) controls whether Referer is forwarded unchanged,

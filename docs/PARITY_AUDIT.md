@@ -61,7 +61,7 @@ at the end groups findings by how much they matter before a public release.
 
 | Variable / feature | v1.1.x default | Status | Note |
 | :--- | :--- | :--: | :--- |
-| `forbiddenFile` | `~/.polipo-forbidden` | ✅ | Domain-suffix + POSIX-ish regex → `403`. (`forbidden.go`) |
+| `forbiddenFile` | `~/.polipo-forbidden` | ✅ | Domain-suffix + POSIX-ish regex → `403`. (`forbidden.go`) As in Polipo, the path may be a directory, and then every file under it is read (in lexical order). Unlike Polipo, a symbolic link to a directory inside it is not followed. The same applies to `uncachableFile` and `forbiddenTunnelsFile`. **Fixed 2026-11-08:** before, a directory failed to load with only a warning, so nothing was forbidden. |
 | `uncachableFile` | `~/.polipo-uncachable` | ✅ | Same matcher; matched URLs are forwarded but not cached. |
 | `forbiddenUrl` | (null) | ❌ | Cannot redirect blocked requests to a notice page; always a bare `403`. |
 | `forbiddenRedirectCode` | `302` | ❌ | Same. |
