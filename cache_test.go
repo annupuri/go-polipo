@@ -348,6 +348,120 @@ func TestStoreCountsAge(t *testing.T) {
 	}
 }
 
+// testT0 is a fixed instant for the table tests of the age and freshness
+// helpers below, so that their results do not depend on when they run.
+var testT0 = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+// at formats testT0+d as an HTTP date.
+func at(d time.Duration) string { return testT0.Add(d).Format(http.TimeFormat) }
+
+func TestResponseBirth(t *testing.T) {
+	tests := []struct {
+		name string
+		hdr  []string
+		want time.Time
+	}{
+		{"no Age or Date", nil, testT0},
+		{"Age is subtracted", []string{"Age", "100"}, testT0.Add(-100 * time.Second)},
+		{"Age with blanks", []string{"Age", " 100 "}, testT0.Add(-100 * time.Second)},
+		{"zero Age", []string{"Age", "0"}, testT0},
+		{"unparseable Age is ignored", []string{"Age", "soon"}, testT0},
+		{"negative Age is ignored", []string{"Age", "-5"}, testT0},
+		// Without the cap, the multiplication by time.Second would overflow.
+		{"huge Age is capped", []string{"Age", "9223372036854775807"}, testT0.Add(-maxAgeValue * time.Second)},
+		{"earlier Date wins", []string{"Age", "20", "Date", at(-30 * time.Second)}, testT0.Add(-30 * time.Second)},
+		{"Date later than request time less Age", []string{"Age", "100", "Date", at(-50 * time.Second)}, testT0.Add(-100 * time.Second)},
+		{"future Date is ignored", []string{"Date", at(time.Hour)}, testT0},
+		{"unparseable Date is ignored", []string{"Date", "yesterday"}, testT0},
+	}
+	for _, tt := range tests {
+		if got := responseBirth(mkResp("", tt.hdr...).Header, testT0); !got.Equal(tt.want) {
+			t.Errorf("%s: responseBirth = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestStoredBirth(t *testing.T) {
+	tests := []struct {
+		name string
+		hdr  []string
+		want time.Time
+	}{
+		{"X-Polipo-Date earlier than Date", []string{"Date", at(0), "X-Polipo-Date", at(-time.Minute)}, testT0.Add(-time.Minute)},
+		// Before go-polipo stored the birth, X-Polipo-Date held the time of writing.
+		{"X-Polipo-Date later than Date", []string{"Date", at(0), "X-Polipo-Date", at(time.Minute)}, testT0},
+		{"X-Polipo-Date equal to Date", []string{"Date", at(0), "X-Polipo-Date", at(0)}, testT0},
+		// Polipo omitted X-Polipo-Date when it equalled Date.
+		{"no X-Polipo-Date", []string{"Date", at(0)}, testT0},
+		{"unparseable X-Polipo-Date", []string{"Date", at(0), "X-Polipo-Date", "soon"}, testT0},
+		{"no Date", []string{"X-Polipo-Date", at(0)}, testT0},
+	}
+	for _, tt := range tests {
+		if got := storedBirth(mkResp("", tt.hdr...)); !got.Equal(tt.want) {
+			t.Errorf("%s: storedBirth = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+
+	// With neither header, the entry counts as born now.
+	before := time.Now()
+	got := storedBirth(mkResp(""))
+	if got.Before(before) || got.After(time.Now()) {
+		t.Errorf("no Date or X-Polipo-Date: storedBirth = %v, want the current time", got)
+	}
+}
+
+func TestHeuristicLifetime(t *testing.T) {
+	tests := []struct {
+		name string
+		lm   string // Last-Modified; "" for none
+		want time.Duration
+	}{
+		{"no Last-Modified", "", 0},
+		{"unparseable Last-Modified", "long ago", 0},
+		{"Last-Modified equal to Date", at(0), 0},
+		{"Last-Modified after Date", at(time.Minute), 0},
+		{"10% of the age", at(-time.Hour), 6 * time.Minute},
+		{"10% of a short age", at(-10 * time.Second), time.Second},
+		{"10% reaching the cap exactly", at(-240 * time.Hour), heuristicMaxLifetime},
+		{"capped", at(-1000 * time.Hour), heuristicMaxLifetime},
+	}
+	for _, tt := range tests {
+		var hdr []string
+		if tt.lm != "" {
+			hdr = []string{"Last-Modified", tt.lm}
+		}
+		if got := heuristicLifetime(mkResp("", hdr...), testT0); got != tt.want {
+			t.Errorf("%s: heuristicLifetime = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestFreshnessLifetime(t *testing.T) {
+	tests := []struct {
+		name string
+		hdr  []string
+		want time.Duration
+	}{
+		{"max-age", []string{"Cache-Control", "max-age=600"}, 600 * time.Second},
+		{"s-maxage beats max-age", []string{"Cache-Control", "max-age=600, s-maxage=60"}, 60 * time.Second},
+		{"max-age beats Expires", []string{"Cache-Control", "max-age=600", "Date", at(0), "Expires", at(time.Hour)}, 600 * time.Second},
+		{"Expires less Date", []string{"Date", at(0), "Expires", at(time.Hour)}, time.Hour},
+		// The origin's clock is 5 minutes fast; only the difference counts.
+		{"Expires measured from Date, not birth", []string{"Date", at(5 * time.Minute), "Expires", at(6 * time.Minute)}, time.Minute},
+		{"Expires before Date", []string{"Date", at(0), "Expires", at(-time.Minute)}, -time.Minute},
+		{"invalid Expires", []string{"Date", at(0), "Expires", "0"}, 0},
+		{"Expires without Date is measured from birth", []string{"Expires", at(time.Hour)}, time.Hour},
+		{"heuristic from Date", []string{"Date", at(0), "Last-Modified", at(-time.Hour)}, 6 * time.Minute},
+		{"heuristic without Date uses birth", []string{"Last-Modified", at(-time.Hour)}, 6 * time.Minute},
+		{"nothing to go on", []string{"Date", at(0)}, 0},
+	}
+	for _, tt := range tests {
+		if got := freshnessLifetime(mkResp("", tt.hdr...), testT0); got != tt.want {
+			t.Errorf("%s: freshnessLifetime = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 // TestRequestCacheControlBoundsFreshness: a request's max-age, min-fresh and
 // max-stale narrow or widen which stored response it accepts (RFC 9111
 // section 5.2.1), as in Polipo's objectIsStale - in both the disk and the
