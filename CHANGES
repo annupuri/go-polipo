@@ -43,7 +43,11 @@
   * Freshness follows RFC 9111 more closely than Polipo did.  s-maxage is
     honoured and takes precedence over max-age for this (shared) cache,
     max-age and s-maxage override Expires, and an invalid Expires value
-    such as "0" is treated as already expired.  A response's age counts
+    such as "0" is treated as already expired, as is an invalid max-age
+    or s-maxage.  Cache-Control is read from every header line and with
+    case-insensitive directive names, as in Polipo; earlier go-polipo
+    read only the first line in some checks, so it could store a
+    response marked private or no-store.  A response's age counts
     any Age header from a cache upstream (RFC 9111 section 4.2.3), and
     an Expires lifetime is measured from Date rather than against the
     local clock.  A response that arrives without a Date gets one

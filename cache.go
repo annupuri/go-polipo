@@ -142,8 +142,7 @@ func responseVaries(resp *http.Response) bool {
 // case-insensitive, and Cache-Control may span several header lines.
 // Without any Cache-Control, Pragma: no-cache counts too (see pragmaNoCache).
 func responseNoCache(resp *http.Response) bool {
-	cc := strings.ToLower(strings.Join(resp.Header.Values("Cache-Control"), ","))
-	return strings.Contains(cc, "no-cache") || pragmaNoCache(resp.Header)
+	return parseCacheControl(resp.Header).has("no-cache") || pragmaNoCache(resp.Header)
 }
 
 // pragmaNoCache reports whether h carries Pragma: no-cache and no
@@ -225,14 +224,11 @@ func staleServable(resp *http.Response) bool {
 	return !responseForbidsStale(resp) && !responseNoCache(resp)
 }
 
-// cacheControlAllowsAuthenticated reports whether a response Cache-Control value
-// carries a directive that, per RFC 9111 section 3.5 (RFC 2616 section 14.8),
-// lets a shared cache store the response to an authenticated request.
-func cacheControlAllowsAuthenticated(cacheControl string) bool {
-	cc := strings.ToLower(cacheControl)
-	return strings.Contains(cc, "public") ||
-		strings.Contains(cc, "must-revalidate") ||
-		strings.Contains(cc, "s-maxage")
+// allowsAuthenticated reports whether a response's Cache-Control carries a
+// directive that, per RFC 9111 section 3.5 (RFC 2616 section 14.8), lets a
+// shared cache store the response to an authenticated request.
+func (cc cacheControl) allowsAuthenticated() bool {
+	return cc.has("public") || cc.has("must-revalidate") || cc.has("s-maxage")
 }
 
 // getDirname gets the directory path for the host.
@@ -358,8 +354,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	}
 
 	// Cache-Control checks
-	cc := req.Header.Get("Cache-Control")
-	if strings.Contains(cc, "no-cache") || strings.Contains(cc, "no-store") || pragmaNoCache(req.Header) {
+	if cc := parseCacheControl(req.Header); cc.has("no-cache") || cc.has("no-store") || pragmaNoCache(req.Header) {
 		return nil, false
 	}
 
@@ -548,31 +543,17 @@ func storedBirth(resp *http.Response) time.Time {
 	return date
 }
 
-// ccFreshnessLifetime reads an explicit freshness lifetime out of a
-// Cache-Control value. s-maxage (shared-cache specific) wins over max-age, per
-// RFC 9111 section 5.2.2.10. ok is false when neither directive is present and
-// parseable.
-func ccFreshnessLifetime(cc string) (life time.Duration, ok bool) {
-	var maxAge, sMaxAge time.Duration
-	var haveMaxAge, haveSMaxAge bool
-	for _, part := range strings.Split(cc, ",") {
-		part = strings.TrimSpace(part)
-		switch {
-		case strings.HasPrefix(part, "s-maxage="):
-			if n, err := strconv.Atoi(strings.TrimPrefix(part, "s-maxage=")); err == nil {
-				sMaxAge, haveSMaxAge = time.Duration(n)*time.Second, true
-			}
-		case strings.HasPrefix(part, "max-age="):
-			if n, err := strconv.Atoi(strings.TrimPrefix(part, "max-age=")); err == nil {
-				maxAge, haveMaxAge = time.Duration(n)*time.Second, true
-			}
+// freshnessDirective reads an explicit freshness lifetime out of a response's
+// Cache-Control. s-maxage (shared-cache specific) wins over max-age, per RFC
+// 9111 section 5.2.2.10. ok is false when neither directive is present. One
+// that is present but not a non-negative integer gives a zero lifetime: RFC
+// 9111 section 4.2.1 encourages treating such a response as stale.
+func (cc cacheControl) freshnessDirective() (life time.Duration, ok bool) {
+	for _, name := range []string{"s-maxage", "max-age"} {
+		if cc.has(name) {
+			life, _ := cc.seconds(name)
+			return life, true
 		}
-	}
-	if haveSMaxAge {
-		return sMaxAge, true
-	}
-	if haveMaxAge {
-		return maxAge, true
 	}
 	return 0, false
 }
@@ -605,7 +586,7 @@ func heuristicLifetime(resp *http.Response, date time.Time) time.Duration {
 // than treating the entry as fresh indefinitely. Without a Date, birth stands
 // in for it.
 func freshnessLifetime(resp *http.Response, birth time.Time) time.Duration {
-	if life, ok := ccFreshnessLifetime(resp.Header.Get("Cache-Control")); ok {
+	if life, ok := parseCacheControl(resp.Header).freshnessDirective(); ok {
 		return life
 	}
 	date := birth
@@ -675,8 +656,8 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	}
 
 	// Cache-Control checks
-	cc := resp.Header.Get("Cache-Control")
-	if strings.Contains(cc, "no-store") || strings.Contains(cc, "private") {
+	cc := parseCacheControl(resp.Header)
+	if cc.has("no-store") || cc.has("private") {
 		return
 	}
 	// A request's no-store forbids storing the response to it too (RFC 9111
@@ -701,7 +682,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	// RFC 9111 section 3.5 (RFC 2616 section 14.8): a shared cache must not
 	// reuse a response to a request carrying Authorization unless the response
 	// explicitly permits it.
-	if requestIsAuthenticated(req) && !cacheControlAllowsAuthenticated(cc) {
+	if requestIsAuthenticated(req) && !cc.allowsAuthenticated() {
 		return
 	}
 
