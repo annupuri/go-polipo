@@ -159,26 +159,35 @@ func pragmaNoCache(h http.Header) bool {
 	return strings.Contains(pragma, "no-cache")
 }
 
-// cacheControlDirectives parses every Cache-Control line in h into a map of
-// lower-cased directive names to their values, unquoted ("" for a directive
-// without one).
-func cacheControlDirectives(h http.Header) map[string]string {
-	d := make(map[string]string)
+// cacheControl holds the directives of a message's Cache-Control, keyed by
+// lower-cased name, with their values unquoted ("" for a directive without
+// one).
+type cacheControl map[string]string
+
+// parseCacheControl reads every Cache-Control line in h.
+func parseCacheControl(h http.Header) cacheControl {
+	cc := make(cacheControl)
 	for _, line := range h.Values("Cache-Control") {
 		for _, part := range strings.Split(line, ",") {
 			name, value, _ := strings.Cut(strings.TrimSpace(part), "=")
 			if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
-				d[name] = strings.Trim(strings.TrimSpace(value), `"`)
+				cc[name] = strings.Trim(strings.TrimSpace(value), `"`)
 			}
 		}
 	}
-	return d
+	return cc
 }
 
-// directiveSeconds reads a delta-seconds directive value, reporting false
-// when it is missing or not a non-negative integer.
-func directiveSeconds(d map[string]string, name string) (time.Duration, bool) {
-	v, ok := d[name]
+// has reports whether the directive name (lower case) is present.
+func (cc cacheControl) has(name string) bool {
+	_, ok := cc[name]
+	return ok
+}
+
+// seconds reads a delta-seconds directive value, reporting false when it is
+// missing or not a non-negative integer.
+func (cc cacheControl) seconds(name string) (time.Duration, bool) {
+	v, ok := cc[name]
 	if !ok {
 		return 0, false
 	}
@@ -193,8 +202,7 @@ func directiveSeconds(d map[string]string, name string) (time.Duration, bool) {
 // only-if-cached, under which the client wants nothing fetched from the
 // origin (RFC 9111 section 5.2.1.7).
 func requestOnlyIfCached(req *http.Request) bool {
-	_, ok := cacheControlDirectives(req.Header)["only-if-cached"]
-	return ok
+	return parseCacheControl(req.Header).has("only-if-cached")
 }
 
 // responseForbidsStale reports whether resp may not be served stale even when
@@ -202,13 +210,8 @@ func requestOnlyIfCached(req *http.Request) bool {
 // 5.2.2.2), and, since this is a shared cache, proxy-revalidate and s-maxage
 // (sections 5.2.2.8 and 5.2.2.10).
 func responseForbidsStale(resp *http.Response) bool {
-	d := cacheControlDirectives(resp.Header)
-	for _, name := range []string{"must-revalidate", "proxy-revalidate", "s-maxage"} {
-		if _, ok := d[name]; ok {
-			return true
-		}
-	}
-	return false
+	cc := parseCacheControl(resp.Header)
+	return cc.has("must-revalidate") || cc.has("proxy-revalidate") || cc.has("s-maxage")
 }
 
 // staleServable reports whether resp may be served stale at all, as
@@ -640,16 +643,16 @@ func (cm *CacheManager) isStaleFor(req *http.Request, resp *http.Response, birth
 	if responseVaries(resp) || responseNoCache(resp) {
 		return true
 	}
-	d := cacheControlDirectives(req.Header)
+	cc := parseCacheControl(req.Header)
 	age := time.Since(birth)
-	if maxAge, ok := directiveSeconds(d, "max-age"); ok && age > maxAge {
+	if maxAge, ok := cc.seconds("max-age"); ok && age > maxAge {
 		return true
 	}
 	deadline := freshnessLifetime(resp, birth)
-	if minFresh, ok := directiveSeconds(d, "min-fresh"); ok {
+	if minFresh, ok := cc.seconds("min-fresh"); ok {
 		deadline -= minFresh
-	} else if _, ok := d["max-stale"]; ok && !responseForbidsStale(resp) {
-		maxStale, ok := directiveSeconds(d, "max-stale")
+	} else if cc.has("max-stale") && !responseForbidsStale(resp) {
+		maxStale, ok := cc.seconds("max-stale")
 		if !ok {
 			return false
 		}
@@ -678,7 +681,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	}
 	// A request's no-store forbids storing the response to it too (RFC 9111
 	// section 5.2.1.5).
-	if _, ok := cacheControlDirectives(req.Header)["no-store"]; ok {
+	if parseCacheControl(req.Header).has("no-store") {
 		return
 	}
 
