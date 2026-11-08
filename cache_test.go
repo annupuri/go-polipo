@@ -590,6 +590,103 @@ func TestStoreSkipsRequestNoStore(t *testing.T) {
 	}
 }
 
+// Cache-Control is read from every header line (RFC 9110 section 5.3) and
+// with case-insensitive directive names (RFC 9111 section 5.2), as Polipo's
+// http_parse.c did. Before, several checks read only the first line with
+// Header.Get and matched case-sensitively, so a private response could be
+// stored in the shared cache.
+func TestStoreReadsEveryCacheControlLine(t *testing.T) {
+	date := time.Now().UTC().Format(http.TimeFormat)
+	tests := []struct {
+		name       string
+		auth       bool     // request carries Authorization
+		cc         []string // response Cache-Control lines
+		wantStored bool
+	}{
+		{"private on second line", false, []string{"public, max-age=600", "private"}, false},
+		{"Private in capitals", false, []string{"Private, max-age=600"}, false},
+		{"no-store on second line", false, []string{"max-age=600", "no-store"}, false},
+		{"No-Store in capitals", false, []string{"No-Store, max-age=600"}, false},
+		{"authenticated, public on second line", true, []string{"max-age=600", "public"}, true},
+		{"authenticated, nothing allowing it", true, []string{"max-age=600"}, false},
+	}
+	for _, tt := range tests {
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cm := NewCacheManager(cfg)
+
+		url := "http://example.com/page"
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		if tt.auth {
+			req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+		}
+		hdr := []string{"Date", date}
+		for _, line := range tt.cc {
+			hdr = append(hdr, "Cache-Control", line)
+		}
+		resp := mkResp("body", hdr...)
+		if err := storeNow(cm, req, resp); err != nil {
+			t.Fatalf("%s: Store: %v", tt.name, err)
+		}
+		stored := cm.memCache.Contains(url) || fileExistsForURL(t, cm, url)
+		if stored != tt.wantStored {
+			t.Errorf("%s: stored = %t, want %t", tt.name, stored, tt.wantStored)
+		}
+	}
+}
+
+// The freshness lifetime is read from every Cache-Control line and
+// case-insensitively; s-maxage wins over max-age wherever it appears; and a
+// present but invalid value makes the response stale (RFC 9111 section
+// 4.2.1) instead of being skipped in favour of Expires.
+func TestFreshnessLifetimeReadsEveryCacheControlLine(t *testing.T) {
+	now := time.Now().UTC()
+	future := now.Add(time.Hour).Format(http.TimeFormat)
+	tests := []struct {
+		name string
+		hdr  []string
+		want time.Duration
+	}{
+		{"max-age on second line", []string{"Cache-Control", "public", "Cache-Control", "max-age=600"}, 600 * time.Second},
+		{"Max-Age in capitals", []string{"Cache-Control", "Max-Age=600"}, 600 * time.Second},
+		{"s-maxage on second line wins", []string{"Cache-Control", "max-age=600", "Cache-Control", "s-maxage=60"}, 60 * time.Second},
+		{"invalid max-age is stale, not Expires", []string{"Cache-Control", "max-age=soon", "Expires", future}, 0},
+		{"negative max-age is stale", []string{"Cache-Control", "max-age=-1", "Expires", future}, 0},
+	}
+	for _, tt := range tests {
+		resp := mkResp("", append([]string{"Date", now.Format(http.TimeFormat)}, tt.hdr...)...)
+		if got := freshnessLifetime(resp, now); got != tt.want {
+			t.Errorf("%s: freshnessLifetime = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+// A request's no-cache or no-store bypasses the cache whatever its case and
+// whichever Cache-Control line carries it.
+func TestLookupReadsEveryRequestCacheControlLine(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	url := "http://example.com/fresh"
+	resp := mkResp("body", "Cache-Control", "max-age=600", "Date", time.Now().UTC().Format(http.TimeFormat))
+	if err := storeNow(cm, httptest.NewRequest(http.MethodGet, url, nil), resp); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if cm.Lookup(httptest.NewRequest(http.MethodGet, url, nil)) == nil {
+		t.Fatal("a plain request missed the fresh entry")
+	}
+	for _, lines := range [][]string{{"No-Cache"}, {"NO-STORE"}, {"max-stale=60", "no-cache"}} {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		for _, line := range lines {
+			req.Header.Add("Cache-Control", line)
+		}
+		if got := cm.Lookup(req); got != nil {
+			got.Body.Close()
+			t.Errorf("Cache-Control %q: served from the cache, want a bypass", lines)
+		}
+	}
+}
+
 func TestStoreSkipsSetCookie(t *testing.T) {
 	url := "http://example.com/with-cookie"
 	req := httptest.NewRequest(http.MethodGet, url, nil)
