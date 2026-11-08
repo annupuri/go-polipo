@@ -201,6 +201,10 @@ func TestCacheIsExpired(t *testing.T) {
 	}
 	respCCFresh.Header.Set("Cache-Control", "max-age=300")
 	respCCFresh.Header.Set("Date", time.Now().UTC().Add(-2*time.Minute).Format(http.TimeFormat))
+	if expired(respCCFresh) {
+		t.Error("expected response within max-age to be fresh")
+	}
+
 	// 5. Check Cache-Control with other values
 	respCCFreshWithOpts := &http.Response{
 		Header: make(http.Header),
