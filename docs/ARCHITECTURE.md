@@ -92,13 +92,19 @@ not the two copy goroutines that `tunnel` starts.
 When the response may be cached, `Store` replaces its body with a
 `cacheBody`, which copies the body to the cache while the client receives
 it; the body is never read ahead of the client. Each chunk that
-`ReverseProxy` reads for the client also goes to the disk entry, the memory
-entry, or both:
+`httputil.ReverseProxy` reads for the client also goes to the disk entry,
+the memory entry, or both.
+
+Despite its name, `httputil.ReverseProxy` is only the standard library's
+generic forwarder: it takes a request, sends it on and relays the response.
+go-polipo is a forward proxy and uses it as such. A client's request to a
+proxy already carries the absolute target URL, so its `Director` leaves the
+destination unchanged rather than pointing it at a backend server.
 
 ```mermaid
 graph LR
     U["Origin server"] --> CB["cacheBody.Read"]
-    CB --> C["Client (via ReverseProxy)"]
+    CB --> C["Client (via httputil.ReverseProxy)"]
     CB -->|"pw.Write: a copy of each chunk"| P["io.Pipe"]
     CB -->|"append"| M["memBuf (memory cache entry)"]
     P -->|"pr.Read"| G["goroutine: clone.Write"]

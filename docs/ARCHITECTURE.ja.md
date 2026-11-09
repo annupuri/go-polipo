@@ -73,12 +73,14 @@ graph TD
 
 ## レスポンスをキャッシュに保存する流れ
 
-`ProxyHandler.cacheResponse` は、各レスポンスを `CacheManager.Store` に渡します。キャッシュしてよいレスポンスなら、`Store` は本文を `cacheBody` に差し替えます。`cacheBody` は、クライアントが本文を受け取るのと同時に、本文をキャッシュへコピーします。クライアントより先に本文を読み進めることはありません。`ReverseProxy` がクライアントのために読んだ部分は、そのたびにディスクのエントリ、メモリのエントリ、またはその両方にも送られます。
+`ProxyHandler.cacheResponse` は、各レスポンスを `CacheManager.Store` に渡します。キャッシュしてよいレスポンスなら、`Store` は本文を `cacheBody` に差し替えます。`cacheBody` は、クライアントが本文を受け取るのと同時に、本文をキャッシュへコピーします。クライアントより先に本文を読み進めることはありません。`httputil.ReverseProxy` がクライアントのために読んだ部分は、そのたびにディスクのエントリ、メモリのエントリ、またはその両方にも送られます。
+
+`httputil.ReverseProxy` は名前に反して、標準ライブラリの汎用の転送部品にすぎません。リクエストを受け取って先へ送り、レスポンスを中継します。go-polipo はフォワードプロキシーで、この部品をフォワードプロキシーとして使っています。クライアントがプロキシーに送るリクエストには最初から完全な URL が入っているので、`Director` は転送先を後ろのサーバーに書き換えず、そのままにします。
 
 ```mermaid
 graph LR
     U["上流サーバー"] --> CB["cacheBody.Read"]
-    CB --> C["クライアント (ReverseProxy 経由)"]
+    CB --> C["クライアント (httputil.ReverseProxy 経由)"]
     CB -->|"pw.Write: 読んだ部分のコピー"| P["io.Pipe"]
     CB -->|"追記"| M["memBuf (メモリキャッシュのエントリ)"]
     P -->|"pr.Read"| G["Goroutine: clone.Write"]
