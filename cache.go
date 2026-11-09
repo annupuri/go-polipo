@@ -147,9 +147,11 @@ func responseNoCache(resp *http.Response) bool {
 
 // pragmaNoCache reports whether h carries Pragma: no-cache and no
 // Cache-Control at all; when Cache-Control is present, it alone decides. In
-// a request, RFC 9111 section 5.4 requires treating that as Cache-Control:
-// no-cache. In a response its meaning is unspecified; Polipo (http_parse.c)
-// honoured it there as well, and so does go-polipo.
+// a request, RFC 7234 section 5.4 required treating that as Cache-Control:
+// no-cache; RFC 9111 section 5.4 deprecates Pragma and drops the rule, but
+// an HTTP/1.0 client may still send it alone, and Polipo (http_parse.c)
+// honoured it, so go-polipo keeps doing so. In a response its meaning was
+// never specified; Polipo honoured it there as well, and so does go-polipo.
 func pragmaNoCache(h http.Header) bool {
 	if len(h.Values("Cache-Control")) > 0 {
 		return false
