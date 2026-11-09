@@ -85,3 +85,48 @@ closes the client connection too, except after a CONNECT handler has hijacked
 it; there the handler's own deferred `Close` calls, which run while the panic
 unwinds, close both connections. This covers only the handler's goroutine,
 not the two copy goroutines that `tunnel` starts.
+
+## How a response is stored in the cache
+
+`ProxyHandler.cacheResponse` passes each response to `CacheManager.Store`.
+When the response may be cached, `Store` replaces its body with a
+`cacheBody`, which copies the body to the cache while the client receives
+it; the body is never read ahead of the client. Each chunk that
+`ReverseProxy` reads for the client also goes to the disk entry, the memory
+entry, or both:
+
+```mermaid
+graph LR
+    U["Origin server"] --> CB["cacheBody.Read"]
+    CB --> C["Client (via ReverseProxy)"]
+    CB -->|"pw.Write: a copy of each chunk"| P["io.Pipe"]
+    CB -->|"append"| M["memBuf (memory cache entry)"]
+    P -->|"pr.Read"| G["goroutine: clone.Write"]
+    G --> T["temporary file .tmp-*"]
+    T -->|"EOF: commit, Rename"| F["cache file"]
+    T -.->|"aborted or too large: dropDisk, Remove"| X["discarded"]
+```
+
+- **Why a pipe.** A disk entry is the response in HTTP form: status line,
+  headers (with go-polipo's `X-Polipo-*` metadata) and body. `startDiskWrite`
+  produces that with `http.Response.Write`, which pulls the body by reading
+  it to EOF. The body, however, is pushed to the cache a chunk at a time as
+  the client reads it. `io.Pipe` connects the two: what `cacheBody.Read`
+  writes to `pw` comes out of `pr`, which `Response.Write` reads in its own
+  goroutine (it does not return until the body ends). So the whole body
+  never has to be held in memory.
+- **The pipe has no buffer.** `pw.Write` returns only once the goroutine
+  has taken the bytes. The disk write therefore keeps pace with the client:
+  a very slow disk also slows the client, but memory use does not grow
+  with the size of the response.
+- **Commit.** When the body reaches EOF, `commit` closes `pw`, waits for
+  the goroutine's result on `diskWrite.done`, and renames the temporary
+  file to its final name. The finished memory entry is added to the LRU
+  cache at the same time.
+- **Abort.** If the body fails or is closed before EOF, or grows past
+  `maxDiskCacheEntrySize`, `dropDisk` closes `pw` with an error, waits for
+  the goroutine, and removes the temporary file. A partial entry therefore
+  never appears under a cache file name. (Past `memoryCacheMaxEntrySize`,
+  only the memory entry is dropped.) If the disk write itself fails, the
+  goroutine closes `pr` with an error, so the next `pw.Write` fails instead
+  of blocking.

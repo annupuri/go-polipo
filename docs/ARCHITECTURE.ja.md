@@ -70,3 +70,24 @@ graph TD
 | `tunnelWithIdleTimeout` (proxy.go) | トンネルを `tunnelIdleTimeout` で監視し、時間切れになったら両方の接続を閉じる | トンネルが終わったとき、またはタイムアウトしたとき | 関数の戻り値になる `expired` フラグを立てる |
 
 どの Goroutine も `recover` しません。起こりうる失敗は `error` で返します。panic はバグを意味し、どの Goroutine でも `recover` されない panic はプロセス全体を止めます。panic の内容とスタックトレースは標準エラー出力に出ます (`logFile` には出ません)。これは意図した動きです。バグのあとも動き続けるとキャッシュが壊れた状態になりかねない一方、同梱の `systemd/go-polipo.service` はプロセスを再起動します (`Restart=on-failure`)。リクエストを処理するハンドラー自身での panic は別で、`net/http` が接続ごとに `recover` し、`http: panic serving ...` を標準ロガーに出します。標準ロガーの出力先は、`logFile` を設定していればそのファイルです。クライアントとの接続も `net/http` が閉じますが、CONNECT ハンドラーが接続を乗っ取った (Hijack した) あとは閉じません。その場合は、panic の巻き戻しの途中で実行されるハンドラー自身の `defer` の `Close` が、両方の接続を閉じます。これが当てはまるのはハンドラーの Goroutine だけで、`tunnel` が起動する 2 つのコピー用 Goroutine は含みません。
+
+## レスポンスをキャッシュに保存する流れ
+
+`ProxyHandler.cacheResponse` は、各レスポンスを `CacheManager.Store` に渡します。キャッシュしてよいレスポンスなら、`Store` は本文を `cacheBody` に差し替えます。`cacheBody` は、クライアントが本文を受け取るのと同時に、本文をキャッシュへコピーします。クライアントより先に本文を読み進めることはありません。`ReverseProxy` がクライアントのために読んだ部分は、そのたびにディスクのエントリ、メモリのエントリ、またはその両方にも送られます。
+
+```mermaid
+graph LR
+    U["上流サーバー"] --> CB["cacheBody.Read"]
+    CB --> C["クライアント (ReverseProxy 経由)"]
+    CB -->|"pw.Write: 読んだ部分のコピー"| P["io.Pipe"]
+    CB -->|"追記"| M["memBuf (メモリキャッシュのエントリ)"]
+    P -->|"pr.Read"| G["Goroutine: clone.Write"]
+    G --> T["一時ファイル .tmp-*"]
+    T -->|"EOF: commit, Rename"| F["キャッシュファイル"]
+    T -.->|"中断・サイズ超過: dropDisk, Remove"| X["破棄"]
+```
+
+- **パイプを使う理由。** ディスクのエントリは、レスポンスを HTTP の形のまま書いたものです (ステータス行、go-polipo の `X-Polipo-*` メタデータを含むヘッダー、本文)。`startDiskWrite` はこれを `http.Response.Write` で書き出します。`Response.Write` は、本文を EOF まで自分で読みに行く関数です。一方、本文はクライアントが読み進めるのに合わせて、少しずつキャッシュへ渡されてきます。この 2 つをつなぐのが `io.Pipe` です。`cacheBody.Read` が `pw` に書いたものが `pr` から出てきて、それを別の Goroutine の `Response.Write` が読みます (本文が終わるまで戻らないため、別の Goroutine で動かします)。こうすることで、本文全体をメモリに持たずに済みます。
+- **パイプにはバッファーがない。** `pw.Write` は、Goroutine がバイト列を受け取るまで戻りません。そのため、ディスクへの書き込みはクライアントへの送信と同じ速さで進みます。ディスクが極端に遅いとクライアントへの送信も遅くなりますが、レスポンスが大きくてもメモリの使用量は増えません。
+- **確定 (commit)。** 本文が EOF に達すると、`commit` が `pw` を閉じ、`diskWrite.done` で Goroutine の結果を待ってから、一時ファイルを本来の名前に変えます。でき上がったメモリのエントリも、このとき LRU キャッシュに加えます。
+- **中断 (abort)。** 本文が EOF の前に失敗したり閉じられたりしたとき、または `maxDiskCacheEntrySize` を超えたときは、`dropDisk` が `pw` をエラー付きで閉じ、Goroutine を待ってから一時ファイルを消します。そのため、途中までのエントリがキャッシュファイルの名前で現れることはありません (`memoryCacheMaxEntrySize` を超えたときは、メモリのエントリだけを捨てます)。逆にディスクへの書き込みが失敗したときは、Goroutine が `pr` をエラー付きで閉じます。そうすると次の `pw.Write` がエラーを返すので、待ったまま止まることはありません。
