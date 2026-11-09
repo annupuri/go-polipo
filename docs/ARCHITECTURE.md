@@ -59,3 +59,29 @@ graph TD
     B5 --> B6[Cache / filter / forward]
     B6 --> B7[Respond to client]
 ```
+
+### Goroutines started by go-polipo itself
+
+Besides the per-request goroutines that `net/http` starts, go-polipo starts
+these goroutines with its own `go` statements:
+
+| Started in | What it does | Ends when | How a failure is reported |
+|---|---|---|---|
+| `CacheManager.startDiskWrite` (cache.go) | Writes a response body to its disk-cache file while the body is served | The body has been written, or the write stopped | Sends the `error` on the `diskWrite.done` channel |
+| `serve` (main.go) | Waits for `SIGINT`/`SIGTERM` and closes the server | One of those signals arrives | Not needed (logs the shutdown) |
+| `setupReloadSignals` (signal_unix.go; none on Windows) | On `SIGUSR1`/`SIGUSR2`, reopens the log file and reloads the forbidden/uncachable/forbiddenTunnels lists (`SIGUSR2` also discards the memory cache) | Never; runs for the life of the process | Logs each failure and keeps waiting |
+| `tunnel` (proxy.go), two of them | Copies one direction of a CONNECT tunnel each | That direction reaches EOF or an error | Not needed; `tunnel` waits for both with a `sync.WaitGroup` |
+| `tunnelWithIdleTimeout` (proxy.go) | Watches a tunnel for `tunnelIdleTimeout` and closes both connections when it expires | The tunnel ends, or the timeout fires | Sets the `expired` flag the function returns |
+
+None of them calls `recover`. Expected failures are returned as `error`s; a
+panic means a bug, and an unrecovered panic in any goroutine stops the whole
+process, with the panic and stack trace written to standard error (not to
+`logFile`). That is deliberate: carrying on after a bug could leave the cache
+in a bad state, whereas the bundled `systemd/go-polipo.service` restarts the
+process (`Restart=on-failure`). A panic in a request handler itself is different:
+`net/http` recovers it per connection and logs `http: panic serving ...`
+through the standard logger, which goes to `logFile` when one is set. It
+closes the client connection too, except after a CONNECT handler has hijacked
+it; there the handler's own deferred `Close` calls, which run while the panic
+unwinds, close both connections. This covers only the handler's goroutine,
+not the two copy goroutines that `tunnel` starts.
