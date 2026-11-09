@@ -11,3 +11,8 @@ windows/dist/
 # Local scratch space for ad-hoc notes/files while working in this repo;
 # not part of the project, never committed.
 tmp
+
+# Per-user editor settings, e.g. the .vscode/settings.json that VS Code
+# writes when an extension's setting is changed for this folder only;
+# not part of the project.
+.vscode/
