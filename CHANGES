@@ -93,8 +93,9 @@
     served as a fresh hit, whatever its max-age: every reuse is
     revalidated with the origin first (RFC 9111 section 5.2.2.4,
     matching Polipo).  Pragma: no-cache counts as Cache-Control:
-    no-cache when there is no Cache-Control header, in requests (RFC
-    9111 section 5.4) and in responses (as in Polipo).
+    no-cache when there is no Cache-Control header, in requests and in
+    responses, as in Polipo.  RFC 7234 section 5.4 required this for
+    requests; RFC 9111 section 5.4 deprecates Pragma and no longer does.
   * A successful POST, PUT, DELETE or other unsafe request removes what
     is cached for its URL (RFC 9111 section 4.4).  Polipo did so as soon
     as the request came in, whatever came of it, and for OPTIONS too.

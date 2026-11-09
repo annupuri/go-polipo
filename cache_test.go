@@ -1894,10 +1894,12 @@ func TestExpireTemporaryFiles(t *testing.T) {
 }
 
 // TestPragmaNoCache: Pragma: no-cache counts as Cache-Control: no-cache when
-// there is no Cache-Control header at all. For a request RFC 9111 section
-// 5.4 requires it (the lookup is skipped); for a response RFC 9111 says
-// nothing, and go-polipo follows Polipo (http_parse.c), which treated it as
-// no-cache too (the entry is stored but always stale). A Cache-Control
+// there is no Cache-Control header at all. For a request RFC 7234 section
+// 5.4 required it and RFC 9111 section 5.4, which deprecates Pragma, no
+// longer does; go-polipo keeps it, as Polipo did (the lookup is skipped).
+// For a response neither RFC specified a meaning, and go-polipo follows
+// Polipo (http_parse.c), which treated it as no-cache too (the entry is
+// stored but always stale). A Cache-Control
 // header, whatever it says, overrides Pragma in both directions.
 func TestPragmaNoCache(t *testing.T) {
 	t.Run("request", func(t *testing.T) {
