@@ -57,7 +57,8 @@
     and max-stale bound which stored response it accepts (RFC 9111
     section 5.2.1, as in Polipo), so a browser reload (max-age=0)
     revalidates even a fresh entry; max-stale never extends a response
-    marked must-revalidate, proxy-revalidate or s-maxage.  Under
+    marked must-revalidate, proxy-revalidate or s-maxage, and one with
+    an invalid value is ignored.  Under
     only-if-cached the origin is never contacted, and a request nothing
     stored suits gets a 504.  A 200 with no Expires, max-age or
     s-maxage is given a heuristic lifetime of min(10% of the time since
