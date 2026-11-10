@@ -114,7 +114,12 @@
     a response may be before it is written to disk at all (default -1,
     unlimited, matching Polipo).
   * HTTP forwarding is built on net/http/httputil.ReverseProxy; hop-by-hop
-    headers are handled per RFC 7230.  Its transparent gzip is turned
+    headers are handled per RFC 7230.  The forwarded request is prepared
+    in its Rewrite hook, after the client's hop-by-hop headers are
+    removed, so a client's Connection header cannot strip the Via or the
+    revalidation validator go-polipo adds.  The client's X-Forwarded-For,
+    X-Forwarded-Host, X-Forwarded-Proto and Forwarded headers are not
+    passed on.  Its transparent gzip is turned
     off, so Accept-Encoding and Content-Encoding pass through as sent,
     as in Polipo (RFC 9110 section 7.7).  A TRACE or OPTIONS request
     with Max-Forwards: 0 is answered by go-polipo (OPTIONS with a 200,

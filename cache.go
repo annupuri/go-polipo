@@ -330,7 +330,7 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 	}
 	if stale {
 		// A stale entry is a miss as far as Lookup is concerned; the caller
-		// (ProxyHandler's Director/ModifyResponse) is what turns this into a
+		// (ProxyHandler's rewrite/ModifyResponse) is what turns this into a
 		// conditional GET and merges a 304 back into the entry - see
 		// addConditionalHeaders and reviveFromCache in proxy.go.
 		resp.Body.Close()

@@ -107,10 +107,9 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 	ph.transport = ph.createTransport()
 	var transport http.RoundTripper = ph.transport
 	if config.ParentProxy != "" && config.ParentAuthCredentials != "" {
-		// Added via a wrapping RoundTripper, not the Director: ReverseProxy
-		// strips hop-by-hop headers (Proxy-Authorization among them) right
-		// after Director returns, so anything set there would be discarded
-		// before the request ever reaches the transport.
+		// Added via a wrapping RoundTripper: Proxy-Authorization belongs to
+		// the hop to the parent proxy, so it is set on the request that the
+		// transport actually sends there; see parentProxyAuthTransport.
 		transport = &parentProxyAuthTransport{
 			RoundTripper: ph.transport,
 			// Matches Polipo's buildServerAuthHeaders: the configured string is
@@ -119,31 +118,45 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 		}
 	}
 	ph.reverseProxy = &httputil.ReverseProxy{
-		Transport: transport,
-		// The proxied request already carries an absolute target URL, so there
-		// is nothing to rewrite. ReverseProxy strips hop-by-hop headers itself;
-		// setting X-Forwarded-For to nil keeps the client's IP private, matching
-		// the original hand-rolled forwarder. Deleting arbitrary headers here is
-		// safe (unlike adding Proxy-Authorization - see parentProxyAuthTransport):
-		// ReverseProxy only strips its own fixed hop-by-hop list after Director
-		// returns, it never restores anything Director removed.
-		Director: func(outReq *http.Request) {
-			outReq.Header["X-Forwarded-For"] = nil
-			for _, h := range ph.config.CensoredHeaders {
-				outReq.Header.Del(h)
-			}
-			ph.censorReferer(outReq)
-			if hasConditionalHeaders(outReq) {
-				*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), clientConditionalKey{}, true))
-			}
-			ph.addConditionalHeaders(outReq)
-			ph.addVia(outReq.Header, outReq.ProtoMajor, outReq.ProtoMinor)
-			*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), requestTimeKey{}, time.Now()))
-		},
+		Transport:      transport,
+		Rewrite:        ph.rewrite,
 		ModifyResponse: ph.cacheResponse,
 		ErrorHandler:   ph.handleUpstreamError,
 	}
 	return ph
+}
+
+// rewrite is the ReverseProxy Rewrite hook: it prepares the request that is
+// sent upstream (pr.Out) from the one the client sent (pr.In).
+//
+// ReverseProxy calls it after removing the client's hop-by-hop headers,
+// including any its Connection header names, so the headers added here
+// reach the origin. With the deprecated Director hook they did not: that
+// removal ran afterwards, and a client sending "Connection: Via" or
+// "Connection: If-None-Match" stripped go-polipo's own Via (RFC 9110 section
+// 7.6.3) or its revalidation validator. Before calling it, ReverseProxy has
+// also removed the client's Forwarded and X-Forwarded-* headers, which keeps
+// the client's address private as go-polipo always has; none are added back.
+//
+// The request already carries an absolute target URL, so the destination is
+// left as it is. Only the query needs restoring: ReverseProxy drops the
+// query parameters Go cannot parse before Rewrite runs, and a forward proxy
+// passes the URL on as received.
+func (ph *ProxyHandler) rewrite(pr *httputil.ProxyRequest) {
+	out := pr.Out
+	out.URL.RawQuery = pr.In.URL.RawQuery
+	for _, h := range ph.config.CensoredHeaders {
+		out.Header.Del(h)
+	}
+	ph.censorReferer(out)
+	ctx := out.Context()
+	if hasConditionalHeaders(out) {
+		ctx = context.WithValue(ctx, clientConditionalKey{}, true)
+	}
+	ph.addConditionalHeaders(out)
+	ph.addVia(out.Header, out.ProtoMajor, out.ProtoMinor)
+	ctx = context.WithValue(ctx, requestTimeKey{}, time.Now())
+	pr.Out = out.WithContext(ctx)
 }
 
 // handleUpstreamError is the ReverseProxy ErrorHandler hook: it answers a
@@ -375,13 +388,13 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 }
 
 // clientConditionalKey marks, on the outgoing request's context, that the
-// client itself sent If-None-Match or If-Modified-Since (set in the Director
+// client itself sent If-None-Match or If-Modified-Since (set in rewrite
 // before addConditionalHeaders runs, read by cacheResponse).
 type clientConditionalKey struct{}
 
 // requestTimeKey records, on the outgoing request's context, when the
-// Director sent it upstream: RFC 9111's request_time, from which Store
-// works out the response's age (see responseBirth).
+// request was sent upstream (set in rewrite): RFC 9111's request_time, from
+// which Store works out the response's age (see responseBirth).
 type requestTimeKey struct{}
 
 // hasConditionalHeaders reports whether req carries a validator, i.e.
@@ -390,7 +403,7 @@ func hasConditionalHeaders(req *http.Request) bool {
 	return req.Header.Get("If-None-Match") != "" || req.Header.Get("If-Modified-Since") != ""
 }
 
-// addConditionalHeaders is part of the Director: when there is a stale cache
+// addConditionalHeaders is part of rewrite: when there is a stale cache
 // entry for outReq with a validator (ETag and/or Last-Modified), it turns
 // the forwarded request into a conditional one, so the origin can answer
 // with a bodyless 304 instead of retransmitting content go-polipo already
@@ -416,7 +429,7 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 	defer cached.Body.Close()
 	if !stale {
 		// A fresh hit is served straight from disk by handleForward and never
-		// reaches the Director; this would only happen for a request Lookup
+		// reaches rewrite; this would only happen for a request Lookup
 		// itself declines (e.g. a client Cache-Control: no-cache), which
 		// should reach the origin unconditionally rather than revalidate.
 		return
@@ -588,10 +601,11 @@ func normalizeProxyURL(raw string) (*url.URL, error) {
 }
 
 // parentProxyAuthTransport adds a fixed Proxy-Authorization header to every
-// request before handing it to the wrapped transport. It exists because
-// ReverseProxy strips hop-by-hop headers (Proxy-Authorization included)
-// immediately after Director runs, so the header must be added downstream of
-// that, on the request that actually reaches the parent proxy.
+// request before handing it to the wrapped transport. Proxy-Authorization is
+// a hop-by-hop header for the hop to the parent proxy, so it is added here,
+// on the request that actually reaches the parent, rather than in rewrite.
+// (It was first put here because the deprecated Director hook ran before
+// ReverseProxy stripped hop-by-hop headers, which discarded it.)
 type parentProxyAuthTransport struct {
 	http.RoundTripper
 	header string
