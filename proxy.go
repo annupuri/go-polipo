@@ -141,40 +141,44 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 			*outReq = *outReq.WithContext(context.WithValue(outReq.Context(), requestTimeKey{}, time.Now()))
 		},
 		ModifyResponse: ph.cacheResponse,
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			// A refused destination is a policy decision, not an origin
-			// failure: no stale fallback, and the body does not say what
-			// the name resolved to.
-			if errors.Is(err, errForbiddenDestination) {
-				ph.stats.denied.Add(1)
-				logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s: %v", r.Method, r.URL, err)
-				http.Error(w, "Forbidden: destination address not allowed", http.StatusForbidden)
-				return
-			}
-			// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
-			// error when the origin cannot be reached at all, unless the
-			// entry forbids being served stale (see staleServable).
-			if ph.config.RelaxTransparency >= 1 {
-				if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
-					defer staleResp.Body.Close()
-					if !stale || staleServable(staleResp) {
-						w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
-						copyHeader(w.Header(), staleResp.Header)
-						w.WriteHeader(staleResp.StatusCode)
-						n, _ := io.Copy(w, staleResp.Body)
-						ph.stats.cacheHits.Add(1)
-						ph.stats.cacheHitBytes.Add(uint64(n))
-						return
-					}
-				}
-			}
-			ph.stats.upstreamErrors.Add(1)
-			logf(ph.config.LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
-			code, msg := upstreamErrorReply(err)
-			http.Error(w, msg, code)
-		},
+		ErrorHandler:   ph.handleUpstreamError,
 	}
 	return ph
+}
+
+// handleUpstreamError is the ReverseProxy ErrorHandler hook: it answers a
+// forwarded request whose origin could not be reached or did not answer.
+func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Request, err error) {
+	// A refused destination is a policy decision, not an origin
+	// failure: no stale fallback, and the body does not say what
+	// the name resolved to.
+	if errors.Is(err, errForbiddenDestination) {
+		ph.stats.denied.Add(1)
+		logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s: %v", r.Method, r.URL, err)
+		http.Error(w, "Forbidden: destination address not allowed", http.StatusForbidden)
+		return
+	}
+	// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
+	// error when the origin cannot be reached at all, unless the
+	// entry forbids being served stale (see staleServable).
+	if ph.config.RelaxTransparency >= 1 {
+		if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
+			defer staleResp.Body.Close()
+			if !stale || staleServable(staleResp) {
+				w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
+				copyHeader(w.Header(), staleResp.Header)
+				w.WriteHeader(staleResp.StatusCode)
+				n, _ := io.Copy(w, staleResp.Body)
+				ph.stats.cacheHits.Add(1)
+				ph.stats.cacheHitBytes.Add(uint64(n))
+				return
+			}
+		}
+	}
+	ph.stats.upstreamErrors.Add(1)
+	logf(ph.config.LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
+	code, msg := upstreamErrorReply(err)
+	http.Error(w, msg, code)
 }
 
 // upstreamErrorReply chooses the status and body for a forwarded request the
