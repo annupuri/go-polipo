@@ -868,6 +868,13 @@ func TestStoreCachesVaryButAlwaysStale(t *testing.T) {
 			cachedResp.Body.Close()
 			t.Errorf("Vary: %q: Lookup should never report a Vary'd entry fresh", vary)
 		}
+		// Not even for a request that accepts any staleness.
+		maxStaleReq := httptest.NewRequest(http.MethodGet, url, nil)
+		maxStaleReq.Header.Set("Cache-Control", "max-stale")
+		if cachedResp := cm.Lookup(maxStaleReq); cachedResp != nil {
+			cachedResp.Body.Close()
+			t.Errorf("Vary: %q: Lookup with max-stale should not report a Vary'd entry fresh", vary)
+		}
 		staleResp, stale := cm.LookupStale(lookupReq)
 		if staleResp == nil {
 			t.Errorf("Vary: %q: LookupStale should still find the entry", vary)
