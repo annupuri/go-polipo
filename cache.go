@@ -825,6 +825,13 @@ type cacheBody struct {
 	once sync.Once
 }
 
+// Read is not called from go-polipo's own code. Store installs the cacheBody
+// as resp.Body inside the ReverseProxy's ModifyResponse hook (cacheResponse),
+// and httputil.ReverseProxy then reads it as a plain io.ReadCloser while
+// copying the body to the client (copyResponse, which loops in copyBuffer).
+// Each call hands the chunk it read back to that copy and also copies it into
+// the disk and/or memory entry; reaching EOF commits the entry. Tests call it
+// directly, for example through io.ReadAll.
 func (b *cacheBody) Read(p []byte) (int, error) {
 	n, err := b.src.Read(p)
 	if n > 0 {
@@ -854,7 +861,9 @@ func (b *cacheBody) Read(p []byte) (int, error) {
 }
 
 // Close discards whatever was not committed: a body closed before EOF is
-// incomplete and must not be cached.
+// incomplete and must not be cached. Like Read, it is called by
+// httputil.ReverseProxy, which closes the response body once the copy to
+// the client ends, whether it finished or failed.
 func (b *cacheBody) Close() error {
 	b.once.Do(b.abort)
 	return b.src.Close()
