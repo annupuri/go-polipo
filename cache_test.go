@@ -484,6 +484,8 @@ func TestRequestCacheControlBoundsFreshness(t *testing.T) {
 		{"max-age=60", "max-stale", true},
 		{"max-age=60", "max-stale=60", true},
 		{"max-age=60", "max-stale=10", false},
+		{"max-age=60", "max-stale=abc", false}, // invalid, ignored
+		{"max-age=60", "max-stale=-1", false},  // invalid, ignored
 		{"max-age=60", "max-stale, max-age=50", false},
 		{"max-age=60", "max-stale, min-fresh=0", false}, // min-fresh wins
 		{"max-age=60, must-revalidate", "max-stale", false},

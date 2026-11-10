@@ -618,7 +618,8 @@ func (cm *CacheManager) isExpired(resp *http.Response, birth time.Time) bool {
 // as Polipo's objectIsStale did: max-age caps the age (a browser reload
 // sends max-age=0 to have the cache check with the origin), min-fresh asks
 // for that much freshness still left, and max-stale accepts that much
-// staleness, or any without a value - unless resp forbids serving it stale.
+// staleness, or any without a value (an invalid value is ignored) - unless
+// resp forbids serving it stale.
 // When a request has both min-fresh and max-stale, min-fresh wins, as in
 // Polipo. A Vary or no-cache response is always stale, whatever req says;
 // see responseVaries and responseNoCache.
@@ -634,12 +635,15 @@ func (cm *CacheManager) isStaleFor(req *http.Request, resp *http.Response, birth
 	deadline := freshnessLifetime(resp, birth)
 	if minFresh, ok := cc.seconds("min-fresh"); ok {
 		deadline -= minFresh
-	} else if cc.has("max-stale") && !responseForbidsStale(resp) {
-		maxStale, ok := cc.seconds("max-stale")
-		if !ok {
+	} else if v, ok := cc["max-stale"]; ok && !responseForbidsStale(resp) {
+		// Without a value, any staleness is accepted (RFC 9111 section
+		// 5.2.1.2). An invalid value is ignored, like an invalid max-age.
+		if v == "" {
 			return false
 		}
-		deadline += maxStale
+		if maxStale, ok := cc.seconds("max-stale"); ok {
+			deadline += maxStale
+		}
 	}
 	return age >= deadline
 }
