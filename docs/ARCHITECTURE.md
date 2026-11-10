@@ -98,8 +98,9 @@ the memory entry, or both.
 Despite its name, `httputil.ReverseProxy` is only the standard library's
 generic forwarder: it takes a request, sends it on and relays the response.
 go-polipo is a forward proxy and uses it as such. A client's request to a
-proxy already carries the absolute target URL, so its `Director` leaves the
-destination unchanged rather than pointing it at a backend server.
+proxy already carries the absolute target URL, so its `Rewrite` hook
+(`ProxyHandler.rewrite`) leaves the destination unchanged rather than
+pointing it at a backend server.
 
 ```mermaid
 graph LR
