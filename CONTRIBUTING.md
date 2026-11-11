@@ -40,11 +40,13 @@ Workflow
        gofmt -l .        # must print nothing
        make vet
        make test         # CI also runs the tests with -race
+       make lint         # golangci-lint, settings in .golangci.yml
        make vulncheck
 
    The Go version is the one in `go.mod`.
-4. Open a pull request against `main`. CI (build / vet / test, test (windows) and
-   govulncheck) must pass before the pull request can be merged.
+4. Open a pull request against `main`. CI (build / vet / test, test (windows),
+   golangci-lint and govulncheck) must pass before the pull request can
+   be merged.
 
 `main` is protected: every change, including the maintainer's own, goes in
 through a pull request. Pull requests are merged with "Rebase and merge", so
@@ -75,10 +77,12 @@ Keeping files in step
   `docs/PARITY_AUDIT*.md`. A change to a default updates all of them.
 - **Docs are bilingual.** `README.md`, `docs/INSTALL.md`,
   `docs/ARCHITECTURE.md`, `docs/PARITY_AUDIT.md` and `docs/TEST_VIEWPOINTS.md`
-  each have a `.ja.md`
-  (Japanese) twin. If you cannot write Japanese, update the English file only
-  and say so in the pull request; the maintainer will update the twin.
+  each have a `.ja.md` (Japanese) twin. If you cannot write Japanese, update
+  the English file only and say so in the pull request; the maintainer will
+  update the twin.
 - **CHANGES**: describe user-visible changes in the topmost entry.
+- **The golangci-lint version** is pinned in the `lint` target of `Makefile`
+  and in the golangci-lint job of `.github/workflows/ci.yml`; change both.
 
 Commits
 -------
