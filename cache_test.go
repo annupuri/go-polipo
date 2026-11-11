@@ -90,8 +90,9 @@ func TestCachePathGeneration(t *testing.T) {
 			continue
 		}
 
-		if !strings.HasPrefix(path, tt.expectedDir) {
-			t.Errorf("expected path %q to have prefix %q", path, tt.expectedDir)
+		// filepath.Join gives the OS's separator.
+		if dir := filepath.FromSlash(tt.expectedDir); !strings.HasPrefix(path, dir) {
+			t.Errorf("expected path %q to have prefix %q", path, dir)
 		}
 
 		if tt.expectedFile != "" && !strings.HasSuffix(path, tt.expectedFile) {
