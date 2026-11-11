@@ -455,3 +455,32 @@ func TestScenarioLocalPages(t *testing.T) {
 		}},
 	})
 }
+
+// TestOptionsAsteriskToProxy: "OPTIONS * HTTP/1.1" sent to go-polipo itself
+// asks about the server in general, like a ping (RFC 9110 section 9.3.7).
+// net/http answers it with an empty 200 before go-polipo's handler runs, so
+// it needs no credentials and is not checked against allowedClients. That
+// is kept on purpose: the answer tells nothing beyond "an HTTP server is
+// listening here", which connecting already tells.
+func TestOptionsAsteriskToProxy(t *testing.T) {
+	p := startScenarioProxy(t, nil, "authCredentials = user:secret")
+	conn, err := net.DialTimeout("tcp", p.addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	fmt.Fprintf(conn, "OPTIONS * HTTP/1.1\r\nHost: %s\r\n\r\n", p.addr)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(body) != 0 {
+		t.Fatalf("got %d %q, want an empty 200", resp.StatusCode, body)
+	}
+	if v := resp.Header.Get("Proxy-Authenticate"); v != "" {
+		t.Errorf("Proxy-Authenticate = %q, want none", v)
+	}
+}
