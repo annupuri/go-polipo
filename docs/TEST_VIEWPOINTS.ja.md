@@ -119,7 +119,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | P2 | 値の書き方 | 型ごと:bool、int(16進/8進)、時間、tristate、ポートの集合、リスト、引用符付き | TestSetAllKeys, TestParseLevelFormats, TestParseDuration, TestParsePortSet, TestRelaxTransparencyTristate | |
 | P3 | コマンド | `-h`、`-v`、`-x` | TestRunHelp, TestRunVersion, TestRunExpire, TestRunExpireMissingRoot | |
 | P4 | ローカルページ | トップ、config、status、flush、reload、メソッド、よその Host、クロスサイトの POST、`disableLocalInterface` | TestProxyLocalInterface, TestStatusPage, TestProxyFlushEndpoint, TestProxyReloadEndpoint, TestLocalInterfaceRefuses*, TestScenarioLocalPages | |
-| P5 | シグナル | SIGUSR1/SIGUSR2、SIGINT/SIGTERM | TestSetupReloadSignals | SIGTERM での終了 |
+| P5 | シグナル | SIGUSR1/SIGUSR2、SIGTERM と SIGINT(待ち受けをやめ、終了コード 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |
 | P6 | ログ | レベル、`logFile`、パーミッション、開き直し | TestLogfGatesByCategory, TestLogFileWriterReopen*, TestLogFilePermissions, TestRunLogFileWritten | |
 | P7 | パスワードの表示 | `-v`、`/polipo/config`、ログ | TestPasswordEntriesAreRedacted, TestParentProxyPasswordHidden, TestInvalidParentProxyWarningHidesPassword | |
 
@@ -135,4 +135,4 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 
 ## わかっている抜け
 
-上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、P5 SIGTERM での終了、Windows の CI。
+上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、Windows の CI。
