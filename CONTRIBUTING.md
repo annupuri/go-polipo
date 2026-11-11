@@ -64,6 +64,9 @@ Tests
   constant (`[::1]`) from `proxy_test.go`, not `127.0.0.1`. Under WSL's
   mirrored networking a connect to a closed `127.0.0.1` port is dropped
   instead of refused, and the test hangs until the `go test` timeout.
+- `docs/TEST_VIEWPOINTS.md` lists what the tests should look at and which
+  tests do. When you add or change behaviour, walk the rows it touches and
+  add your tests to them; a bug fix adds the missed case to its row.
 
 Keeping files in step
 ---------------------
@@ -71,7 +74,8 @@ Keeping files in step
 - **Defaults** appear in `config.go`, `config.sample`, the README tables and
   `docs/PARITY_AUDIT*.md`. A change to a default updates all of them.
 - **Docs are bilingual.** `README.md`, `docs/INSTALL.md`,
-  `docs/ARCHITECTURE.md` and `docs/PARITY_AUDIT.md` each have a `.ja.md`
+  `docs/ARCHITECTURE.md`, `docs/PARITY_AUDIT.md` and `docs/TEST_VIEWPOINTS.md`
+  each have a `.ja.md`
   (Japanese) twin. If you cannot write Japanese, update the English file only
   and say so in the pull request; the maintainer will update the twin.
 - **CHANGES**: describe user-visible changes in the topmost entry.

@@ -32,8 +32,9 @@ Run gofmt, vet and the tests before every commit.
 
 ## Keeping files in step
 
-- **Docs are bilingual.** `README.md`, `docs/INSTALL.md`, `docs/ARCHITECTURE.md`
-  and `docs/PARITY_AUDIT.md` each have a `.ja.md` twin; change both together.
+- **Docs are bilingual.** `README.md`, `docs/INSTALL.md`, `docs/ARCHITECTURE.md`,
+  `docs/PARITY_AUDIT.md` and `docs/TEST_VIEWPOINTS.md` each have a `.ja.md`
+  twin; change both together.
 - **Go version bumps** touch, together: `go.mod`, `.tool-versions`, the asdf
   fallback path in `Makefile`, and the "Go 1.x.y" mentions in `README*.md`,
   `docs/INSTALL*.md` and `CHANGES`. CI reads the version from `go.mod`.
@@ -54,6 +55,9 @@ Run gofmt, vet and the tests before every commit.
   mirrored networking a connect to a closed `127.0.0.1` port is dropped
   instead of refused, and the test hangs until the go test timeout.
 - A bug fix comes with a test that fails without the fix.
+- `docs/TEST_VIEWPOINTS.md` lists what the tests should look at and which
+  tests do. When adding or changing behaviour, walk the rows it touches and
+  add the new tests to them; a bug fix adds the missed case to its row.
 
 ## Do not write
 
