@@ -418,3 +418,46 @@ func TestScenarioHTTPSParentProxy(t *testing.T) {
 		}},
 	})
 }
+
+// TestScenarioHTTPParentThroughSocks: with both parentProxy and
+// socksParentProxy set, go-polipo reaches the HTTP parent through the SOCKS
+// server, as in Polipo: the SOCKS server only ever connects to the parent,
+// and the parent sees the requests, forwarded and CONNECT alike.
+func TestScenarioHTTPParentThroughSocks(t *testing.T) {
+	origin := newScenarioOrigin(t, false, nil)
+	secure := newScenarioOrigin(t, true, nil)
+	parent := newScenarioHTTPParent(t, "Basic cGFyZW50OnB3", false) // parent:pw
+	parentAddr := parent.Listener.Addr().String()
+	socks := newScenarioSocksParent(t, "socks", "pw")
+	p := startScenarioProxy(t, secure.Server,
+		"parentProxy = "+parentAddr, "parentAuthCredentials = parent:pw",
+		"socksParentProxy = "+socks.ln.Addr().String(), "socksAuthCredentials = socks:pw",
+		"tunnelAllowedPorts = 1-65535")
+
+	runScenario(t, []scenarioStep{
+		{"a page goes through the SOCKS server to the parent", func(t *testing.T) {
+			resp, body := p.get(t, origin.URL+"/page")
+			wantResponse(t, resp, body, http.StatusOK, "/page v1")
+			wantSeen(t, "requests at the parent", parent.requests(), []string{"GET " + origin.URL + "/page"})
+			for _, d := range socks.destinations() {
+				if d != parentAddr {
+					t.Fatalf("SOCKS destinations = %q, want only the parent %s", socks.destinations(), parentAddr)
+				}
+			}
+			if len(socks.destinations()) == 0 {
+				t.Fatal("the SOCKS server was not used")
+			}
+		}},
+		{"an HTTPS page goes the same way as CONNECT", func(t *testing.T) {
+			resp, body := p.get(t, secure.URL+"/secure")
+			wantResponse(t, resp, body, http.StatusOK, "/secure v1")
+			wantSeen(t, "requests at the parent", parent.requests(),
+				[]string{"GET " + origin.URL + "/page", "CONNECT " + secure.Listener.Addr().String()})
+			for _, d := range socks.destinations() {
+				if d != parentAddr {
+					t.Fatalf("SOCKS destinations = %q, want only the parent %s", socks.destinations(), parentAddr)
+				}
+			}
+		}},
+	})
+}
