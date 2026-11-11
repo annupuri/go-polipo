@@ -145,6 +145,15 @@ func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, unca
 func (ph *ProxyHandler) rewrite(pr *httputil.ProxyRequest) {
 	out := pr.Out
 	out.URL.RawQuery = pr.In.URL.RawQuery
+	// An OPTIONS for a URL with no path and no query asks about the origin
+	// server as a whole: the last proxy must send it as "OPTIONS *" (RFC
+	// 9112 section 3.2.4). Go's client would send "/"; an Opaque "*" makes
+	// it send "*". Through a parent, the parent is the last proxy, and "*"
+	// would ask about the parent itself, so the URL goes on with a "/".
+	if out.Method == http.MethodOptions && !ph.viaParent &&
+		pr.In.URL.Path == "" && pr.In.URL.RawQuery == "" && !pr.In.URL.ForceQuery {
+		out.URL.Opaque = "*"
+	}
 	for _, h := range ph.config.CensoredHeaders {
 		out.Header.Del(h)
 	}

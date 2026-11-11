@@ -124,7 +124,9 @@
     as in Polipo (RFC 9110 section 7.7).  A TRACE or OPTIONS request
     with Max-Forwards: 0 is answered by go-polipo (OPTIONS with a 200,
     TRACE with a 405 rather than an echo of its headers), and a larger
-    value is decremented (RFC 9110 section 7.6.2).  CONNECT tunnelling
+    value is decremented (RFC 9110 section 7.6.2).  An OPTIONS for a URL
+    with no path goes to the origin as "OPTIONS *" (RFC 9112 section
+    3.2.4), where Polipo sent "OPTIONS /".  CONNECT tunnelling
     and the tunnelAllowedPorts filter are retained; the default
     (22, 80, 109-110, 143, 443, 873, 993, 995, 2401, 5222-5223, 9418)
     matches Polipo's (ssh, HTTP, POP, IMAP, HTTPS, rsync, IMAPS, POP3S,

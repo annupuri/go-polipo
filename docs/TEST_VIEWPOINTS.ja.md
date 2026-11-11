@@ -37,7 +37,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | # | 観点 | 値の分類 | テスト | 抜け |
 |---|---|---|---|---|
 | R1 | メソッド | GET、HEAD、POST/PUT/DELETE(安全でない)、OPTIONS、TRACE、CONNECT | TestProxyHandleForward, TestUnsafeRequestInvalidatesCache, TestMaxForwards, TestRangeIgnoredForHead | |
-| R2 | リクエストターゲットの形式 | absolute、origin(ローカルページ)、authority(CONNECT)、asterisk(`OPTIONS *`) | TestProxyLocalInterface, TestProxyOtherLocalFormIsNotFound, TestProxyConnectTunnel | `OPTIONS *` |
+| R2 | リクエストターゲットの形式 | absolute、パスのない absolute(`OPTIONS` は `*` で転送。親経由は除く)、origin(ローカルページ)、authority(CONNECT)、asterisk(`OPTIONS *`) | TestProxyLocalInterface, TestProxyOtherLocalFormIsNotFound, TestProxyConnectTunnel, TestOptionsWithEmptyPath, TestOptionsWithEmptyPathThroughParent | `OPTIONS *` |
 | R3 | 接続先のポート | `allowedPorts` の内/外、`tunnelAllowedPorts` の内/外、不正 | TestProxyForwardPortNotAllowed, TestProxyHandleConnectInvalidPort, TestDefaultAllowedPorts, TestDefaultTunnelAllowedPorts, TestScenarioRestrictedProxy | |
 | R4 | 接続先のアドレス | 公開、ループバック、リンクローカル、プライベート、それらが混ざって解決される名前 | TestAddressClasses, TestCheckDestination, TestForbidLocalDestinationsForward, TestForbidLocalDestinationsConnect | |
 | R5 | forbidden 系の一覧 | ドメイン、サブドメイン、正規表現、ファイルを並べたディレクトリ、再読み込み | TestForbiddenMatch, TestForbiddenMatchTunnel, TestForbiddenLoadDirectory, TestProxyForbiddenFiltering, TestProxyForbiddenTunnelsFile, TestProxyReload | |
