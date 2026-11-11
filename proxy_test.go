@@ -2733,6 +2733,58 @@ func TestServerTimeoutOnReusedConnection(t *testing.T) {
 	}
 }
 
+// TestServerIdleTimeout: an idle connection to the origin is kept for reuse
+// for serverIdleTimeout and closed after it, so the next request opens a
+// new one.
+func TestServerIdleTimeout(t *testing.T) {
+	var opened, closed atomic.Int32
+	backend := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		io.WriteString(w, "ok")
+	}))
+	backend.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		switch s {
+		case http.StateNew:
+			opened.Add(1)
+		case http.StateClosed:
+			closed.Add(1)
+		}
+	}
+	backend.Start()
+	defer backend.Close()
+
+	cfg := newTestConfig()
+	cfg.ServerIdleTimeout = 200 * time.Millisecond
+	ph := newTestHandler(cfg)
+	get := func() {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, backend.URL+"/", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		ph.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+	}
+
+	get()
+	get() // at once: the idle connection is reused
+	if n := opened.Load(); n != 1 {
+		t.Fatalf("after two quick requests the origin saw %d connections, want 1", n)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for closed.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if closed.Load() != 1 {
+		t.Fatal("the idle connection was not closed after serverIdleTimeout")
+	}
+	get()
+	if n := opened.Load(); n != 2 {
+		t.Errorf("after the idle timeout the origin saw %d connections, want 2", n)
+	}
+}
+
 // TestClientTimeout: a client that connects and sends nothing is
 // disconnected after clientTimeout.
 func TestClientTimeout(t *testing.T) {

@@ -68,7 +68,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | # | 観点 | 値の分類 | テスト | 抜け |
 |---|---|---|---|---|
 | N1 | オリジンに届くか | 正常、拒否、ホスト名がない、タイムアウト(`serverTimeout`)、本文の途中で止まる、本文の途中で切れる | TestProxyForwardRoundTripError, TestUpstreamErrorReply, TestServerTimeoutAwaitingHeaders, TestServerTimeoutMidBody, TestStoreDiscardsIncompleteBody | |
-| N2 | 接続の再利用 | 再利用、`serverIdleTimeout` | TestServerTimeoutOnReusedConnection | `serverIdleTimeout` そのもの |
+| N2 | 接続の再利用 | `serverIdleTimeout` 内なら再利用、過ぎたら閉じる | TestServerTimeoutOnReusedConnection, TestServerIdleTimeout | |
 | N3 | エラー応答の本文 | ネットワークの情報を漏らさない | TestUpstreamErrorBodyRevealsNothing | |
 
 ## 5. キャッシュの状態
@@ -135,4 +135,4 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 
 ## わかっている抜け
 
-上の表から集めたものです。次にテストに取り組む人のために並べておきます:N2 `serverIdleTimeout`、S5 ディスクのエラー、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、U5 `tunnelIdleTimeout` 設定時の片側クローズ、P5 SIGTERM での終了、Windows の CI。
+上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクのエラー、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、U5 `tunnelIdleTimeout` 設定時の片側クローズ、P5 SIGTERM での終了、Windows の CI。
