@@ -484,3 +484,84 @@ func TestOptionsAsteriskToProxy(t *testing.T) {
 		t.Errorf("Proxy-Authenticate = %q, want none", v)
 	}
 }
+
+// TestScenarioExpectContinue: a client that sends "Expect: 100-continue"
+// waits for go-polipo before sending the body (RFC 9110 section 10.1.1).
+// go-polipo says 100 Continue once it starts forwarding, and answers a
+// request it refuses at once with the final status, so the body is never
+// sent. An expectation it does not know is a 417, as in Polipo.
+func TestScenarioExpectContinue(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		io.WriteString(w, "stored")
+	}))
+	t.Cleanup(origin.Close)
+	forbiddenPath := filepath.Join(t.TempDir(), "forbidden")
+	if err := os.WriteFile(forbiddenPath, []byte("/blocked/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	p := startScenarioProxy(t, nil, "forbiddenFile = "+forbiddenPath)
+
+	// post sends the headers of a POST with expect, then waits for the
+	// first status line before sending the body. It returns that first
+	// status code and the final one.
+	post := func(t *testing.T, path, expect string) (first, final int) {
+		t.Helper()
+		conn, err := net.DialTimeout("tcp", p.addr, 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(5 * time.Second))
+		fmt.Fprintf(conn, "POST %s%s HTTP/1.1\r\nHost: %s\r\nContent-Length: 5\r\nExpect: %s\r\n\r\n",
+			origin.URL, path, strings.TrimPrefix(origin.URL, "http://"), expect)
+		br := bufio.NewReader(conn)
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		first = resp.StatusCode
+		if first != http.StatusContinue {
+			resp.Body.Close()
+			return first, first
+		}
+		io.WriteString(conn, "hello")
+		resp, err = http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("POST %s after 100 Continue: %v", path, err)
+		}
+		resp.Body.Close()
+		return first, resp.StatusCode
+	}
+	received := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), bodies...)
+	}
+
+	runScenario(t, []scenarioStep{
+		{"go-polipo says 100 Continue, then the body reaches the origin", func(t *testing.T) {
+			if first, final := post(t, "/upload", "100-continue"); first != http.StatusContinue || final != http.StatusOK {
+				t.Fatalf("got %d then %d, want 100 then 200", first, final)
+			}
+			wantSeen(t, "bodies at the origin", received(), []string{"hello"})
+		}},
+		{"a refused request gets its final status without 100 Continue", func(t *testing.T) {
+			if first, _ := post(t, "/blocked/upload", "100-continue"); first != http.StatusForbidden {
+				t.Fatalf("first status %d, want 403", first)
+			}
+			wantSeen(t, "bodies at the origin", received(), []string{"hello"})
+		}},
+		{"an unknown expectation is a 417", func(t *testing.T) {
+			if first, _ := post(t, "/upload", "something-else"); first != http.StatusExpectationFailed {
+				t.Fatalf("first status %d, want 417", first)
+			}
+			wantSeen(t, "bodies at the origin", received(), []string{"hello"})
+		}},
+	})
+}
