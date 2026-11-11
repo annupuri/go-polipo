@@ -123,7 +123,7 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 | U2 | HTTP parent | forwarded, CONNECT, credentials correct / wrong / in the URL, parent refuses | TestParentProxyAuthCredentials, TestParentProxyRefusesCredentials, TestConnectThroughParentProxy*, TestScenarioHTTPParentProxy | `https://` parent |
 | U3 | SOCKS5 parent | forwarded, CONNECT, credentials correct / wrong | TestDialContextSocks, TestSocksAuthCredentials, TestScenarioSocksParentProxy | |
 | U4 | HTTP parent through SOCKS | both set | | not tested |
-| U5 | Tunnel lifetime | busy, idle past `tunnelIdleTimeout`, half-close | TestTunnelIdleTimeout*, TestTunnelOutlivesTimeouts, TestConnectForwardsBytesSentWithTheRequest | half-close with `tunnelIdleTimeout` |
+| U5 | Tunnel lifetime | busy, idle past `tunnelIdleTimeout`, half-close with and without `tunnelIdleTimeout` | TestTunnelIdleTimeout*, TestTunnelOutlivesTimeouts, TestConnectForwardsBytesSentWithTheRequest, TestTunnelHalfClose | |
 
 ## 8. Operation
 
@@ -150,5 +150,5 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 ## Known gaps
 
 Collected from the tables above, for whoever picks up test work next:
-S5 a full disk, U2 `https://` parent, U4 HTTP parent through SOCKS, U5
-half-close with `tunnelIdleTimeout`, P5 shutdown on SIGTERM, Windows in CI.
+S5 a full disk, U2 `https://` parent, U4 HTTP parent through SOCKS,
+P5 shutdown on SIGTERM, Windows in CI.

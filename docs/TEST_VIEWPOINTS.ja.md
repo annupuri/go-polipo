@@ -109,7 +109,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | U2 | HTTP の親プロキシ | 転送、CONNECT、認証情報が正しい/誤り/URL に記載、親が拒否 | TestParentProxyAuthCredentials, TestParentProxyRefusesCredentials, TestConnectThroughParentProxy*, TestScenarioHTTPParentProxy | `https://` の親 |
 | U3 | SOCKS5 の親プロキシ | 転送、CONNECT、認証情報が正しい/誤り | TestDialContextSocks, TestSocksAuthCredentials, TestScenarioSocksParentProxy | |
 | U4 | SOCKS 経由の HTTP 親プロキシ | 両方を設定 | | 未テスト |
-| U5 | トンネルの寿命 | 通信中、`tunnelIdleTimeout` を超えて無通信、片側だけ閉じる | TestTunnelIdleTimeout*, TestTunnelOutlivesTimeouts, TestConnectForwardsBytesSentWithTheRequest | `tunnelIdleTimeout` 設定時の片側クローズ |
+| U5 | トンネルの寿命 | 通信中、`tunnelIdleTimeout` を超えて無通信、片側だけ閉じる(`tunnelIdleTimeout` の有無それぞれ) | TestTunnelIdleTimeout*, TestTunnelOutlivesTimeouts, TestConnectForwardsBytesSentWithTheRequest, TestTunnelHalfClose | |
 
 ## 8. 運用
 
@@ -135,4 +135,4 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 
 ## わかっている抜け
 
-上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、U5 `tunnelIdleTimeout` 設定時の片側クローズ、P5 SIGTERM での終了、Windows の CI。
+上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、P5 SIGTERM での終了、Windows の CI。
