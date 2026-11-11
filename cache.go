@@ -260,7 +260,7 @@ func (cm *CacheManager) getDirname(rawURL string) (string, error) {
 
 		if c == '%' || !isSafe {
 			sb.WriteByte('%')
-			sb.WriteString(fmt.Sprintf("%02X", c))
+			fmt.Fprintf(&sb, "%02X", c)
 		} else {
 			sb.WriteByte(c)
 		}
@@ -909,7 +909,7 @@ func (b *cacheBody) dropDisk(reason error) {
 	}
 	b.disk = nil
 	w.pw.CloseWithError(reason)
-	<-w.done
+	<-w.done //nolint:errcheck // wait for the writer to stop; its outcome no longer matters
 	os.Remove(w.tmp)
 }
 
