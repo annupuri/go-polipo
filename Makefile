@@ -26,7 +26,7 @@ ifeq ($(GO),)
     GO = $(shell echo ~/.asdf/installs/golang/1.27.3/go/bin/go)
 endif
 
-.PHONY: all build build-windows installer test cover vet fmt vulncheck clean install
+.PHONY: all build build-windows installer test cover vet fmt vulncheck lint clean install
 
 all: build
 
@@ -59,6 +59,10 @@ fmt:
 
 vulncheck:
 	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+# Keep the version in step with the golangci-lint job in .github/workflows/ci.yml.
+lint:
+	$(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
 
 clean:
 	rm -rf $(OUTDIR) coverage.out

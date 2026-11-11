@@ -1,0 +1,35 @@
+version: "2"
+
+# The default linters: errcheck, govet, ineffassign, staticcheck, unused.
+
+linters:
+  settings:
+    staticcheck:
+      checks:
+        # staticcheck's defaults ...
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        # ... and QF1008: brw.Reader.Peek reads better next to
+        # brw.Reader.Buffered, where the embedded field cannot be left out.
+        - -QF1008
+
+  exclusions:
+    rules:
+      # Errors go-polipo ignores on purpose: closing, deadlines, writes to a
+      # client that may be gone, removing a file that may be gone, and
+      # copying a body or tunnel until either side stops. Reviewed one by
+      # one on 2026-11-09; none needs handling. Mark them with `_ =` and
+      # shrink this list instead of adding to it.
+      - linters: [errcheck]
+        text: "Error return value of `[^`]*\\.(Close|CloseWrite|SetDeadline|SetReadDeadline)` is not checked"
+      - linters: [errcheck]
+        text: "Error return value of `(fmt\\.Fprint|fmt\\.Fprintf|fmt\\.Fprintln|io\\.Copy|os\\.Remove|filepath\\.WalkDir|clientConn\\.Write|w\\.Write)` is not checked"
+      # Tests ignore errors from their own fixtures; a failure there shows
+      # up in what the test checks.
+      - linters: [errcheck]
+        path: _test\.go

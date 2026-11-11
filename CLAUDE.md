@@ -13,9 +13,10 @@ In comparisons, "v1.1.x" means the original C Polipo and "v2.0.x" this rewrite
 | `make test` / `go test ./...` | Run the tests. CI also runs them with `-race` |
 | `make vet`, `gofmt -l .` | Must be clean; CI fails on either |
 | `make vulncheck` | govulncheck (CI runs it too) |
+| `make lint` | golangci-lint with `.golangci.yml`; must be clean, CI runs it too |
 | `make cover` | Tests with a coverage summary |
 
-Run gofmt, vet and the tests before every commit.
+Run gofmt, vet, `make lint` and the tests before every commit.
 
 ## Principles
 
@@ -39,6 +40,9 @@ Run gofmt, vet and the tests before every commit.
   fallback path in `Makefile`, and the "Go 1.x.y" mentions in `README*.md`,
   `docs/INSTALL*.md` and `CHANGES`. CI reads the version from `go.mod`.
   Afterwards run `asdf reshim golang`, or gopls and other shimmed tools fail.
+- **The golangci-lint version** is pinned twice: the `lint` target in
+  `Makefile` and the golangci-lint job in `.github/workflows/ci.yml`.
+  Change both together.
 - **`CONTRIBUTING.md`** repeats the principles, test rules and commit rules
   in this file for outside contributors; when one of them changes here,
   change it there too.
