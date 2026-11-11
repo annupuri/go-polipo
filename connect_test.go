@@ -161,3 +161,50 @@ func TestTunnelIdleTimeoutOffByDefault(t *testing.T) {
 		t.Fatalf("echo after a silence: %q, %v", b, err)
 	}
 }
+
+// TestTunnelHalfClose: a client that has sent all it will send closes its
+// write side and waits for the reply, as many request/response protocols
+// do. The tunnel passes the half-close on, so the destination reads EOF and
+// answers, and the reply still reaches the client. Both ways of running a
+// tunnel are checked: the plain copy, and the one that watches for
+// tunnelIdleTimeout, whose wrapped connections must still half-close.
+func TestTunnelHalfClose(t *testing.T) {
+	for _, idle := range []time.Duration{0, 10 * time.Second} {
+		t.Run("tunnelIdleTimeout="+idle.String(), func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			go func() {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer c.Close()
+				c.SetDeadline(time.Now().Add(5 * time.Second))
+				all, err := io.ReadAll(c) // returns only once the client's half-close arrives
+				if err != nil {
+					return
+				}
+				c.Write(append([]byte("got:"), all...))
+			}()
+
+			cfg := newTestConfig()
+			cfg.TunnelIdleTimeout = idle
+			pc, br := tunnelThroughProxy(t, cfg, ln.Addr().String())
+			pc.SetDeadline(time.Now().Add(3 * time.Second))
+			io.WriteString(pc, "hello")
+			if err := pc.(*net.TCPConn).CloseWrite(); err != nil {
+				t.Fatal(err)
+			}
+			reply, err := io.ReadAll(br)
+			if err != nil {
+				t.Fatalf("reading the reply: %v (the half-close did not reach the destination?)", err)
+			}
+			if string(reply) != "got:hello" {
+				t.Errorf("reply = %q, want %q", reply, "got:hello")
+			}
+		})
+	}
+}
