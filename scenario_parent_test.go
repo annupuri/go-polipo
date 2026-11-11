@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/binary"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Scenarios with a parent proxy between go-polipo and the origins. The
@@ -32,19 +35,20 @@ func relay(a, b net.Conn) {
 
 // scenarioHTTPParent is an HTTP parent proxy that requires Basic
 // credentials, forwards requests in absolute form, and opens CONNECT
-// tunnels. It records each request it receives as "METHOD target".
+// tunnels. It records each request it receives as "METHOD target". With
+// useTLS it is an https:// parent, with httptest's certificate.
 type scenarioHTTPParent struct {
 	*httptest.Server
 	mu   sync.Mutex
 	seen []string
 }
 
-func newScenarioHTTPParent(t *testing.T, wantAuth string) *scenarioHTTPParent {
+func newScenarioHTTPParent(t *testing.T, wantAuth string, useTLS bool) *scenarioHTTPParent {
 	t.Helper()
 	p := &scenarioHTTPParent{}
 	transport := &http.Transport{} // straight to the origin, whatever the environment says
 	t.Cleanup(transport.CloseIdleConnections)
-	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	p.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		target := r.URL.String()
 		if r.Method == http.MethodConnect {
 			target = r.Host
@@ -93,6 +97,11 @@ func newScenarioHTTPParent(t *testing.T, wantAuth string) *scenarioHTTPParent {
 		w.WriteHeader(resp.StatusCode)
 		io.Copy(w, resp.Body)
 	}))
+	if useTLS {
+		p.StartTLS()
+	} else {
+		p.Start()
+	}
 	t.Cleanup(p.Close)
 	return p
 }
@@ -258,7 +267,7 @@ func wantSeen(t *testing.T, what string, got, want []string) {
 func TestScenarioHTTPParentProxy(t *testing.T) {
 	origin := newScenarioOrigin(t, false, nil)
 	secure := newScenarioOrigin(t, true, nil)
-	parent := newScenarioHTTPParent(t, "Basic cGFyZW50OnB3") // parent:pw
+	parent := newScenarioHTTPParent(t, "Basic cGFyZW50OnB3", false) // parent:pw
 	parentAddr := parent.Listener.Addr().String()
 	p := startScenarioProxy(t, secure.Server,
 		"parentProxy = "+parentAddr, "parentAuthCredentials = parent:pw", "tunnelAllowedPorts = 1-65535")
@@ -331,6 +340,81 @@ func TestScenarioSocksParentProxy(t *testing.T) {
 			resp, body := wrong.get(t, origin.URL+"/other")
 			wantResponse(t, resp, body, http.StatusBadGateway, "")
 			wantHits(t, origin, "/other", 0)
+		}},
+	})
+}
+
+// TestScenarioHTTPSParentProxy: with an https:// parentProxy, go-polipo
+// speaks TLS to the parent for both forwarded requests and CONNECT, and a
+// parent whose certificate it does not trust is a 502, never a fallback to
+// plain HTTP.
+func TestScenarioHTTPSParentProxy(t *testing.T) {
+	origin := newScenarioOrigin(t, false, nil)
+	secure := newScenarioOrigin(t, true, nil)
+	parent := newScenarioHTTPParent(t, "Basic cGFyZW50OnB3", true) // parent:pw
+	parentCAs := parent.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+
+	// The scenario proxy is built from a config file and cannot be given
+	// the test parent's certificate, so this one is built from a Config.
+	start := func(t *testing.T, trustParent bool) *http.Client {
+		t.Helper()
+		cfg := newTestConfig()
+		cfg.ParentProxy = parent.URL
+		cfg.ParentAuthCredentials = "parent:pw"
+		cfg.TunnelAllowedPorts = PortSet{{1, 65535}}
+		ph := newTestHandler(cfg)
+		if trustParent {
+			ph.transport.TLSClientConfig = &tls.Config{RootCAs: parentCAs}
+		}
+		proxy := httptest.NewServer(ph)
+		t.Cleanup(proxy.Close)
+		transport := &http.Transport{
+			Proxy:           http.ProxyURL(&url.URL{Scheme: "http", Host: proxy.Listener.Addr().String()}),
+			TLSClientConfig: &tls.Config{RootCAs: secure.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs},
+		}
+		t.Cleanup(transport.CloseIdleConnections)
+		return &http.Client{Transport: transport, Timeout: 10 * time.Second}
+	}
+	get := func(t *testing.T, c *http.Client, target string) (int, string) {
+		t.Helper()
+		resp, err := c.Get(target)
+		if err != nil {
+			return 0, err.Error()
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	scope := t
+	var client *http.Client
+
+	runScenario(t, []scenarioStep{
+		{"go-polipo starts with an https:// parent it trusts", func(t *testing.T) {
+			client = start(scope, true)
+		}},
+		{"a page is fetched through the parent over TLS", func(t *testing.T) {
+			if code, body := get(t, client, origin.URL+"/page"); code != http.StatusOK || body != "/page v1" {
+				t.Fatalf("got %d %q, want 200 %q", code, body, "/page v1")
+			}
+			wantSeen(t, "requests at the parent", parent.requests(), []string{"GET " + origin.URL + "/page"})
+		}},
+		{"an HTTPS page goes through the parent as CONNECT over TLS", func(t *testing.T) {
+			if code, body := get(t, client, secure.URL+"/secure"); code != http.StatusOK || body != "/secure v1" {
+				t.Fatalf("got %d %q, want 200 %q", code, body, "/secure v1")
+			}
+			wantSeen(t, "requests at the parent", parent.requests(),
+				[]string{"GET " + origin.URL + "/page", "CONNECT " + secure.Listener.Addr().String()})
+		}},
+		{"a parent go-polipo does not trust is a 502", func(t *testing.T) {
+			untrusting := start(scope, false)
+			if code, _ := get(t, untrusting, origin.URL+"/other"); code != http.StatusBadGateway {
+				t.Fatalf("status %d, want 502", code)
+			}
+			if _, err := untrusting.Get(secure.URL + "/other"); err == nil {
+				t.Fatal("an HTTPS page went through a parent go-polipo does not trust")
+			}
+			wantHits(t, origin, "/other", 0)
+			wantHits(t, secure, "/other", 0)
 		}},
 	})
 }

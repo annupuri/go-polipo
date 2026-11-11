@@ -106,7 +106,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | # | 観点 | 値の分類 | テスト | 抜け |
 |---|---|---|---|---|
 | U1 | 直接 | HTTP、CONNECT | TestProxyHandleForward, TestProxyConnectTunnel, TestScenarioHTTPS | |
-| U2 | HTTP の親プロキシ | 転送、CONNECT、認証情報が正しい/誤り/URL に記載、親が拒否 | TestParentProxyAuthCredentials, TestParentProxyRefusesCredentials, TestConnectThroughParentProxy*, TestScenarioHTTPParentProxy | `https://` の親 |
+| U2 | HTTP の親プロキシ | 転送、CONNECT、認証情報が正しい/誤り/URL に記載、親が拒否、`https://` の親(証明書を信頼する/しない) | TestParentProxyAuthCredentials, TestParentProxyRefusesCredentials, TestConnectThroughParentProxy*, TestScenarioHTTPParentProxy, TestScenarioHTTPSParentProxy | |
 | U3 | SOCKS5 の親プロキシ | 転送、CONNECT、認証情報が正しい/誤り | TestDialContextSocks, TestSocksAuthCredentials, TestScenarioSocksParentProxy | |
 | U4 | SOCKS 経由の HTTP 親プロキシ | 両方を設定 | | 未テスト |
 | U5 | トンネルの寿命 | 通信中、`tunnelIdleTimeout` を超えて無通信、片側だけ閉じる(`tunnelIdleTimeout` の有無それぞれ) | TestTunnelIdleTimeout*, TestTunnelOutlivesTimeouts, TestConnectForwardsBytesSentWithTheRequest, TestTunnelHalfClose | |
@@ -135,4 +135,4 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 
 ## わかっている抜け
 
-上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、P5 SIGTERM での終了、Windows の CI。
+上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、U4 SOCKS 経由の HTTP 親プロキシ、P5 SIGTERM での終了、Windows の CI。
