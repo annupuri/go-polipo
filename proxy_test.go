@@ -731,6 +731,38 @@ func TestParentProxyAuthCredentials(t *testing.T) {
 	}
 }
 
+// TestParentProxyRefusesCredentials: a 407 from the HTTP parent means it
+// refused go-polipo's own parentAuthCredentials, which the client cannot
+// fix, so the client gets a 502 - as for a CONNECT the parent refuses -
+// rather than a 407 asking it for credentials.
+func TestParentProxyRefusesCredentials(t *testing.T) {
+	parent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Proxy-Authenticate", `Basic realm="parent"`)
+		http.Error(w, "parent wants credentials", http.StatusProxyAuthRequired)
+	}))
+	defer parent.Close()
+
+	cfg := newTestConfig()
+	cfg.ParentProxy = strings.TrimPrefix(parent.URL, "http://")
+	cfg.ParentAuthCredentials = "alice:wrong"
+	ph := newTestHandler(cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "parent proxy") {
+		t.Errorf("body = %q, want it to name the parent proxy", rr.Body.String())
+	}
+	if n := ph.stats.upstreamErrors.Load(); n != 1 {
+		t.Errorf("upstreamErrors = %d, want 1", n)
+	}
+}
+
 func TestParentProxyNoAuthHeaderWithoutCredentials(t *testing.T) {
 	var sawAuth bool
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

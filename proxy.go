@@ -194,6 +194,10 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 	http.Error(w, msg, code)
 }
 
+// errParentProxyAuth is the error for an HTTP parent proxy that answered a
+// forwarded request with 407; see cacheResponse.
+var errParentProxyAuth = errors.New("parent proxy refused parentAuthCredentials (407)")
+
 // upstreamErrorReply chooses the status and body for a forwarded request the
 // origin could not answer. A serverTimeout running out is a 504 (RFC 9110
 // section 15.6.5), as in Polipo; any other failure is a 502.
@@ -206,8 +210,13 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 // therefore says only what kind of failure it was, and the full error goes
 // to the log. A host that does not exist gets its own message, since that is
 // the failure a user most often needs to tell apart (a mistyped address) and
-// it reveals nothing the page does not already know.
+// it reveals nothing the page does not already know. So does a parent proxy
+// refusing parentAuthCredentials, which only go-polipo's configuration can
+// fix.
 func upstreamErrorReply(err error) (int, string) {
+	if errors.Is(err, errParentProxyAuth) {
+		return http.StatusBadGateway, "Bad Gateway: the parent proxy refused go-polipo's credentials"
+	}
 	var ne net.Error
 	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout() {
 		return http.StatusGatewayTimeout, "Gateway Timeout: the origin server did not respond in time"
@@ -255,6 +264,16 @@ func (ph *ProxyHandler) Reload() error {
 // first fetched or last revalidated, so a later cache hit never needs to
 // re-censor or re-merge.
 func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
+	// A 407 through an HTTP parent is the parent refusing go-polipo's own
+	// parentAuthCredentials. Passed on, it would ask the client for
+	// credentials the client has no way to send to the parent, so it is a
+	// failure to reach the origin: a 502, as for a CONNECT the parent
+	// refuses (connectParent). The response handed back would not even
+	// carry the Proxy-Authenticate a 407 must have (RFC 9110 section
+	// 15.5.8), since that is removed as hop-by-hop.
+	if ph.viaParent && resp.StatusCode == http.StatusProxyAuthRequired {
+		return errParentProxyAuth
+	}
 	// RFC 9110 section 6.6.1: a response without a Date gets one recording
 	// when it was received, before it is cached or passed on - as Polipo
 	// did (server.c). Done first, so that a Date-less 304 refreshes the
