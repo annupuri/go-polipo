@@ -145,9 +145,9 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 | Reliability | origin failures (N1), offline (section 6), panics in goroutines | |
 | Performance efficiency | streaming without buffering whole bodies, concurrency limit (C6) | TestStoreStreamsBodyWhileCaching |
 | Compatibility | Polipo's on-disk cache format, config syntax | TestCachePathGeneration, TestLoadConfig |
-| Portability | Linux, Windows (no SIGUSR, `polipo.exe`) | CI runs on Linux only; Windows is built locally (`make build-windows`) and not tested |
+| Portability | Linux, Windows (no SIGUSR, `polipo.exe`) | CI runs the tests on Linux (with `-race`) and on Windows; Unix-only tests are skipped there |
 
 ## Known gaps
 
 Collected from the tables above, for whoever picks up test work next:
-S5 a full disk, Windows in CI.
+S5 a full disk.

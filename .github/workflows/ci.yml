@@ -39,6 +39,24 @@ jobs:
       - name: go test
         run: go test -race -coverprofile=coverage.out ./...
 
+  # go-polipo also ships for Windows (make build-windows). gofmt, -race and
+  # govulncheck do not depend on the OS and run on Linux above.
+  windows:
+    name: test (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest

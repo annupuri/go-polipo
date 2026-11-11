@@ -43,7 +43,7 @@ Workflow
        make vulncheck
 
    The Go version is the one in `go.mod`.
-4. Open a pull request against `main`. CI (build / vet / test and
+4. Open a pull request against `main`. CI (build / vet / test, test (windows) and
    govulncheck) must pass before the pull request can be merged.
 
 `main` is protected: every change, including the maintainer's own, goes in
