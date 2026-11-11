@@ -48,7 +48,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 | # | Viewpoint | Value classes | Tests | Gaps |
 |---|---|---|---|---|
 | R1 | Method | GET, HEAD, POST/PUT/DELETE (unsafe), OPTIONS, TRACE, CONNECT | TestProxyHandleForward, TestUnsafeRequestInvalidatesCache, TestMaxForwards, TestRangeIgnoredForHead | |
-| R2 | Request-target form | absolute, absolute with no path (`OPTIONS` goes on as `*`, not through a parent), origin (local pages), authority (CONNECT), asterisk (`OPTIONS *`) | TestProxyLocalInterface, TestProxyOtherLocalFormIsNotFound, TestProxyConnectTunnel, TestOptionsWithEmptyPath, TestOptionsWithEmptyPathThroughParent | `OPTIONS *` |
+| R2 | Request-target form | absolute, absolute with no path (`OPTIONS` goes on as `*`, not through a parent), origin (local pages), authority (CONNECT), asterisk (`OPTIONS *`) | TestProxyLocalInterface, TestProxyOtherLocalFormIsNotFound, TestProxyConnectTunnel, TestOptionsWithEmptyPath, TestOptionsWithEmptyPathThroughParent, TestOptionsAsteriskToProxy | |
 | R3 | Destination port | in / out of `allowedPorts`; in / out of `tunnelAllowedPorts`; invalid | TestProxyForwardPortNotAllowed, TestProxyHandleConnectInvalidPort, TestDefaultAllowedPorts, TestDefaultTunnelAllowedPorts, TestScenarioRestrictedProxy | |
 | R4 | Destination address | public, loopback, link-local, private; name resolving to a mix | TestAddressClasses, TestCheckDestination, TestForbidLocalDestinationsForward, TestForbidLocalDestinationsConnect | |
 | R5 | Forbidden lists | domain, subdomain, regex, directory of files, reload | TestForbiddenMatch, TestForbiddenMatchTunnel, TestForbiddenLoadDirectory, TestProxyForbiddenFiltering, TestProxyForbiddenTunnelsFile, TestProxyReload | |
@@ -150,6 +150,6 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 ## Known gaps
 
 Collected from the tables above, for whoever picks up test work next:
-R2 `OPTIONS *`, R13 Expect: 100-continue, N2 `serverIdleTimeout`, S5 disk
+R13 Expect: 100-continue, N2 `serverIdleTimeout`, S5 disk
 errors, U2 `https://` parent, U4 HTTP parent through SOCKS, U5 half-close
 with `tunnelIdleTimeout`, P5 shutdown on SIGTERM, Windows in CI.
