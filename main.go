@@ -133,21 +133,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // server actually started. reopenLog, nil when logFile is unset, reopens the
 // log file on SIGUSR1/SIGUSR2.
 func serve(config *Config, reopenLog func() error) int {
-	forbidden := NewForbiddenList()
-	if err := forbidden.Load(config.ForbiddenFile, config.LogLevel); err != nil {
-		logf(config.LogLevel, LogWarn, "Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
-	}
-	uncachable := NewForbiddenList()
-	if err := uncachable.Load(config.UncachableFile, config.LogLevel); err != nil {
-		logf(config.LogLevel, LogWarn, "Warning: failed to load uncachable file %s: %v", config.UncachableFile, err)
-	}
-	forbiddenTunnels := NewForbiddenList()
-	if err := forbiddenTunnels.Load(config.ForbiddenTunnelsFile, config.LogLevel); err != nil {
-		logf(config.LogLevel, LogWarn, "Warning: failed to load forbiddenTunnels file %s: %v", config.ForbiddenTunnelsFile, err)
-	}
-
-	cacheMgr := NewCacheManager(config)
-	handler := NewProxyHandler(config, cacheMgr, forbidden, uncachable, forbiddenTunnels)
+	handler, cacheMgr := newProxy(config)
 	setupReloadSignals(config.LogLevel, reopenLog, handler.Reload, cacheMgr.DiscardMemory)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))
@@ -168,6 +154,27 @@ func serve(config *Config, reopenLog func() error) int {
 		return 1
 	}
 	return 0
+}
+
+// newProxy loads the domain files config names and builds the proxy handler
+// and its cache, as serve runs them. A domain file that cannot be read is
+// logged and left empty rather than stopping the proxy.
+func newProxy(config *Config) (*ProxyHandler, *CacheManager) {
+	forbidden := NewForbiddenList()
+	if err := forbidden.Load(config.ForbiddenFile, config.LogLevel); err != nil {
+		logf(config.LogLevel, LogWarn, "Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
+	}
+	uncachable := NewForbiddenList()
+	if err := uncachable.Load(config.UncachableFile, config.LogLevel); err != nil {
+		logf(config.LogLevel, LogWarn, "Warning: failed to load uncachable file %s: %v", config.UncachableFile, err)
+	}
+	forbiddenTunnels := NewForbiddenList()
+	if err := forbiddenTunnels.Load(config.ForbiddenTunnelsFile, config.LogLevel); err != nil {
+		logf(config.LogLevel, LogWarn, "Warning: failed to load forbiddenTunnels file %s: %v", config.ForbiddenTunnelsFile, err)
+	}
+
+	cacheMgr := NewCacheManager(config)
+	return NewProxyHandler(config, cacheMgr, forbidden, uncachable, forbiddenTunnels), cacheMgr
 }
 
 // warnIfOpenProxy logs a warning when anyone who can reach the port may use
