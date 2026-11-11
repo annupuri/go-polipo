@@ -46,10 +46,21 @@ func TestLogDefaultLevelMatchesPolipo(t *testing.T) {
 	}
 }
 
+// skipReopenOnWindows skips a test that renames an open log file or its
+// directory, which Windows does not allow. Reopening is for log rotation and
+// is triggered by SIGUSR1/SIGUSR2, which Windows does not have either.
+func skipReopenOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot rename an open file; log reopening is Unix-only")
+	}
+}
+
 // TestLogFileWriterReopen: after a log rotation tool renames the log file,
 // Reopen makes later messages go to a new file at the original path, while
 // the renamed file keeps what was written before.
 func TestLogFileWriterReopen(t *testing.T) {
+	skipReopenOnWindows(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "polipo.log")
 	w, err := openLogFileWriter(path, 0o640)
@@ -81,6 +92,7 @@ func TestLogFileWriterReopen(t *testing.T) {
 // again, Reopen reports the error and logging carries on in the old file -
 // Polipo exited instead.
 func TestLogFileWriterReopenFailureKeepsLogging(t *testing.T) {
+	skipReopenOnWindows(t)
 	dir := filepath.Join(t.TempDir(), "logs")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
