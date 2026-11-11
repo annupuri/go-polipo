@@ -75,7 +75,14 @@ func (ph *ProxyHandler) connectParent(ctx context.Context, conn net.Conn, addr s
 		conn.SetDeadline(time.Now().Add(t))
 	}
 	if ph.parentURL.Scheme == "https" {
-		tlsConn := tls.Client(conn, &tls.Config{ServerName: ph.parentURL.Hostname()})
+		// The same TLS settings the Transport uses for the parent on
+		// forwarded requests, so both paths trust the same certificates.
+		cfg := &tls.Config{}
+		if base := ph.transport.TLSClientConfig; base != nil {
+			cfg = base.Clone()
+		}
+		cfg.ServerName = ph.parentURL.Hostname()
+		tlsConn := tls.Client(conn, cfg)
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			return conn, nil, err
 		}
