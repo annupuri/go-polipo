@@ -48,7 +48,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | R10 | ホップバイホップと転送系のヘッダー | エンドツーエンドのヘッダーを指す Connection、X-Forwarded-*、Forwarded、`censoredHeaders`、Referer(`censorReferer`) | TestForwardedRequestHeaders, TestConditionalHeadersSurviveConnection, TestCensoredHeadersStrippedFromRequest, TestCensorReferer* | |
 | R11 | Via、Max-Forwards | Via のループ、`disableVia`、Max-Forwards 0/n/不正 | TestVia, TestViaLoopDetected, TestMaxForwards | |
 | R12 | 認証付きリクエスト | Authorization あり | TestStoreSkipsAuthenticated | |
-| R13 | Expect: 100-continue | 本文付きリクエスト | | 未テスト |
+| R13 | Expect | 本文付きリクエストの 100-continue、go-polipo が拒否するリクエストの 100-continue、知らない指定(417) | TestScenarioExpectContinue | |
 
 ## 3. オリジンの応答
 
@@ -135,4 +135,4 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 
 ## わかっている抜け
 
-上の表から集めたものです。次にテストに取り組む人のために並べておきます:R13 Expect: 100-continue、N2 `serverIdleTimeout`、S5 ディスクのエラー、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、U5 `tunnelIdleTimeout` 設定時の片側クローズ、P5 SIGTERM での終了、Windows の CI。
+上の表から集めたものです。次にテストに取り組む人のために並べておきます:N2 `serverIdleTimeout`、S5 ディスクのエラー、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、U5 `tunnelIdleTimeout` 設定時の片側クローズ、P5 SIGTERM での終了、Windows の CI。

@@ -59,7 +59,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 | R10 | Hop-by-hop and forwarding headers | Connection naming end-to-end headers, X-Forwarded-*, Forwarded, `censoredHeaders`, Referer (`censorReferer`) | TestForwardedRequestHeaders, TestConditionalHeadersSurviveConnection, TestCensoredHeadersStrippedFromRequest, TestCensorReferer* | |
 | R11 | Via, Max-Forwards | Via loop, `disableVia`, Max-Forwards 0 / n / invalid | TestVia, TestViaLoopDetected, TestMaxForwards | |
 | R12 | Authenticated request | Authorization present | TestStoreSkipsAuthenticated | |
-| R13 | Expect: 100-continue | with a request body | | not tested |
+| R13 | Expect | 100-continue on a request with a body, on a request go-polipo refuses, an unknown expectation (417) | TestScenarioExpectContinue | |
 
 ## 3. Origin response
 
@@ -150,6 +150,6 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 ## Known gaps
 
 Collected from the tables above, for whoever picks up test work next:
-R13 Expect: 100-continue, N2 `serverIdleTimeout`, S5 disk
+N2 `serverIdleTimeout`, S5 disk
 errors, U2 `https://` parent, U4 HTTP parent through SOCKS, U5 half-close
 with `tunnelIdleTimeout`, P5 shutdown on SIGTERM, Windows in CI.
