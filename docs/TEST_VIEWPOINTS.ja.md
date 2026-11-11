@@ -131,8 +131,8 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | 信頼性 | オリジンの障害(N1)、オフライン(6節)、ゴルーチン内の panic | |
 | 性能効率 | 本文全体をためずに流す、同時実行の上限(C6) | TestStoreStreamsBodyWhileCaching |
 | 互換性 | Polipo のディスクキャッシュ形式、設定の書き方 | TestCachePathGeneration, TestLoadConfig |
-| 移植性 | Linux、Windows(SIGUSR がない、`polipo.exe`) | CI は Linux だけ。Windows は手元でビルド(`make build-windows`)するだけで、テストしていない |
+| 移植性 | Linux、Windows(SIGUSR がない、`polipo.exe`) | CI は Linux(`-race` 付き)と Windows でテストを実行する。Unix 専用のテストは Windows では飛ばす |
 
 ## わかっている抜け
 
-上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、Windows の CI。
+上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき。
