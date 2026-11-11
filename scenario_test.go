@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -562,6 +563,59 @@ func TestScenarioExpectContinue(t *testing.T) {
 				t.Fatalf("first status %d, want 417", first)
 			}
 			wantSeen(t, "bodies at the origin", received(), []string{"hello"})
+		}},
+	})
+}
+
+// TestScenarioDiskErrors: a disk cache go-polipo cannot write to, or an
+// entry it cannot read, costs only the caching: every page is still served,
+// fetched from the origin instead.
+func TestScenarioDiskErrors(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs Unix permissions that apply to the test's user")
+	}
+	origin := newScenarioOrigin(t, false, nil)
+	// No memory cache, so every hit has to come from the disk.
+	p := startScenarioProxy(t, nil, "memoryCacheEntries = 0")
+	t.Cleanup(func() { os.Chmod(p.cacheDir, 0700) }) // so TempDir can remove it
+
+	runScenario(t, []scenarioStep{
+		{"with the cache directory read-only, pages are still served", func(t *testing.T) {
+			if err := os.Chmod(p.cacheDir, 0500); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				resp, body := p.get(t, origin.URL+"/page")
+				wantResponse(t, resp, body, http.StatusOK, "/page v1")
+			}
+			wantHits(t, origin, "/page", 2)
+			if n := p.cacheFiles(t); n != 0 {
+				t.Fatalf("%d file(s) in the disk cache, want 0", n)
+			}
+		}},
+		{"once writable again, a page is cached", func(t *testing.T) {
+			if err := os.Chmod(p.cacheDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				resp, body := p.get(t, origin.URL+"/other")
+				wantResponse(t, resp, body, http.StatusOK, "/other v1")
+			}
+			wantHits(t, origin, "/other", 1)
+		}},
+		{"an entry go-polipo cannot read is fetched again", func(t *testing.T) {
+			err := filepath.WalkDir(p.cacheDir, func(path string, d fs.DirEntry, err error) error {
+				if err == nil && !d.IsDir() {
+					err = os.Chmod(path, 0)
+				}
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, body := p.get(t, origin.URL+"/other")
+			wantResponse(t, resp, body, http.StatusOK, "/other v1")
+			wantHits(t, origin, "/other", 2)
 		}},
 	})
 }
