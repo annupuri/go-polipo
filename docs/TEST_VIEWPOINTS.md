@@ -133,7 +133,7 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 | P2 | Value syntax | each type: bool, int (hex / octal), duration, tristate, port set, list, quoted | TestSetAllKeys, TestParseLevelFormats, TestParseDuration, TestParsePortSet, TestRelaxTransparencyTristate | |
 | P3 | Commands | `-h`, `-v`, `-x` | TestRunHelp, TestRunVersion, TestRunExpire, TestRunExpireMissingRoot | |
 | P4 | Local pages | top, config, status, flush, reload; method; foreign Host; cross-site POST; `disableLocalInterface` | TestProxyLocalInterface, TestStatusPage, TestProxyFlushEndpoint, TestProxyReloadEndpoint, TestLocalInterfaceRefuses*, TestScenarioLocalPages | |
-| P5 | Signals | SIGUSR1/SIGUSR2, SIGINT/SIGTERM | TestSetupReloadSignals | shutdown on SIGTERM |
+| P5 | Signals | SIGUSR1/SIGUSR2, SIGTERM and SIGINT (stop serving, exit 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |
 | P6 | Logging | levels, `logFile`, permissions, reopen | TestLogfGatesByCategory, TestLogFileWriterReopen*, TestLogFilePermissions, TestRunLogFileWritten | |
 | P7 | Passwords shown | `-v`, `/polipo/config`, log | TestPasswordEntriesAreRedacted, TestParentProxyPasswordHidden, TestInvalidParentProxyWarningHidesPassword | |
 
@@ -150,4 +150,4 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 ## Known gaps
 
 Collected from the tables above, for whoever picks up test work next:
-S5 a full disk, P5 shutdown on SIGTERM, Windows in CI.
+S5 a full disk, Windows in CI.
