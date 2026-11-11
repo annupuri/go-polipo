@@ -90,7 +90,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 | S2 | Revalidation | 304 merges headers, 200 replaces, 304 without entry | TestConditionalRevalidation200ReplacesCache, TestRevalidation304UpdatesStoredHeaders, TestRevalidation304WithoutCachedEntryIsAnError | |
 | S3 | Tiers | disk off, memory off, both off, eviction | TestDiskCacheDisabled, TestMemoryCacheDisabled, TestMemoryCacheEntriesEviction, TestMemoryCacheIndependentOfNoDiskCache | |
 | S4 | Files on disk | corrupt, temporary (being written / abandoned), unused past `diskCacheUnlinkTime`, large and unused (`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries | |
-| S5 | Disk errors | cache directory unwritable, disk full | | not tested |
+| S5 | Disk errors | cache directory unwritable, entry unreadable, disk full | TestScenarioDiskErrors | disk full (no portable way to cause it in a test) |
 | S6 | Invalidation | unsafe method invalidates the URL | TestUnsafeRequestInvalidatesCache | |
 
 ## 6. Decision tables
@@ -150,5 +150,5 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 ## Known gaps
 
 Collected from the tables above, for whoever picks up test work next:
-S5 disk errors, U2 `https://` parent, U4 HTTP parent through SOCKS, U5
+S5 a full disk, U2 `https://` parent, U4 HTTP parent through SOCKS, U5
 half-close with `tunnelIdleTimeout`, P5 shutdown on SIGTERM, Windows in CI.

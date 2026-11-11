@@ -79,7 +79,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | S2 | 再検証 | 304 でヘッダーを合成、200 で置き換え、エントリなしの 304 | TestConditionalRevalidation200ReplacesCache, TestRevalidation304UpdatesStoredHeaders, TestRevalidation304WithoutCachedEntryIsAnError | |
 | S3 | 階層 | ディスクなし、メモリなし、両方なし、追い出し | TestDiskCacheDisabled, TestMemoryCacheDisabled, TestMemoryCacheEntriesEviction, TestMemoryCacheIndependentOfNoDiskCache | |
 | S4 | ディスク上のファイル | 壊れている、一時ファイル(書き込み中/放置)、`diskCacheUnlinkTime` を過ぎて未使用、大きくて未使用(`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries | |
-| S5 | ディスクのエラー | キャッシュディレクトリに書けない、ディスクがいっぱい | | 未テスト |
+| S5 | ディスクのエラー | キャッシュディレクトリに書けない、エントリが読めない、ディスクがいっぱい | TestScenarioDiskErrors | ディスクがいっぱい(テストで起こす移植性のある方法がない) |
 | S6 | 無効化 | 安全でないメソッドがその URL を無効にする | TestUnsafeRequestInvalidatesCache | |
 
 ## 6. デシジョンテーブル
@@ -135,4 +135,4 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 
 ## わかっている抜け
 
-上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクのエラー、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、U5 `tunnelIdleTimeout` 設定時の片側クローズ、P5 SIGTERM での終了、Windows の CI。
+上の表から集めたものです。次にテストに取り組む人のために並べておきます:S5 ディスクがいっぱいのとき、U2 `https://` の親、U4 SOCKS 経由の HTTP 親プロキシ、U5 `tunnelIdleTimeout` 設定時の片側クローズ、P5 SIGTERM での終了、Windows の CI。
