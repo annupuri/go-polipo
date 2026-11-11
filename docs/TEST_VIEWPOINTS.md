@@ -79,7 +79,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 | # | Viewpoint | Value classes | Tests | Gaps |
 |---|---|---|---|---|
 | N1 | Origin reachable | up, refused, unknown host, timeout (`serverTimeout`), stalls mid-body, closes mid-body | TestProxyForwardRoundTripError, TestUpstreamErrorReply, TestServerTimeoutAwaitingHeaders, TestServerTimeoutMidBody, TestStoreDiscardsIncompleteBody | |
-| N2 | Reused connection | reuse, `serverIdleTimeout` | TestServerTimeoutOnReusedConnection | `serverIdleTimeout` itself |
+| N2 | Reused connection | reuse within `serverIdleTimeout`, closed after it | TestServerTimeoutOnReusedConnection, TestServerIdleTimeout | |
 | N3 | Error reply body | reveals nothing of the network | TestUpstreamErrorBodyRevealsNothing | |
 
 ## 5. Cache state
@@ -150,6 +150,5 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 ## Known gaps
 
 Collected from the tables above, for whoever picks up test work next:
-N2 `serverIdleTimeout`, S5 disk
-errors, U2 `https://` parent, U4 HTTP parent through SOCKS, U5 half-close
-with `tunnelIdleTimeout`, P5 shutdown on SIGTERM, Windows in CI.
+S5 disk errors, U2 `https://` parent, U4 HTTP parent through SOCKS, U5
+half-close with `tunnelIdleTimeout`, P5 shutdown on SIGTERM, Windows in CI.
