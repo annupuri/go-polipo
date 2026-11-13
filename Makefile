@@ -23,7 +23,7 @@ endif
 # Use the go in PATH; fall back to the asdf-managed toolchain under WSL.
 GO := $(shell which go 2>/dev/null)
 ifeq ($(GO),)
-    GO = $(shell echo ~/.asdf/installs/golang/1.27.3/go/bin/go)
+    GO = $(shell echo ~/.asdf/installs/golang/1.27.4/go/bin/go)
 endif
 
 .PHONY: all build build-windows installer test cover vet fmt vulncheck lint clean install
