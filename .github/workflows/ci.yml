@@ -79,4 +79,7 @@ jobs:
     steps:
       - uses: golang/govulncheck-action@v1
         with:
+          # The action defaults go-version-input to "stable", which would
+          # override go-version-file; empty it so go.mod's Go is used.
+          go-version-input: ''
           go-version-file: go.mod
