@@ -5,13 +5,11 @@ go-polipo (v2.0.0) Installation Instructions
 
 This is a Go-based implementation of the Polipo caching web proxy.
 
-1. Requirements
----------------
+## 1. Requirements
 
 To build go-polipo, you need to have Go (version 1.27.4 or later) installed on your system.
 
-2. Building and running go-polipo
----------------------------------
+## 2. Building and running go-polipo
 
 You can build the binary using the provided Makefile:
 
@@ -29,8 +27,7 @@ To run the proxy:
 
 By default, the proxy runs in the foreground and listens on http://127.0.0.1:8123/.
 
-3. Configuring your web browser
--------------------------------
+## 3. Configuring your web browser
 
 Configure your web browser to use the proxy on `http://localhost:8123/`.
 You can also set the proxy via environment variables:
@@ -84,8 +81,7 @@ in the event log), which are harmless: they only report ad impressions and
 clicks back to advertisers. UET normally reports to `bat.bing.com`, so adding
 `*.bing.com` to the list should let them through as well.
 
-4. Configuring go-polipo
-------------------------
+## 4. Configuring go-polipo
 
 If you want to use an on-disk cache, make sure the cache directory exists and is writable:
 
@@ -104,8 +100,7 @@ also see the effective configuration with `./bin/polipo -v`, or open the local
 configuration page at `http://127.0.0.1:8123/polipo/config` while the proxy
 is running.
 
-5. Running go-polipo on Windows: which way to choose
-----------------------------------------------------
+## 5. Running go-polipo on Windows: which way to choose
 
 On Linux, macOS and other POSIX systems, sections 1-4 are all you need. On
 Windows there are two ways to run go-polipo:
@@ -123,8 +118,7 @@ Windows there are two ways to run go-polipo:
   Windows Security > App & browser control > Smart App Control settings. If
   you are not sure, use WSL.
 
-6. Running go-polipo inside WSL (recommended)
----------------------------------------------
+## 6. Running go-polipo inside WSL (recommended)
 
 This is the recommended way to run go-polipo on Windows (see section 5).
 The native Linux build runs inside WSL2, so Windows never has to run an
@@ -296,8 +290,7 @@ it so the two don't fight over port 8123:
 
     Disable-ScheduledTask -TaskName "go-polipo"   # run as Administrator
 
-7. Building on Windows
-----------------------
+## 7. Building on Windows
 
 This section and the next two are for running go-polipo as a native Windows
 program. See section 5 first: on most Windows 11 machines, running it inside
@@ -337,8 +330,7 @@ its log output), then register a Task Scheduler task with an "At log on"
 trigger pointing at `polipo.exe -c <config>`. See section 8 below for the
 full, tested procedure.
 
-8. Running go-polipo at Windows startup
----------------------------------------
+## 8. Running go-polipo at Windows startup
 
 **Not currently recommended if Smart App Control is On.** Windows 11's
 Smart App Control, once it locks into the "On" state (the "Evaluation"
@@ -443,8 +435,7 @@ signal that terminates go-polipo along with it, which looks like "the proxy
 randomly stops working" with no error in the log. Rebuild with `WINGUI=1`
 (section 7) and repeat the steps above.
 
-9. Windows installer (optional)
--------------------------------
+## 9. Windows installer (optional)
 
 Section 8 and its "Updating the binary" above can be done by hand every time, or
 packaged into a one-time installer/uninstaller built with
