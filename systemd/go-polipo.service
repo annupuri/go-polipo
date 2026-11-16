@@ -1,5 +1,5 @@
 # Sample systemd unit for running go-polipo as a service on Linux,
-# including inside WSL2 (see docs/INSTALL.md, section 8).
+# including inside WSL2 (see docs/INSTALL.md, section 6).
 #
 # Replace <you> and /path/to/go-polipo, then:
 #

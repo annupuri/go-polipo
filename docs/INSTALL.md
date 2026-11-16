@@ -59,7 +59,7 @@ cmd.exe they are not needed. No restart is required - just reopen the app.
 `-a` removes one. For another Store app, find its package family name with
 `Get-AppxPackage <name> | Select-Object PackageFamilyName`.
 
-**go-polipo inside WSL in mirrored networking mode** (section 8): there,
+**go-polipo inside WSL in mirrored networking mode** (section 6): there,
 127.0.0.1:8123 is served by go-polipo inside the WSL VM, not by a Windows
 process, and the loopback exemption may not cover that path. This was seen
 after upgrading to Windows 11 26H2 (build 26300): the exemption was still
@@ -104,201 +104,40 @@ also see the effective configuration with `./bin/polipo -v`, or open the local
 configuration page at `http://127.0.0.1:8123/polipo/config` while the proxy
 is running.
 
-5. Building on Windows
----------------------
+5. Running go-polipo on Windows: which way to choose
+----------------------------------------------------
 
-Go builds Windows binaries out of the box. You do not need Cygwin, MinGW, or
-any third-party POSIX emulation layer to compile or run go-polipo on Windows.
+On Linux, macOS and other POSIX systems, sections 1-4 are all you need. On
+Windows there are two ways to run go-polipo:
 
-Native build (PowerShell or Command Prompt, with Go installed):
+- **Inside WSL2 (recommended, section 6).** The native Linux build runs as a
+  systemd service inside WSL2, and Windows applications reach it at
+  `http://127.0.0.1:8123/` as usual. Smart App Control does not get in the
+  way, because the only Windows program involved is the Microsoft-signed
+  `wsl.exe`.
+- **As a native Windows program (sections 7-9).** This works only where
+  Smart App Control is Off. go-polipo's `polipo.exe` is not code-signed, and
+  Windows 11 with Smart App Control On blocks it (see section 8). Smart App
+  Control is Off on PCs upgraded from Windows 10; on a clean install of
+  Windows 11 it starts in evaluation mode and may turn itself On. Check it in
+  Windows Security > App & browser control > Smart App Control settings. If
+  you are not sure, use WSL.
 
-    > make build
+6. Running go-polipo inside WSL (recommended)
+---------------------------------------------
 
-or, without `make`:
-
-    > go build -o bin\polipo.exe .
-
-Cross-compiling for Windows from Unix/Linux/macOS/WSL:
-
-    $ make build-windows                  # -> bin/polipo.exe (amd64)
-    $ make build-windows WINARCH=arm64    # -> bin/polipo.exe (arm64)
-    $ make build-windows WINGUI=1         # no console window on launch
-
-or without `make`:
-
-    $ GOOS=windows GOARCH=amd64 go build -o bin/polipo.exe .
-
-`make build` on WSL produces the native Linux `bin/polipo`; use
-`build-windows` (or set `GOOS=windows`) to get `bin/polipo.exe`.
-
-Paths: unlike the C version, go-polipo follows the host's path conventions
-automatically. Make sure `diskCacheRoot` and any other paths in your
-configuration file are valid Windows paths, e.g. `C:\var\cache\polipo\`.
-
-Running at startup: build with `WINGUI=1` so no console window appears, set
-`logFile` in the configuration (a `-H windowsgui` build has no console for
-its log output), then register a Task Scheduler task with an "At log on"
-trigger pointing at `polipo.exe -c <config>`. See section 6 below for the
-full, tested procedure.
-
-6. Running go-polipo at Windows startup
-----------------------------------------
-
-**Not currently recommended if Smart App Control is On.** Windows 11's
-Smart App Control, once it locks into the "On" state (the "Evaluation"
-toggle becomes unselectable), blocks execution of unsigned, self-built
-binaries like `polipo.exe` outright ("This app has been blocked by your
-system administrator" / an application-control-policy error), with no
-supported way back to "Off" short of a clean Windows reinstall, and no
-self-signing workaround. If that's your situation, skip ahead to section 8
-(running go-polipo inside WSL) instead. This section remains for machines
-where Smart App Control is Off or still evaluating, or once the binary has
-proper code signing.
-
-Recommended layout (per-user; no admin rights needed for the files
-themselves):
-
-    %LOCALAPPDATA%\Programs\go-polipo\polipo.exe    binary
-    %USERPROFILE%\.polipo                           config (auto-discovered)
-    %LOCALAPPDATA%\go-polipo\cache\                 diskCacheRoot
-    %LOCALAPPDATA%\go-polipo\polipo.log             logFile
-
-go-polipo creates `diskCacheRoot` itself on first use, but it does **not**
-create `logFile`'s parent directory, so create it once:
-
-    > mkdir "%LOCALAPPDATA%\go-polipo"
-
-Example `%USERPROFILE%\.polipo`:
-
-    proxyAddress = 127.0.0.1
-    proxyPort = 8123
-    diskCacheRoot = C:/Users/<you>/AppData/Local/go-polipo/cache
-    logFile = C:/Users/<you>/AppData/Local/go-polipo/polipo.log
-
-Build a console-free binary (see section 5) and copy `bin\polipo.exe` to
-`%LOCALAPPDATA%\Programs\go-polipo\polipo.exe`:
-
-    $ make build-windows WINGUI=1
-
-### Register a scheduled task (recommended)
-
-Run this in an **elevated** PowerShell — registering the task needs admin
-rights, but the task itself still runs under your normal, unprivileged
-account (`-RunLevel Limited`):
-
-    $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
-    $cfg = "$env:USERPROFILE\.polipo"
-
-    $action    = New-ScheduledTaskAction -Execute $exe -Argument "-c `"$cfg`"" -WorkingDirectory (Split-Path $exe)
-    $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-    $settings  = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -MultipleInstances IgnoreNew
-    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-
-    Register-ScheduledTask -TaskName "go-polipo" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
-
-If `Register-ScheduledTask` still fails with "Access is denied" after
-elevating, some managed/corporate machines block Task Scheduler entirely via
-policy; use the Startup-folder fallback below instead.
-
-### Verify it started
-
-    Start-ScheduledTask -TaskName "go-polipo"
-    Get-ScheduledTask -TaskName "go-polipo" | Get-ScheduledTaskInfo
-    Test-NetConnection 127.0.0.1 -Port 8123
-    Get-Content "$env:LOCALAPPDATA\go-polipo\polipo.log" -Tail 5
-
-`LastTaskResult` is a **Task Scheduler** status code, not go-polipo's exit
-code: `267009` (`0x41301`, "task is currently running") means it is up and
-healthy; `0` means it ran and exited cleanly (e.g. after `-h`/`-v`/`-x`). Any
-other small integer (`1`, `2`, ...) is go-polipo's own exit code — check the
-log file for the reason. `TcpTestSucceeded : True` confirms the proxy is
-listening, and the log should show a "starting on http://..." line.
-
-### Fallback: Startup-folder shortcut (no special permissions needed)
-
-    $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
-    $cfg = "$env:USERPROFILE\.polipo"
-    $startup = [Environment]::GetFolderPath('Startup')
-    $ws = New-Object -ComObject WScript.Shell
-    $sc = $ws.CreateShortcut("$startup\go-polipo.lnk")
-    $sc.TargetPath       = $exe
-    $sc.Arguments        = "-c `"$cfg`""
-    $sc.WorkingDirectory = Split-Path $exe
-    $sc.Save()
-
-This starts go-polipo at logon with no elevation and (with a `WINGUI=1`
-build) no console window, but without Task Scheduler's automatic restart on
-crash. Remove it with `Remove-Item "$startup\go-polipo.lnk"`.
-
-### Updating the binary
-
-Windows keeps a running executable locked, so stop go-polipo before
-overwriting it:
-
-    Stop-ScheduledTask -TaskName "go-polipo"
-    Get-Process polipo -ErrorAction SilentlyContinue | Stop-Process -Force
-    # copy the newly built bin\polipo.exe into place, then:
-    Start-ScheduledTask -TaskName "go-polipo"
-
-If a console window pops up when the task starts, the binary you just built
-and copied in is missing `WINGUI=1` - it's a regular console-subsystem
-executable, not the console-less one. Closing that window sends it a close
-signal that terminates go-polipo along with it, which looks like "the proxy
-randomly stops working" with no error in the log. Rebuild with `WINGUI=1`
-(section 5) and repeat the steps above.
-
-7. Windows installer (optional)
---------------------------------
-
-Sections 6 and "Updating the binary" above can be done by hand every time, or
-packaged into a one-time installer/uninstaller built with
-[Inno Setup](https://jrsoftware.org/isinfo.php). This is not distributed as a
-release asset - you build it yourself, locally, from `windows/polipo.iss`.
-
-Install Inno Setup once, then from the repo root:
-
-    $ make build-windows WINGUI=1
-    $ iscc windows/polipo.iss
-
-(`make installer` runs both steps.) This produces
-`windows/dist/go-polipo-setup.exe`. Running it (admin privileges are required,
-since registering the scheduled task needs them) does everything sections 4
-and 6 describe by hand:
-
-- deploys `polipo.exe` to `%LOCALAPPDATA%\Programs\go-polipo\`
-- creates `%USERPROFILE%\.polipo` from `config.sample` if one doesn't already
-  exist (an existing config is never overwritten)
-- registers and starts the `go-polipo` scheduled task from section 6
-
-Running the installer again (e.g. after rebuilding with a code change) stops
-the running task/process first, then overwrites the binary - the same
-`Stop-ScheduledTask` / `Stop-Process` sequence as manual updates, just
-automated. Uninstalling (via "Apps & features", or `unins000.exe` in the
-install directory) stops and removes the scheduled task and the binary; your
-config, disk cache, and log file are left in place.
-
-This installer path is optional and untested by the maintainers beyond a
-source review of `windows/polipo.iss` - the fully manual steps in sections 4
-and 6 remain the documented fallback if it misbehaves on your machine. Like
-section 6, it is subject to the Smart App Control caveat above - the
-installer deploys the same unsigned `polipo.exe`.
-
-8. Running go-polipo inside WSL (Smart App Control workaround)
-----------------------------------------------------------------
-
-If Windows blocks execution of the self-built `polipo.exe` outright (see
-the Smart App Control note in section 6), running the native Linux build
-inside WSL2 keeps go-polipo usable as a proxy from Windows without waiting
-on code signing or a Windows reinstall. WSL2 forwards `127.0.0.1` between
-Windows and the Linux VM by default, so Windows applications keep pointing
-at `http://127.0.0.1:8123/` exactly as before.
+This is the recommended way to run go-polipo on Windows (see section 5).
+The native Linux build runs inside WSL2, so Windows never has to run an
+unsigned `polipo.exe`, and Smart App Control does not get in the way. WSL2
+forwards `127.0.0.1` between Windows and the Linux VM by default, so Windows
+applications point at `http://127.0.0.1:8123/` as usual.
 
 Build the native Linux binary from inside WSL:
 
     $ make build
 
 (WSL's default `make build` already produces the Linux binary - no
-`GOOS`/`build-windows` needed, see section 5.)
+`GOOS`/`build-windows` needed, see section 7.)
 
 Config, cache and log live inside the WSL filesystem, e.g. `~/.polipo`:
 
@@ -307,7 +146,7 @@ Config, cache and log live inside the WSL filesystem, e.g. `~/.polipo`:
     diskCacheRoot = /home/<you>/.cache/go-polipo/cache
     logFile = /home/<you>/.cache/go-polipo/polipo.log
 
-As on Windows, go-polipo creates `diskCacheRoot` itself but not `logFile`'s
+go-polipo creates `diskCacheRoot` itself on first use, but not `logFile`'s
 parent directory:
 
     $ mkdir -p ~/.cache/go-polipo
@@ -411,7 +250,7 @@ Things that change in mirrored mode:
 
 - **Windows and WSL share one port space.** A Windows process listening on
   127.0.0.1:8123 keeps go-polipo from starting (`bind: address already in
-  use` in the log). Make sure the Windows task or shortcut from section 6 is
+  use` in the log). Make sure the Windows task or shortcut from section 8 is
   disabled.
 - **Ports in TIME_WAIT on Windows count as in use.** In NAT mode, WSL's
   localhost relay (`wslrelay.exe`) accepts the Windows-side connections to
@@ -451,8 +290,191 @@ stop-before-copy dance is needed:
     $ make build
     $ sudo systemctl restart go-polipo
 
-If you had registered the Windows Task Scheduler task or Startup-folder
-shortcut from section 6 before switching to WSL, disable or remove it so
-the two don't fight over port 8123:
+If you had run go-polipo natively on Windows before, with the Task
+Scheduler task or Startup-folder shortcut from section 8, disable or remove
+it so the two don't fight over port 8123:
 
     Disable-ScheduledTask -TaskName "go-polipo"   # run as Administrator
+
+7. Building on Windows
+----------------------
+
+This section and the next two are for running go-polipo as a native Windows
+program. See section 5 first: on most Windows 11 machines, running it inside
+WSL (section 6) is the way that works.
+
+Go builds Windows binaries out of the box. You do not need Cygwin, MinGW, or
+any third-party POSIX emulation layer to compile or run go-polipo on Windows.
+
+Native build (PowerShell or Command Prompt, with Go installed):
+
+    > make build
+
+or, without `make`:
+
+    > go build -o bin\polipo.exe .
+
+Cross-compiling for Windows from Unix/Linux/macOS/WSL:
+
+    $ make build-windows                  # -> bin/polipo.exe (amd64)
+    $ make build-windows WINARCH=arm64    # -> bin/polipo.exe (arm64)
+    $ make build-windows WINGUI=1         # no console window on launch
+
+or without `make`:
+
+    $ GOOS=windows GOARCH=amd64 go build -o bin/polipo.exe .
+
+`make build` on WSL produces the native Linux `bin/polipo`; use
+`build-windows` (or set `GOOS=windows`) to get `bin/polipo.exe`.
+
+Paths: unlike the C version, go-polipo follows the host's path conventions
+automatically. Make sure `diskCacheRoot` and any other paths in your
+configuration file are valid Windows paths, e.g. `C:\var\cache\polipo\`.
+
+Running at startup: build with `WINGUI=1` so no console window appears, set
+`logFile` in the configuration (a `-H windowsgui` build has no console for
+its log output), then register a Task Scheduler task with an "At log on"
+trigger pointing at `polipo.exe -c <config>`. See section 8 below for the
+full, tested procedure.
+
+8. Running go-polipo at Windows startup
+---------------------------------------
+
+**Not currently recommended if Smart App Control is On.** Windows 11's
+Smart App Control, once it locks into the "On" state (the "Evaluation"
+toggle becomes unselectable), blocks execution of unsigned, self-built
+binaries like `polipo.exe` outright ("This app has been blocked by your
+system administrator" / an application-control-policy error), with no
+supported way back to "Off" short of a clean Windows reinstall, and no
+self-signing workaround. If that's your situation, use section 6 (running
+go-polipo inside WSL) instead. This section remains for machines
+where Smart App Control is Off or still evaluating, or once the binary has
+proper code signing.
+
+Recommended layout (per-user; no admin rights needed for the files
+themselves):
+
+    %LOCALAPPDATA%\Programs\go-polipo\polipo.exe    binary
+    %USERPROFILE%\.polipo                           config (auto-discovered)
+    %LOCALAPPDATA%\go-polipo\cache\                 diskCacheRoot
+    %LOCALAPPDATA%\go-polipo\polipo.log             logFile
+
+go-polipo creates `diskCacheRoot` itself on first use, but it does **not**
+create `logFile`'s parent directory, so create it once:
+
+    > mkdir "%LOCALAPPDATA%\go-polipo"
+
+Example `%USERPROFILE%\.polipo`:
+
+    proxyAddress = 127.0.0.1
+    proxyPort = 8123
+    diskCacheRoot = C:/Users/<you>/AppData/Local/go-polipo/cache
+    logFile = C:/Users/<you>/AppData/Local/go-polipo/polipo.log
+
+Build a console-free binary (see section 7) and copy `bin\polipo.exe` to
+`%LOCALAPPDATA%\Programs\go-polipo\polipo.exe`:
+
+    $ make build-windows WINGUI=1
+
+### Register a scheduled task (recommended)
+
+Run this in an **elevated** PowerShell — registering the task needs admin
+rights, but the task itself still runs under your normal, unprivileged
+account (`-RunLevel Limited`):
+
+    $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
+    $cfg = "$env:USERPROFILE\.polipo"
+
+    $action    = New-ScheduledTaskAction -Execute $exe -Argument "-c `"$cfg`"" -WorkingDirectory (Split-Path $exe)
+    $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $settings  = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -MultipleInstances IgnoreNew
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+
+    Register-ScheduledTask -TaskName "go-polipo" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
+
+If `Register-ScheduledTask` still fails with "Access is denied" after
+elevating, some managed/corporate machines block Task Scheduler entirely via
+policy; use the Startup-folder fallback below instead.
+
+### Verify it started
+
+    Start-ScheduledTask -TaskName "go-polipo"
+    Get-ScheduledTask -TaskName "go-polipo" | Get-ScheduledTaskInfo
+    Test-NetConnection 127.0.0.1 -Port 8123
+    Get-Content "$env:LOCALAPPDATA\go-polipo\polipo.log" -Tail 5
+
+`LastTaskResult` is a **Task Scheduler** status code, not go-polipo's exit
+code: `267009` (`0x41301`, "task is currently running") means it is up and
+healthy; `0` means it ran and exited cleanly (e.g. after `-h`/`-v`/`-x`). Any
+other small integer (`1`, `2`, ...) is go-polipo's own exit code — check the
+log file for the reason. `TcpTestSucceeded : True` confirms the proxy is
+listening, and the log should show a "starting on http://..." line.
+
+### Fallback: Startup-folder shortcut (no special permissions needed)
+
+    $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
+    $cfg = "$env:USERPROFILE\.polipo"
+    $startup = [Environment]::GetFolderPath('Startup')
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut("$startup\go-polipo.lnk")
+    $sc.TargetPath       = $exe
+    $sc.Arguments        = "-c `"$cfg`""
+    $sc.WorkingDirectory = Split-Path $exe
+    $sc.Save()
+
+This starts go-polipo at logon with no elevation and (with a `WINGUI=1`
+build) no console window, but without Task Scheduler's automatic restart on
+crash. Remove it with `Remove-Item "$startup\go-polipo.lnk"`.
+
+### Updating the binary
+
+Windows keeps a running executable locked, so stop go-polipo before
+overwriting it:
+
+    Stop-ScheduledTask -TaskName "go-polipo"
+    Get-Process polipo -ErrorAction SilentlyContinue | Stop-Process -Force
+    # copy the newly built bin\polipo.exe into place, then:
+    Start-ScheduledTask -TaskName "go-polipo"
+
+If a console window pops up when the task starts, the binary you just built
+and copied in is missing `WINGUI=1` - it's a regular console-subsystem
+executable, not the console-less one. Closing that window sends it a close
+signal that terminates go-polipo along with it, which looks like "the proxy
+randomly stops working" with no error in the log. Rebuild with `WINGUI=1`
+(section 7) and repeat the steps above.
+
+9. Windows installer (optional)
+-------------------------------
+
+Section 8 and its "Updating the binary" above can be done by hand every time, or
+packaged into a one-time installer/uninstaller built with
+[Inno Setup](https://jrsoftware.org/isinfo.php). This is not distributed as a
+release asset - you build it yourself, locally, from `windows/polipo.iss`.
+
+Install Inno Setup once, then from the repo root:
+
+    $ make build-windows WINGUI=1
+    $ iscc windows/polipo.iss
+
+(`make installer` runs both steps.) This produces
+`windows/dist/go-polipo-setup.exe`. Running it (admin privileges are required,
+since registering the scheduled task needs them) does everything sections 4
+and 8 describe by hand:
+
+- deploys `polipo.exe` to `%LOCALAPPDATA%\Programs\go-polipo\`
+- creates `%USERPROFILE%\.polipo` from `config.sample` if one doesn't already
+  exist (an existing config is never overwritten)
+- registers and starts the `go-polipo` scheduled task from section 8
+
+Running the installer again (e.g. after rebuilding with a code change) stops
+the running task/process first, then overwrites the binary - the same
+`Stop-ScheduledTask` / `Stop-Process` sequence as manual updates, just
+automated. Uninstalling (via "Apps & features", or `unins000.exe` in the
+install directory) stops and removes the scheduled task and the binary; your
+config, disk cache, and log file are left in place.
+
+This installer path is optional and untested by the maintainers beyond a
+source review of `windows/polipo.iss` - the fully manual steps in sections 4
+and 8 remain the documented fallback if it misbehaves on your machine. Like
+section 8, it is subject to the Smart App Control caveat above - the
+installer deploys the same unsigned `polipo.exe`.
