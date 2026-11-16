@@ -35,7 +35,7 @@ You can also set the proxy via environment variables:
     $ export http_proxy=http://127.0.0.1:8123
     $ export https_proxy=http://127.0.0.1:8123
 
-### Windows: Microsoft Store and other Store apps
+### 3.1 Windows: Microsoft Store and other Store apps
 
 If Windows' system proxy points at `127.0.0.1:8123`, Microsoft Store (and
 other packaged/UWP apps) may show an error, while working fine with the
@@ -145,7 +145,7 @@ parent directory:
 
     $ mkdir -p ~/.cache/go-polipo
 
-### Run as a systemd service
+### 6.1 Run as a systemd service
 
 Most current WSL2 distros have systemd enabled by default; check with:
 
@@ -159,7 +159,7 @@ and replace `<you>` and `/path/to/go-polipo` in it:
 
 Its `RestartSec=5` and `StartLimitIntervalSec=0` keep systemd retrying while
 port 8123 is still held by something else - which happens for up to two
-minutes after a WSL restart in mirrored networking mode (see "IPv6 and
+minutes after a WSL restart in mirrored networking mode (see 6.4 "IPv6 and
 mirrored networking" below). Without them, systemd's defaults (retry after
 100 ms, give up after 5 starts within 10 s) stop the service for good within
 a second.
@@ -171,7 +171,7 @@ Install and enable it:
     $ sudo systemctl enable --now go-polipo
     $ sudo systemctl status go-polipo --no-pager
 
-### Keep the WSL2 VM (and the service) alive
+### 6.2 Keep the WSL2 VM (and the service) alive
 
 By default WSL2 shuts its background VM down shortly after the last WSL
 terminal/window closes, taking systemd and go-polipo down with it. Add this
@@ -190,7 +190,7 @@ keeps it busy), but in mirrored mode it is required: without it the distro,
 and go-polipo with it, powers off about 15 seconds after the logon task
 below has run.
 
-### Start WSL automatically at Windows logon (and after sleep)
+### 6.3 Start WSL automatically at Windows logon (and after sleep)
 
 The WSL2 VM does not start on its own at Windows logon, and in practice it
 is often restarted when Windows resumes from sleep as well. A Task Scheduler
@@ -220,7 +220,7 @@ Verify after a Windows restart, and after a resume from sleep:
 
     Test-NetConnection 127.0.0.1 -Port 8123
 
-### IPv6 and mirrored networking
+### 6.4 IPv6 and mirrored networking
 
 In WSL's default NAT networking mode the Linux VM has no IPv6
 connectivity, even when Windows has. go-polipo then cannot reach hosts that
@@ -275,7 +275,7 @@ Switching, in **Windows PowerShell**:
 From inside WSL, `ip -6 route` should now list a `default` route. To go
 back, remove the `networkingMode` line and run `wsl --shutdown` again.
 
-### Updating the binary
+### 6.5 Updating the binary
 
 Unlike Windows, WSL/Linux does not lock a running executable, so no
 stop-before-copy dance is needed:
@@ -368,7 +368,7 @@ Build a console-free binary (see section 7) and copy `bin\polipo.exe` to
 
     $ make build-windows WINGUI=1
 
-### Register a scheduled task (recommended)
+### 8.1 Register a scheduled task (recommended)
 
 Run this in an **elevated** PowerShell — registering the task needs admin
 rights, but the task itself still runs under your normal, unprivileged
@@ -388,7 +388,7 @@ If `Register-ScheduledTask` still fails with "Access is denied" after
 elevating, some managed/corporate machines block Task Scheduler entirely via
 policy; use the Startup-folder fallback below instead.
 
-### Verify it started
+### 8.2 Verify it started
 
     Start-ScheduledTask -TaskName "go-polipo"
     Get-ScheduledTask -TaskName "go-polipo" | Get-ScheduledTaskInfo
@@ -402,7 +402,7 @@ other small integer (`1`, `2`, ...) is go-polipo's own exit code — check the
 log file for the reason. `TcpTestSucceeded : True` confirms the proxy is
 listening, and the log should show a "starting on http://..." line.
 
-### Fallback: Startup-folder shortcut (no special permissions needed)
+### 8.3 Fallback: Startup-folder shortcut (no special permissions needed)
 
     $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
     $cfg = "$env:USERPROFILE\.polipo"
@@ -418,7 +418,7 @@ This starts go-polipo at logon with no elevation and (with a `WINGUI=1`
 build) no console window, but without Task Scheduler's automatic restart on
 crash. Remove it with `Remove-Item "$startup\go-polipo.lnk"`.
 
-### Updating the binary
+### 8.4 Updating the binary
 
 Windows keeps a running executable locked, so stop go-polipo before
 overwriting it:
@@ -437,7 +437,7 @@ randomly stops working" with no error in the log. Rebuild with `WINGUI=1`
 
 ## 9. Windows installer (optional)
 
-Section 8 and its "Updating the binary" above can be done by hand every time, or
+Section 8, including 8.4 "Updating the binary", can be done by hand every time, or
 packaged into a one-time installer/uninstaller built with
 [Inno Setup](https://jrsoftware.org/isinfo.php). This is not distributed as a
 release asset - you build it yourself, locally, from `windows/polipo.iss`.
