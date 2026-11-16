@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Registers (or replaces) the "go-polipo" Task Scheduler entry and starts it.
-    Mirrors the manual steps documented in docs/INSTALL.md / docs/INSTALL.ja.md section 6.
+    Mirrors the manual steps documented in docs/INSTALL.md / docs/INSTALL.ja.md section 8.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$ExePath,

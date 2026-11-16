@@ -2,7 +2,7 @@
 .SYNOPSIS
     Registers (or replaces) the "go-polipo-wsl" Task Scheduler entry, which
     wakes WSL so that systemd starts go-polipo inside it, and runs it once.
-    See docs/INSTALL.md / docs/INSTALL.ja.md section 8.
+    See docs/INSTALL.md / docs/INSTALL.ja.md section 6.
 
 .DESCRIPTION
     The task runs `wsl.exe -d <Distro> -u <User> -- true` (through

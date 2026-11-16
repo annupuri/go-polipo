@@ -42,7 +42,7 @@ Source: "unregister-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 ; Parent folder for logFile; go-polipo does not create it itself (it does
-; create diskCacheRoot on first use). See docs/INSTALL.md section 6.
+; create diskCacheRoot on first use). See docs/INSTALL.md section 8.
 Name: "{localappdata}\go-polipo"
 
 [Run]

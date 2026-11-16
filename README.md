@@ -46,8 +46,9 @@ Any trailing `var=val` arguments override configuration file settings, e.g.
 Documentation
 -------------
 
-See `docs/INSTALL.md` for building and installation instructions, including a
-"Building on Windows" section and running go-polipo at Windows startup.
+See `docs/INSTALL.md` for building and installation instructions. On
+Windows, running go-polipo inside WSL is the recommended way; the native
+Windows build and running it at Windows startup are covered too.
 For architecture details and C-to-Go file mapping, refer to `docs/ARCHITECTURE.md`.
 To contribute, see `CONTRIBUTING.md`.
 
