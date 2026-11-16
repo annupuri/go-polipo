@@ -35,7 +35,7 @@ Web ブラウザのプロキシ設定を `http://localhost:8123/` に向けて�
     $ export http_proxy=http://127.0.0.1:8123
     $ export https_proxy=http://127.0.0.1:8123
 
-### Windows: Microsoft Store などのストアアプリ
+### 3.1 Windows: Microsoft Store などのストアアプリ
 
 Windows のシステムプロキシを `127.0.0.1:8123` に向けると、Microsoft Store(や他のパッケージ化された UWP アプリ)がエラーになることがあります。プロキシをオフにすると正常に動きます。これは go-polipo の問題ではなく、元の Polipo でも、go-polipo をネイティブで動かしても WSL 内で動かしても同じように起きます。これらのアプリは AppContainer というサンドボックス内で動いており、Windows は既定で AppContainer からループバックアドレスへの接続を禁止しているため、リクエストがプロキシまで届きません(プロキシのログにも何も出ません)。
 
@@ -95,7 +95,7 @@ WSL上でネイティブのLinuxバイナリをビルドします:
 
     $ mkdir -p ~/.cache/go-polipo
 
-### systemdサービスとして実行する
+### 6.1 systemdサービスとして実行する
 
 最近のWSL2ディストリビューションの多くは既定でsystemdが有効です。次のコマンドで確認できます:
 
@@ -106,7 +106,7 @@ WSL上でネイティブのLinuxバイナリをビルドします:
     $ cp systemd/go-polipo.service ~/go-polipo.service
     $ sed -i "s|<you>|$USER|g; s|/path/to/go-polipo|$PWD|" ~/go-polipo.service
 
-このファイルの`RestartSec=5`と`StartLimitIntervalSec=0`は、ポート8123がまだ他に掴まれている間もsystemdに再試行を続けさせるための設定です。ミラーモードのネットワークでは、WSLの再起動後に最大2分ほどこの状態になります(後述の「IPv6とミラーモードのネットワーク」参照)。これらが無いと、systemdの既定値(100ms後に再試行し、10秒以内に5回起動したら諦める)により、1秒足らずでサービスが恒久的に停止してしまいます。
+このファイルの`RestartSec=5`と`StartLimitIntervalSec=0`は、ポート8123がまだ他に掴まれている間もsystemdに再試行を続けさせるための設定です。ミラーモードのネットワークでは、WSLの再起動後に最大2分ほどこの状態になります(後述の「6.4 IPv6とミラーモードのネットワーク」参照)。これらが無いと、systemdの既定値(100ms後に再試行し、10秒以内に5回起動したら諦める)により、1秒足らずでサービスが恒久的に停止してしまいます。
 
 配置して有効化します:
 
@@ -115,7 +115,7 @@ WSL上でネイティブのLinuxバイナリをビルドします:
     $ sudo systemctl enable --now go-polipo
     $ sudo systemctl status go-polipo --no-pager
 
-### WSL2 VM(とサービス)を落とさないようにする
+### 6.2 WSL2 VM(とサービス)を落とさないようにする
 
 WSL2は既定で、最後のWSLターミナル/ウィンドウを閉じてからしばらくするとバックグラウンドVM自体を終了させ、systemdごとgo-polipoも道連れに停止します。**Windows側**の`%UserProfile%\.wslconfig`に以下を追記してこれを無効化してください:
 
@@ -127,7 +127,7 @@ WSL2は既定で、最後のWSLターミナル/ウィンドウを閉じてから
 
 `vmIdleTimeout`はVMを、`instanceIdleTimeout`はWSLのセッションが無くなった後のディストリビューション自体を落とさないための設定です。既定のNATモードではこれが無くても(WSLのlocalhost転送が動いているため)たまたまディストリビューションが動き続けますが、ミラーモードでは必須です。無いと、後述のログオン時のタスクが実行されてから約15秒でディストリビューションがgo-polipoごと停止します。
 
-### Windowsログオン時(とスリープ復帰時)にWSLを自動起動する
+### 6.3 Windowsログオン時(とスリープ復帰時)にWSLを自動起動する
 
 WSL2のVMはWindowsログオン時に自動では起動せず、実際にはWindowsのスリープからの復帰時にも再起動されていることがよくあります。Microsoft署名済み(スマートアプリコントロールの対象外)の`wsl.exe`を、ログオン時・ロック解除時・スリープからの復帰時に実行するタスクスケジューラのタスクで、その都度WSLを起こします。これによりsystemd経由でgo-polipoも起動します。WSLがすでに動いている時に実行しても害はありません。`windows/register-wsl-task.ps1`が、このタスクを現在のWindowsユーザー用に`go-polipo-wsl`として登録し、一度実行します。**Windows PowerShell**で(通常は管理者権限は不要です。登録が「アクセスが拒否されました」で失敗した場合は、管理者権限のプロンプトで実行してください):
 
@@ -144,7 +144,7 @@ Windows再起動後と、スリープからの復帰後に確認:
 
     Test-NetConnection 127.0.0.1 -Port 8123
 
-### IPv6とミラーモードのネットワーク
+### 6.4 IPv6とミラーモードのネットワーク
 
 WSLの既定のNATモードでは、Windows側にIPv6接続があってもLinux VMにはIPv6接続がありません。このため、IPv6(AAAA)アドレスしか持たないホストにはgo-polipo経由で接続できず、ログには次のように出ます:
 
@@ -178,7 +178,7 @@ WSLの既定のNATモードでは、Windows側にIPv6接続があってもLinux 
 
 WSL内で`ip -6 route`を実行すると、`default`の経路が表示されるはずです。元に戻すには、`networkingMode`の行を削除して再度`wsl --shutdown`します。
 
-### バイナリの更新
+### 6.5 バイナリの更新
 
 Windowsと異なり、WSL/Linuxは実行中のファイルをロックしないため、上書き前に停止する手順は不要です:
 
@@ -246,7 +246,7 @@ WSL 上で `make build` を実行するとネイティブの Linux 用 `bin/poli
 
     $ make build-windows WINGUI=1
 
-### タスクスケジューラへの登録(推奨)
+### 8.1 タスクスケジューラへの登録(推奨)
 
 **管理者権限の** PowerShell で実行してください(タスクの登録自体に管理者権限が必要ですが、タスクの実行自体は通常の非特権アカウントで行われます。`-RunLevel Limited`):
 
@@ -262,7 +262,7 @@ WSL 上で `make build` を実行するとネイティブの Linux 用 `bin/poli
 
 管理者権限で実行してもなお `Register-ScheduledTask` が "Access is denied" になる場合、組織管理端末ではポリシーでタスクスケジューラへの登録自体がブロックされていることがあります。その場合は下記のスタートアップフォルダ方式を代わりに使ってください。
 
-### 起動確認
+### 8.2 起動確認
 
     Start-ScheduledTask -TaskName "go-polipo"
     Get-ScheduledTask -TaskName "go-polipo" | Get-ScheduledTaskInfo
@@ -271,7 +271,7 @@ WSL 上で `make build` を実行するとネイティブの Linux 用 `bin/poli
 
 `LastTaskResult` は **タスクスケジューラ**のステータスコードであり、go-polipo 自身の終了コードではありません。`267009`(`0x41301`、「タスクは現在実行中」)は正常に稼働中であることを意味します。`0` は正常終了(`-h`/`-v`/`-x` 実行後など)を意味します。それ以外の小さな整数(`1`、`2` など)は go-polipo 自身の終了コードなので、理由はログファイルを確認してください。`TcpTestSucceeded : True` はプロキシが待ち受け中であることの確認になり、ログには "starting on http://..." の行が出るはずです。
 
-### 代替手段: スタートアップフォルダへのショートカット(特別な権限不要)
+### 8.3 代替手段: スタートアップフォルダへのショートカット(特別な権限不要)
 
     $exe = "$env:LOCALAPPDATA\Programs\go-polipo\polipo.exe"
     $cfg = "$env:USERPROFILE\.polipo"
@@ -285,7 +285,7 @@ WSL 上で `make build` を実行するとネイティブの Linux 用 `bin/poli
 
 これで、権限昇格なしに、(`WINGUI=1` ビルドであれば)コンソール窓も出さずにログオン時に go-polipo が起動します。ただし、タスクスケジューラのようなクラッシュ時の自動再起動はありません。削除するには `Remove-Item "$startup\go-polipo.lnk"` を実行してください。
 
-### バイナリの更新
+### 8.4 バイナリの更新
 
 Windows は実行中の実行ファイルをロックするため、上書きする前に go-polipo を停止してください:
 
@@ -298,7 +298,7 @@ Windows は実行中の実行ファイルをロックするため、上書きす
 
 ## 9. Windows インストーラー(任意)
 
-セクション8や「バイナリの更新」を毎回手作業で行う代わりに、[Inno Setup](https://jrsoftware.org/isinfo.php)でインストーラー/アンインストーラーを1つにまとめることもできます。リリース成果物としては配布しておらず、`windows/polipo.iss`から各自のローカル環境でビルドする想定です。
+セクション8の手順や「8.4 バイナリの更新」を毎回手作業で行う代わりに、[Inno Setup](https://jrsoftware.org/isinfo.php)でインストーラー/アンインストーラーを1つにまとめることもできます。リリース成果物としては配布しておらず、`windows/polipo.iss`から各自のローカル環境でビルドする想定です。
 
 Inno Setupを一度インストールした上で、リポジトリのルートから:
 
