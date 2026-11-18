@@ -192,6 +192,13 @@ func (cc cacheControl) seconds(name string) (time.Duration, bool) {
 	if !ok {
 		return 0, false
 	}
+	return parseDeltaSeconds(v)
+}
+
+// parseDeltaSeconds parses a delta-seconds value (RFC 9111 section 1.2.2),
+// reporting false when v is not a non-negative integer. A value too large
+// to represent is capped at maxAgeValue, as the RFC asks.
+func parseDeltaSeconds(v string) (time.Duration, bool) {
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n < 0 {
 		return 0, false
@@ -517,8 +524,9 @@ func responseDate(resp *http.Response) time.Time {
 	return time.Now()
 }
 
-// maxAgeValue caps a parsed Age, as RFC 9111 section 1.2.2 caps any
-// delta-seconds that overflows.
+// maxAgeValue caps a parsed delta-seconds value (Age, and the max-age and
+// other Cache-Control durations), as RFC 9111 section 1.2.2 asks of any
+// value that overflows.
 const maxAgeValue = 1 << 31
 
 // responseBirth returns the instant a response just received from upstream
@@ -530,8 +538,8 @@ const maxAgeValue = 1 << 31
 // stored it on disk as X-Polipo-Date.
 func responseBirth(h http.Header, requestTime time.Time) time.Time {
 	birth := requestTime
-	if age, err := strconv.ParseInt(strings.TrimSpace(h.Get("Age")), 10, 64); err == nil && age > 0 {
-		birth = birth.Add(-time.Duration(min(age, maxAgeValue)) * time.Second)
+	if age, ok := parseDeltaSeconds(strings.TrimSpace(h.Get("Age"))); ok {
+		birth = birth.Add(-age)
 	}
 	if d, err := http.ParseTime(h.Get("Date")); err == nil && d.Before(birth) {
 		birth = d
@@ -647,7 +655,7 @@ func (cm *CacheManager) isStaleFor(req *http.Request, resp *http.Response, birth
 		if v == "" {
 			return false
 		}
-		if maxStale, ok := cc.seconds("max-stale"); ok {
+		if maxStale, ok := parseDeltaSeconds(v); ok {
 			deadline += maxStale
 		}
 	}
