@@ -48,7 +48,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | R10 | ホップバイホップと転送系のヘッダー | エンドツーエンドのヘッダーを指す Connection、X-Forwarded-*、Forwarded、`censoredHeaders`、Referer(`censorReferer`) | TestForwardedRequestHeaders, TestConditionalHeadersSurviveConnection, TestCensoredHeadersStrippedFromRequest, TestCensorReferer* | |
 | R11 | Via、Max-Forwards | Via のループ、`disableVia`、Max-Forwards 0/n/不正 | TestVia, TestViaLoopDetected, TestMaxForwards | |
 | R12 | 認証付きリクエスト | Authorization あり | TestStoreSkipsAuthenticated | |
-| R13 | Expect | 本文付きリクエストの 100-continue、go-polipo が拒否するリクエストの 100-continue、知らない指定(417) | TestScenarioExpectContinue | |
+| R13 | Expect | 本文付きリクエストの 100-continue、go-polipo が拒否するリクエストの 100-continue、知らない指定(417)。最終応答の前に 1xx が2つ以上来ても受け入れる(RFC 9110 15.2 節。net/http が 100 Continue を2回送ることがある) | TestScenarioExpectContinue | |
 
 ## 3. オリジンの応答
 

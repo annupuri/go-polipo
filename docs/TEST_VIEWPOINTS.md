@@ -59,7 +59,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 | R10 | Hop-by-hop and forwarding headers | Connection naming end-to-end headers, X-Forwarded-*, Forwarded, `censoredHeaders`, Referer (`censorReferer`) | TestForwardedRequestHeaders, TestConditionalHeadersSurviveConnection, TestCensoredHeadersStrippedFromRequest, TestCensorReferer* | |
 | R11 | Via, Max-Forwards | Via loop, `disableVia`, Max-Forwards 0 / n / invalid | TestVia, TestViaLoopDetected, TestMaxForwards | |
 | R12 | Authenticated request | Authorization present | TestStoreSkipsAuthenticated | |
-| R13 | Expect | 100-continue on a request with a body, on a request go-polipo refuses, an unknown expectation (417) | TestScenarioExpectContinue | |
+| R13 | Expect | 100-continue on a request with a body, on a request go-polipo refuses, an unknown expectation (417); the client accepts more than one 1xx before the final status (RFC 9110 section 15.2), since net/http may send two 100 Continue | TestScenarioExpectContinue | |
 
 ## 3. Origin response
 
