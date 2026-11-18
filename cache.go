@@ -433,7 +433,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// fetched since the last restart. Nothing needs demoting when the LRU
 	// evicts it again: the disk copy stays where it is. A HEAD response
 	// carries no body to copy.
-	if cm.memCache != nil && req.Method == http.MethodGet {
+	if req.Method == http.MethodGet {
 		cm.promote(key, resp, birth)
 	}
 
@@ -453,7 +453,11 @@ func setAge(resp *http.Response, birth time.Time) {
 // memoryCacheMaxEntrySize limit as Store. A body over the limit is not
 // copied and keeps streaming from the file, with whatever was already read
 // put back in front of the rest.
+// It does nothing when the memory cache is off.
 func (cm *CacheManager) promote(key string, resp *http.Response, birth time.Time) {
+	if cm.memCache == nil {
+		return
+	}
 	limit := cm.config.MemoryCacheMaxEntrySize
 	if limit >= 0 && resp.ContentLength > limit {
 		return
@@ -893,6 +897,8 @@ func (b *cacheBody) commit() {
 		}
 	}
 	if b.mem != nil {
+		// memCache is set: Store gives b.mem a value only when memWants,
+		// which needs the memory cache.
 		b.mem.body = b.memBuf.Bytes()
 		b.cm.memCache.Add(b.key, b.mem)
 		b.mem, b.memBuf = nil, nil
