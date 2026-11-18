@@ -958,7 +958,7 @@ type ExpireStats struct {
 // corrupt files, responses that are stale by HTTP freshness rules, files
 // whose last access is older than Config.DiskCacheUnlinkTime, and large
 // files that have gone unused past DiskCacheTruncateTime (see
-// expireReason). Empty host directories left behind are pruned. It
+// judgeExpire). Empty host directories left behind are pruned. It
 // implements the `-x` command.
 func (cm *CacheManager) Expire() (ExpireStats, error) {
 	var stats ExpireStats
@@ -991,8 +991,8 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 			return nil // an entry still being written by Store
 		}
 		stats.Scanned++
-		reason := cm.expireReason(path, info)
-		if reason == "" {
+		reason := cm.judgeExpire(path, info)
+		if reason == expireKeep {
 			return nil
 		}
 		if err := os.Remove(path); err != nil {
@@ -1001,7 +1001,7 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 		}
 		stats.Removed++
 		stats.Freed += info.Size()
-		if reason == "size" {
+		if reason == expireSize {
 			stats.RemovedForSize++
 			logf(cm.config.LogLevel, LogInfo, "Cache expire: removed %s (%d bytes, unused since %s): "+
 				"larger than diskCacheTruncateSize and older than diskCacheTruncateTime",
@@ -1017,28 +1017,39 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 	return stats, nil
 }
 
-// expireReason reports why a single cache file should be deleted ("" if it
-// should be kept). The specific non-empty values are for Expire's own
-// bookkeeping/logging; callers other than Expire only need to know whether
-// the result is empty.
-func (cm *CacheManager) expireReason(path string, info fs.FileInfo) string {
+// expireReason is why Expire removes a cache file, or expireKeep when it
+// keeps it. The values appear in Expire's log lines.
+type expireReason string
+
+const (
+	expireKeep       expireReason = ""
+	expireAbandoned  expireReason = "abandoned"   // a partial write left behind by a crash
+	expireCorrupt    expireReason = "corrupt"     // unparseable cache file: junk
+	expireHTTPStale  expireReason = "http-stale"  // stale by HTTP freshness rules
+	expireUnlinkTime expireReason = "unlink-time" // unused for diskCacheUnlinkTime
+	expireSize       expireReason = "size"        // large and unused for diskCacheTruncateTime
+)
+
+// judgeExpire decides whether Expire should remove a single cache file, and
+// why. Expire counts expireSize removals separately (RemovedForSize).
+func (cm *CacheManager) judgeExpire(path string, info fs.FileInfo) expireReason {
 	if strings.HasPrefix(info.Name(), cacheTempPrefix) {
-		return "abandoned" // a partial write left behind by a crash
+		return expireAbandoned
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return ""
+		return expireKeep
 	}
 	defer file.Close()
 
 	resp, err := http.ReadResponse(bufio.NewReader(file), nil)
 	if err != nil {
-		return "corrupt" // unparseable cache file: junk, drop it
+		return expireCorrupt
 	}
 	defer resp.Body.Close()
 
 	if cm.isExpired(resp, storedBirth(resp)) {
-		return "http-stale"
+		return expireHTTPStale
 	}
 
 	// Absolute age cap based on last recorded access (fall back to mtime).
@@ -1050,7 +1061,7 @@ func (cm *CacheManager) expireReason(path string, info fs.FileInfo) string {
 	}
 	if cm.config.DiskCacheUnlinkTime > 0 &&
 		time.Since(lastAccess) > cm.config.DiskCacheUnlinkTime {
-		return "unlink-time"
+		return expireUnlinkTime
 	}
 
 	// Polipo would truncate a large, long-unused entry down to
@@ -1063,10 +1074,10 @@ func (cm *CacheManager) expireReason(path string, info fs.FileInfo) string {
 	// reclaims the same space without ever serving that broken response.
 	if cm.config.DiskCacheTruncateSize > 0 && info.Size() > cm.config.DiskCacheTruncateSize &&
 		time.Since(lastAccess) > cm.config.DiskCacheTruncateTime {
-		return "size"
+		return expireSize
 	}
 
-	return ""
+	return expireKeep
 }
 
 // pruneEmptyDirs removes empty directories under root, deepest first, keeping
