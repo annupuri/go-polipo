@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 	"sync"
@@ -46,6 +47,8 @@ type logFileWriter struct {
 	perm os.FileMode
 	f    *os.File
 }
+
+var _ io.WriteCloser = (*logFileWriter)(nil)
 
 func openLogFileWriter(path string, perm os.FileMode) (*logFileWriter, error) {
 	f, err := openLogFile(path, perm)

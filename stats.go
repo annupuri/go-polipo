@@ -39,6 +39,8 @@ type countingWriter struct {
 	n uint64
 }
 
+var _ http.ResponseWriter = (*countingWriter)(nil)
+
 func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.ResponseWriter.Write(p)
 	c.n += uint64(n)

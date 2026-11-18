@@ -15,6 +15,8 @@ import (
 // with something other than 2xx.
 type errParentRefused struct{ status string }
 
+var _ error = (*errParentRefused)(nil)
+
 func (e *errParentRefused) Error() string { return "parent proxy answered " + e.status }
 
 // parentAddr is the parent proxy's host:port, with the scheme's default port

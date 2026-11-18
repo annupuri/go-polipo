@@ -395,6 +395,8 @@ func parseTristate(val string) (int, error) {
 // integers. A nil PortSet allows nothing.
 type PortSet []portRange
 
+var _ fmt.Stringer = PortSet(nil)
+
 type portRange struct{ lo, hi int }
 
 // Contains reports whether port falls in any range of the set.

@@ -483,6 +483,8 @@ type fileBody struct {
 	file *os.File
 }
 
+var _ io.ReadCloser = fileBody{}
+
 func (b fileBody) Close() error {
 	b.ReadCloser.Close()
 	return b.file.Close()
@@ -824,6 +826,8 @@ type cacheBody struct {
 
 	once sync.Once
 }
+
+var _ io.ReadCloser = (*cacheBody)(nil)
 
 // Read is not called from go-polipo's own code. Store installs the cacheBody
 // as resp.Body inside the ReverseProxy's ModifyResponse hook (cacheResponse),
