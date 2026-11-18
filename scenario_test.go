@@ -532,12 +532,23 @@ func TestScenarioExpectContinue(t *testing.T) {
 			return first, first
 		}
 		io.WriteString(conn, "hello")
-		resp, err = http.ReadResponse(br, nil)
-		if err != nil {
-			t.Fatalf("POST %s after 100 Continue: %v", path, err)
+		// More 1xx responses may come before the final one, which a client
+		// must accept (RFC 9110 section 15.2). Here a second 100 Continue
+		// sometimes does: net/http's server sends one when the Transport
+		// starts reading the body, and ReverseProxy forwards the origin's
+		// own 100 as well. Which comes first is a race inside net/http
+		// (Transport signals the body writer before calling
+		// Got1xxResponse); the CI's Windows runner has seen both arrive.
+		for {
+			resp, err = http.ReadResponse(br, nil)
+			if err != nil {
+				t.Fatalf("POST %s after 100 Continue: %v", path, err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode >= 200 {
+				return first, resp.StatusCode
+			}
 		}
-		resp.Body.Close()
-		return first, resp.StatusCode
 	}
 	received := func() []string {
 		mu.Lock()
