@@ -650,8 +650,15 @@ func (cm *CacheManager) isStaleFor(req *http.Request, resp *http.Response, birth
 	if minFresh, ok := cc.seconds("min-fresh"); ok {
 		deadline -= minFresh
 	} else if v, ok := cc["max-stale"]; ok && !responseForbidsStale(resp) {
-		// Without a value, any staleness is accepted (RFC 9111 section
-		// 5.2.1.2). An invalid value is ignored, like an invalid max-age.
+		// max-stale has three cases, and the empty one must be checked
+		// first, because parseDeltaSeconds rejects "" just as it rejects
+		// "abc" or "-1":
+		//   - no value: any staleness is accepted (RFC 9111 section
+		//     5.2.1.2);
+		//   - delta-seconds: that much staleness is accepted;
+		//   - anything else is invalid and ignored, as if the request had
+		//     no max-stale, like an invalid max-age. Treating it as "any
+		//     staleness" would let a malformed value unlock stale entries.
 		if v == "" {
 			return false
 		}
