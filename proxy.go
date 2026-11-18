@@ -66,6 +66,8 @@ type ProxyHandler struct {
 	stats *proxyStats
 }
 
+var _ http.Handler = (*ProxyHandler)(nil)
+
 // NewProxyHandler creates a new ProxyHandler.
 func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, uncachable, forbiddenTunnels *ForbiddenList) *ProxyHandler {
 	ph := &ProxyHandler{
@@ -582,6 +584,8 @@ type idleTimeoutConn struct {
 	timeout time.Duration
 }
 
+var _ net.Conn = (*idleTimeoutConn)(nil)
+
 func (c *idleTimeoutConn) Read(p []byte) (int, error) {
 	c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
 	return c.Conn.Read(p)
@@ -638,6 +642,8 @@ type parentProxyAuthTransport struct {
 	http.RoundTripper
 	header string
 }
+
+var _ http.RoundTripper = (*parentProxyAuthTransport)(nil)
 
 func (t *parentProxyAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
@@ -1089,6 +1095,14 @@ type halfCloser interface {
 	CloseWrite() error
 }
 
+// The types tunnel relies on to half-close. activityConn.CloseWrite exists
+// only to satisfy halfCloser, and tunnel checks for it at run time, so
+// without the second line, removing it would silently stop half-closing.
+var (
+	_ halfCloser = (*net.TCPConn)(nil)
+	_ halfCloser = (*activityConn)(nil)
+)
+
 // tunnel copies bytes in both directions until both sides are done. A single
 // tunnel often multiplexes many logical requests (HTTP/2 over one CONNECT),
 // so it must not close either connection until BOTH directions have finished;
@@ -1157,6 +1171,8 @@ type activityConn struct {
 	start time.Time
 	last  *atomic.Int64
 }
+
+var _ net.Conn = (*activityConn)(nil)
 
 func (c *activityConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
