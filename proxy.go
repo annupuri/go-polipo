@@ -1380,37 +1380,62 @@ func (ph *ProxyHandler) writeRange(w http.ResponseWriter, req *http.Request, res
 		return false
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false
+	var src io.ReaderAt
+	var size int64
+	ok := false
+	if rb, isRangeBody := resp.Body.(rangeBody); isRangeBody {
+		src, size, ok = rb.bodyAt()
 	}
-	// Restore resp.Body so the normal-path fallback (any return false below)
-	// can still read it from the start, exactly as if writeRange had never
-	// been called. Closing it must still close the original body: callers
-	// close whatever resp.Body is when they return, and a disk entry's body
-	// holds the cache file open.
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{bytes.NewReader(body), resp.Body}
+	if !ok {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return false
+		}
+		// Restore resp.Body so the normal-path fallback (any return false
+		// below) can still read it from the start, exactly as if writeRange
+		// had never been called. Closing it must still close the original
+		// body: callers close whatever resp.Body is when they return, and a
+		// disk entry's body holds the cache file open.
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{bytes.NewReader(body), resp.Body}
+		src, size = bytes.NewReader(body), int64(len(body))
+	}
 
-	start, end, result := parseByteRange(rangeHeader, int64(len(body)))
+	start, end, result := parseByteRange(rangeHeader, size)
 	switch result {
 	case rangeNotApplicable:
 		return false
 	case rangeUnsatisfiable:
 		w.Header().Del(headerContentLength)
-		w.Header().Set(headerContentRange, fmt.Sprintf("bytes */%d", len(body)))
+		w.Header().Set(headerContentRange, fmt.Sprintf("bytes */%d", size))
 		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 		return true
 	default: // rangeSatisfiable
-		w.Header().Set(headerContentRange, fmt.Sprintf("bytes %d-%d/%d", start, end, len(body)))
+		w.Header().Set(headerContentRange, fmt.Sprintf("bytes %d-%d/%d", start, end, size))
 		w.Header().Set(headerContentLength, strconv.FormatInt(end-start+1, 10))
 		w.WriteHeader(http.StatusPartialContent)
-		w.Write(body[start : end+1])
+		io.Copy(w, io.NewSectionReader(src, start, end-start+1))
 		return true
 	}
 }
+
+// rangeBody is a cached body that can hand out any byte range of itself
+// without reading the bytes before it, so writeRange need not read a large
+// disk entry whole to serve one range of it.
+type rangeBody interface {
+	// bodyAt returns the whole body as an io.ReaderAt and its length, or
+	// ok == false if the body can only be read from the start. Reading
+	// through the ReaderAt does not move the body's own read position.
+	bodyAt() (r io.ReaderAt, size int64, ok bool)
+}
+
+// The cached bodies writeRange can slice without reading them whole.
+var (
+	_ rangeBody = fileBody{}
+	_ rangeBody = memBody{}
+)
 
 // rangeResult reports how parseByteRange's input relates to the resource.
 type rangeResult int
