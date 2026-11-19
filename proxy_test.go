@@ -158,13 +158,13 @@ func TestProxyLocalInterfaceNotForProxiedURLs(t *testing.T) {
 	}
 }
 
-// TestProxyOtherLocalFormIsNotFound: a local-form request outside the local
+// TestProxyOtherOriginFormIsNotFound: an origin-form request outside the local
 // interface (a browser that opened /polipo/ fetching /favicon.ico) is
 // answered 404 by go-polipo itself, as Polipo did when localDocumentRoot had
 // no such file, instead of being "forwarded" to no host at all - which
 // failed with a 502 and a "Proxy error" log line. The same goes for /polipo/
 // when the local interface is disabled.
-func TestProxyOtherLocalFormIsNotFound(t *testing.T) {
+func TestProxyOtherOriginFormIsNotFound(t *testing.T) {
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
@@ -191,7 +191,7 @@ func TestProxyOtherLocalFormIsNotFound(t *testing.T) {
 		}
 	}
 	if strings.Contains(buf.String(), "Proxy error") {
-		t.Errorf("local-form requests must not be forwarded, but got:\n%s", buf.String())
+		t.Errorf("origin-form requests must not be forwarded, but got:\n%s", buf.String())
 	}
 }
 
@@ -2220,7 +2220,7 @@ func TestProxyAuthCredentials(t *testing.T) {
 		t.Errorf("correct credentials: got %d, want 418 from the backend", rrOK.Code)
 	}
 
-	// Local-form request (a browser pointed straight at go-polipo rather than
+	// Origin-form request (a browser pointed straight at go-polipo rather than
 	// configured to use it as a proxy): challenged with 401/WWW-Authenticate,
 	// against Authorization rather than Proxy-Authorization, matching
 	// Polipo's urlIsLocal split.
@@ -2229,7 +2229,7 @@ func TestProxyAuthCredentials(t *testing.T) {
 	rrLocal := httptest.NewRecorder()
 	ph.ServeHTTP(rrLocal, reqLocal)
 	if rrLocal.Code != http.StatusUnauthorized {
-		t.Errorf("local-form, no credentials: got %d, want 401", rrLocal.Code)
+		t.Errorf("origin-form, no credentials: got %d, want 401", rrLocal.Code)
 	}
 	if got := rrLocal.Header().Get("WWW-Authenticate"); got != `Basic realm="go-polipo"` {
 		t.Errorf("WWW-Authenticate = %q", got)
@@ -2241,7 +2241,7 @@ func TestProxyAuthCredentials(t *testing.T) {
 	rrLocalOK := httptest.NewRecorder()
 	ph.ServeHTTP(rrLocalOK, reqLocalOK)
 	if rrLocalOK.Code != http.StatusOK {
-		t.Errorf("local-form, correct Authorization: got %d, want 200", rrLocalOK.Code)
+		t.Errorf("origin-form, correct Authorization: got %d, want 200", rrLocalOK.Code)
 	}
 
 	// CONNECT without credentials: 407, same as any other proxied request.
