@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -45,8 +46,8 @@ func NewCacheManager(config *Config) *CacheManager {
 // cacheable response. Unlike the disk format it has no body-offset gap and no
 // X-Polipo-* metadata - none of that is needed here. There is no hash
 // collision to guard against (the map key is the request URL itself, not a
-// hash of it), and "last access" bookkeeping is unnecessary: the LRU tracks
-// recency internally, and the entry never outlives the process anyway.
+// hash of it). The LRU tracks recency in memory; touched only exists to
+// record a memory hit's use on the disk copy, for -x.
 type memEntry struct {
 	status     string
 	statusCode int
@@ -56,12 +57,17 @@ type memEntry struct {
 	header     http.Header
 	body       []byte
 	birth      time.Time // see responseBirth; a disk entry keeps it in X-Polipo-Date
+
+	// touched is when this entry's disk copy last had its use recorded
+	// (UnixNano; see noteAccess). A hit served from memory never opens the
+	// file, so this is how it knows when to record the use again.
+	touched atomic.Int64
 }
 
 // newMemEntry snapshots resp (whose body has already been read into
 // bodyBytes) for storage in the memory cache.
 func newMemEntry(resp *http.Response, bodyBytes []byte, birth time.Time) *memEntry {
-	return &memEntry{
+	e := &memEntry{
 		birth:      birth,
 		status:     resp.Status,
 		statusCode: resp.StatusCode,
@@ -71,6 +77,33 @@ func newMemEntry(resp *http.Response, bodyBytes []byte, birth time.Time) *memEnt
 		header:     resp.Header.Clone(),
 		body:       bodyBytes,
 	}
+	// Made from a response just stored or just read from disk, whose use
+	// is already recorded.
+	e.touched.Store(time.Now().UnixNano())
+	return e
+}
+
+// accessRefreshInterval is how often a cache hit records its entry's use on
+// disk. diskCacheUnlinkTime is counted in days, so an hour is fine enough,
+// and an entry served many times a minute does not touch its file each time.
+const accessRefreshInterval = time.Hour
+
+// noteAccess records that the disk entry at path was used, by setting the
+// file's mtime to now, unless lastUse (when the use was last recorded) is
+// within accessRefreshInterval. Polipo kept an object's last use in
+// object->atime, set whenever it was served (client.c), and wrote it out to
+// X-Polipo-Access; judgeExpire counts diskCacheUnlinkTime from that. go-polipo
+// does not rewrite the entry's header for this: changing the file's
+// timestamp leaves its content alone, so a reader cannot see a half-written
+// header. The mtime then means "last used" rather than "last modified", and
+// judgeExpire takes the later of it and X-Polipo-Access. A failure (say the
+// entry was just removed) only means the use goes unrecorded.
+func noteAccess(path string, lastUse time.Time) bool {
+	now := time.Now()
+	if now.Sub(lastUse) < accessRefreshInterval {
+		return false
+	}
+	return os.Chtimes(path, now, now) == nil
 }
 
 // response reconstructs an *http.Response from e. The header is cloned on
@@ -374,6 +407,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// is meant to work the same whether or not the disk cache is enabled.
 	if cm.memCache != nil {
 		if entry, ok := cm.memCache.Get(key); ok {
+			cm.noteMemoryAccess(key, entry)
 			resp := entry.response(req)
 			stale := cm.isStaleFor(req, resp, entry.birth)
 			setAge(resp, entry.birth)
@@ -392,6 +426,16 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
+
+	// Record the use before opening the file: on Windows os.Chtimes opens
+	// the file without sharing it for reading, so it fails while this
+	// function holds the file open. (Another request reading the same entry
+	// can still make it fail there; the next hit then records the use.)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, false
+	}
+	noteAccess(path, info.ModTime())
 
 	file, err := os.Open(path)
 	if err != nil {
@@ -447,6 +491,28 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 
 	setAge(resp, birth)
 	return resp, stale
+}
+
+// noteMemoryAccess records a memory hit's use on the entry's disk copy, if
+// there is one; see noteAccess.
+func (cm *CacheManager) noteMemoryAccess(key string, entry *memEntry) {
+	if cm.isDiskCacheDisabled() {
+		return
+	}
+	if time.Since(time.Unix(0, entry.touched.Load())) < accessRefreshInterval {
+		return
+	}
+	path, err := cm.CachePath(key)
+	if err != nil {
+		return
+	}
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	// The memory entry's own clock is what throttles this, so pass a lastUse
+	// old enough that noteAccess writes.
+	if noteAccess(path, time.Time{}) {
+		entry.touched.Store(time.Now().UnixNano())
+	}
 }
 
 // setAge replaces whatever Age resp was stored with by its current age, which
@@ -1054,10 +1120,13 @@ func (cm *CacheManager) judgeExpire(path string, info fs.FileInfo) expireReason 
 		return expireHTTPStale
 	}
 
-	// Absolute age cap based on last recorded access (fall back to mtime).
+	// Absolute age cap based on the last recorded use: the later of
+	// X-Polipo-Access (written when the entry was stored, or by Polipo when
+	// it served the entry) and the file's mtime (set by noteAccess when
+	// go-polipo serves it).
 	lastAccess := info.ModTime()
 	if a := resp.Header.Get(headerPolipoAccess); a != "" {
-		if t, err := http.ParseTime(a); err == nil {
+		if t, err := http.ParseTime(a); err == nil && t.After(lastAccess) {
 			lastAccess = t
 		}
 	}

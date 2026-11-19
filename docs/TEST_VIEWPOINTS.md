@@ -89,7 +89,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 | S1 | Entry | miss, fresh memory hit, fresh disk hit, stale, stale but forbidden to serve stale, Vary / no-cache entry | TestCacheStoreAndLookup, TestDiskHitPromotedToMemory, TestMemoryCacheRespectsFreshnessAndVary, TestVaryEntryNeverServedWithoutRevalidation, TestScenarioCacheLifecycle | |
 | S2 | Revalidation | 304 merges headers, 200 replaces, 304 without entry | TestConditionalRevalidation200ReplacesCache, TestRevalidation304UpdatesStoredHeaders, TestRevalidation304WithoutCachedEntryIsAnError | |
 | S3 | Tiers | disk off, memory off, both off, eviction | TestDiskCacheDisabled, TestMemoryCacheDisabled, TestMemoryCacheEntriesEviction, TestMemoryCacheIndependentOfNoDiskCache | |
-| S4 | Files on disk | corrupt, temporary (being written / abandoned), unused past `diskCacheUnlinkTime`, large and unused (`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries | |
+| S4 | Files on disk | corrupt, temporary (being written / abandoned), unused past `diskCacheUnlinkTime`, stored long ago but used recently (disk hit, memory hit; not rewritten within the hour), large and unused (`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries, TestCacheHitRefreshesAccess | |
 | S5 | Disk errors | cache directory unwritable, entry unreadable, disk full | TestScenarioDiskErrors | disk full (no portable way to cause it in a test) |
 | S6 | Invalidation | unsafe method invalidates the URL | TestUnsafeRequestInvalidatesCache | |
 

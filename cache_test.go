@@ -1139,6 +1139,87 @@ func TestExpire(t *testing.T) {
 	}
 }
 
+// TestCacheHitRefreshesAccess: an entry still being used must not be removed
+// by -x just because it was stored more than diskCacheUnlinkTime ago.
+// Polipo updated an object's access time whenever it served it (client.c)
+// and wrote that out to X-Polipo-Access; go-polipo records the use in the
+// entry file's mtime, from both disk and memory hits, and Expire counts
+// from the later of the two.
+func TestCacheHitRefreshesAccess(t *testing.T) {
+	const rawURL = "http://example.com/used-every-day"
+	longAgo := time.Now().Add(-40 * 24 * time.Hour)
+
+	setup := func(t *testing.T, memEntries int) (*CacheManager, string) {
+		t.Helper()
+		cfg := NewDefaultConfig()
+		cfg.DiskCacheRoot = t.TempDir()
+		cfg.DiskCacheUnlinkTime = 32 * 24 * time.Hour
+		cfg.MemoryCacheEntries = memEntries
+		cm := NewCacheManager(cfg)
+		// Fresh by HTTP rules, but stored (and, as far as the file says,
+		// last used) 40 days ago.
+		p := writeCacheEntry(t, cm, rawURL, "max-age=999999999",
+			time.Now().UTC().Format(http.TimeFormat), longAgo.UTC().Format(http.TimeFormat), longAgo)
+		return cm, p
+	}
+	hit := func(t *testing.T, cm *CacheManager) {
+		t.Helper()
+		resp := cm.Lookup(httptest.NewRequest(http.MethodGet, rawURL, nil))
+		if resp == nil {
+			t.Fatal("Lookup missed a fresh entry")
+		}
+		resp.Body.Close()
+	}
+	expireKeeps := func(t *testing.T, cm *CacheManager, p string) {
+		t.Helper()
+		if _, err := cm.Expire(); err != nil {
+			t.Fatalf("Expire: %v", err)
+		}
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("an entry used just now was removed: %v", err)
+		}
+	}
+
+	t.Run("disk hit", func(t *testing.T) {
+		cm, p := setup(t, 0)
+		hit(t, cm)
+		expireKeeps(t, cm, p)
+	})
+
+	t.Run("memory hit", func(t *testing.T) {
+		cm, p := setup(t, 16)
+		hit(t, cm) // from disk, copied into memory
+		// Pretend the copy has been served from memory, untouched on disk,
+		// for longer than the refresh interval.
+		if err := os.Chtimes(p, longAgo, longAgo); err != nil {
+			t.Fatal(err)
+		}
+		entry, ok := cm.memCache.Peek(rawURL)
+		if !ok {
+			t.Fatal("the disk hit was not copied into memory")
+		}
+		entry.touched.Store(longAgo.UnixNano())
+		hit(t, cm) // from memory
+		expireKeeps(t, cm, p)
+	})
+
+	t.Run("not rewritten within the interval", func(t *testing.T) {
+		cm, p := setup(t, 0)
+		recent := time.Now().Add(-accessRefreshInterval / 2).Truncate(time.Second)
+		if err := os.Chtimes(p, recent, recent); err != nil {
+			t.Fatal(err)
+		}
+		hit(t, cm)
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(recent) {
+			t.Errorf("mtime = %v, want it left at %v", info.ModTime(), recent)
+		}
+	})
+}
+
 func TestCacheLookupRejections(t *testing.T) {
 	root := t.TempDir()
 	cfg := NewDefaultConfig()
