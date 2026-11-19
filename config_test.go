@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -225,6 +226,46 @@ func TestSet(t *testing.T) {
 	err = c.Set("allowedPorts", "80, invalid")
 	if err == nil {
 		t.Error("expected error for invalid allowedPorts")
+	}
+}
+
+// TestConfigSampleParses reads every commented-out "# name = value" example
+// in config.sample and checks that the name is a known variable and the
+// line parses. The sample spells the names the way users write them in a
+// config file, so this pins the external names: a configKey constant with a
+// wrong value fails here even though Set and Entries, which share the
+// constant, still agree with each other. (Set only logs an unknown name, as
+// Polipo did, so the name is checked against Entries separately.) It also
+// catches an example the parser no longer accepts.
+func TestConfigSampleParses(t *testing.T) {
+	data, err := os.ReadFile("config.sample")
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := map[configKey]bool{}
+	for _, e := range NewDefaultConfig().Entries() {
+		known[e.Name] = true
+	}
+	example := regexp.MustCompile(`^#\s*([A-Za-z]+\s*=.*)$`)
+	seen := map[string]bool{}
+	for i, line := range strings.Split(string(data), "\n") {
+		m := example.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		name, _, _ := strings.Cut(m[1], "=")
+		name = strings.TrimSpace(name)
+		seen[name] = true
+		if !known[configKey(name)] {
+			t.Errorf("config.sample:%d: unknown variable %q", i+1, name)
+		}
+		if err := NewDefaultConfig().ParseLine(m[1]); err != nil {
+			t.Errorf("config.sample:%d: %q: %v", i+1, m[1], err)
+		}
+	}
+	// Guard against the pattern silently matching nothing.
+	if len(seen) < 30 {
+		t.Fatalf("found examples for only %d variables in config.sample", len(seen))
 	}
 }
 
