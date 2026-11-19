@@ -141,11 +141,11 @@ type Config struct {
 	CensoredHeaders []string
 
 	// CensorReferer controls suppression of the Referer request header,
-	// using Polipo's three levels: 0 ("false", the default) forwards it
-	// unchanged. 1 ("maybe") drops it only when it names a different host
-	// than the request's own target (cross-origin). 2 ("true") drops it
+	// using Polipo's three levels: "false" (the default) forwards it
+	// unchanged. "maybe" drops it only when it names a different host than
+	// the request's own target (cross-origin). "true" drops it
 	// unconditionally.
-	CensorReferer int
+	CensorReferer Tristate
 
 	// ProxyOffline, when true, never contacts the origin for a forwarded
 	// request: whatever is on disk (fresh or stale) is served as-is, and a
@@ -153,17 +153,16 @@ type Config struct {
 	ProxyOffline bool
 
 	// RelaxTransparency controls what happens when the origin cannot be
-	// reached, using Polipo's three levels: 0 ("false", the default) means a
-	// failure is always reported as an error. 1 ("maybe") serves a stale
-	// cache entry instead, with a Warning header noting the failure. 2
-	// ("true") goes further: any existing entry, even stale, is served
-	// without even attempting the network - only a true miss reaches the
-	// origin.
-	RelaxTransparency int
+	// reached, using Polipo's three levels: "false" (the default) means a
+	// failure is always reported as an error. "maybe" serves a stale cache
+	// entry instead, with a Warning header noting the failure. "true" goes
+	// further: any existing entry, even stale, is served without even
+	// attempting the network - only a true miss reaches the origin.
+	RelaxTransparency Tristate
 
 	// DontTrustVaryETag controls whether a Vary'd cache entry may be
-	// revalidated using its ETag, Polipo's three levels: 0 ("false") and 1
-	// ("maybe", the default) both allow it; only 2 ("true") disables it,
+	// revalidated using its ETag, Polipo's three levels: "false" and "maybe"
+	// (the default) both allow it; only "true" disables it,
 	// forcing a full, unconditional re-fetch every time instead. Polipo's
 	// "maybe" adds an extra check that only matters for its in-memory
 	// object-sharing model, which go-polipo has no equivalent of (see
@@ -171,7 +170,7 @@ type Config struct {
 	// matching Polipo's own ("maybe") rather than the most conservative
 	// value - see PARITY_AUDIT for what is actually at stake in each
 	// direction.
-	DontTrustVaryETag int
+	DontTrustVaryETag Tristate
 
 	// DisableVia stops go-polipo adding itself to the Via of the requests and
 	// responses it forwards. RFC 9110 section 7.6.3 requires a proxy to add
@@ -239,10 +238,10 @@ func NewDefaultConfig() *Config {
 		ParentAuthCredentials:   "",
 		SocksAuthCredentials:    "",
 		CensoredHeaders:         nil,
-		CensorReferer:           0,
+		CensorReferer:           TristateFalse,
 		ProxyOffline:            false,
-		RelaxTransparency:       0,
-		DontTrustVaryETag:       1,
+		RelaxTransparency:       TristateFalse,
+		DontTrustVaryETag:       TristateMaybe,
 		DisableVia:              false,
 		// Not in Polipo: see ForbidLocalDestinations.
 		ForbidLocalDestinations:   true,
@@ -285,7 +284,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{"parentAuthCredentials", redactedPassword},
 		{"socksAuthCredentials", redactedPassword},
 		{"censoredHeaders", strings.Join(c.CensoredHeaders, ", ")},
-		{"censorReferer", tristateString(c.CensorReferer)},
+		{"censorReferer", c.CensorReferer.String()},
 		{"tunnelAllowedPorts", c.TunnelAllowedPorts.String()},
 		{"allowedPorts", c.AllowedPorts.String()},
 		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
@@ -298,8 +297,8 @@ func (c *Config) Entries() []ConfigEntry {
 		{"serverIdleTimeout", c.ServerIdleTimeout.String()},
 		{"tunnelIdleTimeout", c.TunnelIdleTimeout.String()},
 		{"proxyOffline", strconv.FormatBool(c.ProxyOffline)},
-		{"relaxTransparency", tristateString(c.RelaxTransparency)},
-		{"dontTrustVaryETag", tristateString(c.DontTrustVaryETag)},
+		{"relaxTransparency", c.RelaxTransparency.String()},
+		{"dontTrustVaryETag", c.DontTrustVaryETag.String()},
 		{"disableVia", strconv.FormatBool(c.DisableVia)},
 		{"forbidLocalDestinations", strconv.FormatBool(c.ForbidLocalDestinations)},
 		{"forbidPrivateDestinations", strconv.FormatBool(c.ForbidPrivateDestinations)},
@@ -362,32 +361,40 @@ func redactProxyURL(raw string) string {
 	return raw
 }
 
-// tristateString renders a Polipo CONFIG_TRISTATE value (0/1/2) the way `-v`
-// and the config page show it: "false", "maybe", "true".
-func tristateString(v int) string {
-	switch v {
-	case 1:
-		return "maybe"
-	case 2:
-		return "true"
-	default:
-		return "false"
+// Tristate is Polipo's CONFIG_TRISTATE: a setting that is "false",
+// "maybe" or "true". The values are ordered, so a level can be compared
+// with >=.
+type Tristate int
+
+const (
+	TristateFalse Tristate = iota
+	TristateMaybe
+	TristateTrue
+)
+
+var _ fmt.Stringer = Tristate(0)
+
+var tristateNames = [...]string{TristateFalse: "false", TristateMaybe: "maybe", TristateTrue: "true"}
+
+// String renders t the way `-v` and the config page show it, as Polipo
+// did. A value outside the three renders as "false".
+func (t Tristate) String() string {
+	if t < TristateFalse || t > TristateTrue {
+		return tristateNames[TristateFalse]
 	}
+	return tristateNames[t]
 }
 
-// parseTristate parses Polipo's tristate config syntax into 0 ("false"), 1
-// ("maybe") or 2 ("true"), case-insensitively.
-func parseTristate(val string) (int, error) {
-	switch strings.ToLower(strings.TrimSpace(val)) {
-	case "false":
-		return 0, nil
-	case "maybe":
-		return 1, nil
-	case "true":
-		return 2, nil
-	default:
-		return 0, fmt.Errorf("invalid tristate value %q: want false, maybe, or true", val)
+// parseTristate parses Polipo's tristate config syntax ("false", "maybe"
+// or "true"), case-insensitively.
+func parseTristate(val string) (Tristate, error) {
+	name := strings.ToLower(strings.TrimSpace(val))
+	for t, n := range tristateNames {
+		if name == n {
+			return Tristate(t), nil
+		}
 	}
+	return TristateFalse, fmt.Errorf("invalid tristate value %q: want false, maybe, or true", val)
 }
 
 // PortSet is a set of allowed TCP ports expressed as inclusive ranges, so

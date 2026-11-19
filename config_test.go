@@ -51,14 +51,14 @@ func TestNewDefaultConfig(t *testing.T) {
 	if len(c.CensoredHeaders) != 0 {
 		t.Errorf("expected CensoredHeaders empty, got %v", c.CensoredHeaders)
 	}
-	if c.CensorReferer != 0 {
-		t.Errorf("expected CensorReferer 0, got %d", c.CensorReferer)
+	if c.CensorReferer != TristateFalse {
+		t.Errorf("expected CensorReferer false, got %s", c.CensorReferer)
 	}
 	if c.ProxyOffline != false {
 		t.Errorf("expected ProxyOffline false, got %t", c.ProxyOffline)
 	}
-	if c.RelaxTransparency != 0 {
-		t.Errorf("expected RelaxTransparency 0, got %d", c.RelaxTransparency)
+	if c.RelaxTransparency != TristateFalse {
+		t.Errorf("expected RelaxTransparency false, got %s", c.RelaxTransparency)
 	}
 }
 
@@ -348,17 +348,17 @@ func TestSetAllKeys(t *testing.T) {
 	if diff := cmp.Diff([]string{"X-My-Header", "X-Another"}, c.CensoredHeaders); diff != "" {
 		t.Errorf("censoredHeaders mismatch (-want +got):\n%s", diff)
 	}
-	if c.CensorReferer != 1 {
-		t.Errorf("censorReferer = %d, want 1 (maybe)", c.CensorReferer)
+	if c.CensorReferer != TristateMaybe {
+		t.Errorf("censorReferer = %s, want maybe", c.CensorReferer)
 	}
 	if !c.ProxyOffline {
 		t.Error(`proxyOffline "true" should be truthy`)
 	}
-	if c.RelaxTransparency != 1 {
-		t.Errorf("relaxTransparency = %d, want 1 (maybe)", c.RelaxTransparency)
+	if c.RelaxTransparency != TristateMaybe {
+		t.Errorf("relaxTransparency = %s, want maybe", c.RelaxTransparency)
 	}
-	if c.DontTrustVaryETag != 2 {
-		t.Errorf("dontTrustVaryETag = %d, want 2 (true)", c.DontTrustVaryETag)
+	if c.DontTrustVaryETag != TristateTrue {
+		t.Errorf("dontTrustVaryETag = %s, want true", c.DontTrustVaryETag)
 	}
 
 	// disableLocalInterface falls back to false for anything not true/1.
@@ -455,20 +455,20 @@ func TestRelaxTransparencyTristate(t *testing.T) {
 
 	tests := []struct {
 		val  string
-		want int
+		want Tristate
 	}{
-		{"false", 0},
-		{"maybe", 1},
-		{"true", 2},
-		{"FALSE", 0}, // case-insensitive
-		{"True", 2},
+		{"false", TristateFalse},
+		{"maybe", TristateMaybe},
+		{"true", TristateTrue},
+		{"FALSE", TristateFalse}, // case-insensitive
+		{"True", TristateTrue},
 	}
 	for _, tt := range tests {
 		if err := c.Set("relaxTransparency", tt.val); err != nil {
 			t.Errorf("Set(relaxTransparency, %q) unexpected error: %v", tt.val, err)
 		}
 		if c.RelaxTransparency != tt.want {
-			t.Errorf("relaxTransparency = %d after %q, want %d", c.RelaxTransparency, tt.val, tt.want)
+			t.Errorf("relaxTransparency = %s after %q, want %s", c.RelaxTransparency, tt.val, tt.want)
 		}
 	}
 

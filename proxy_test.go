@@ -1037,7 +1037,7 @@ func TestCensorRefererFalseForwardsUnchanged(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	ph := newTestHandler(newTestConfig()) // CensorReferer left at its default (0/"false")
+	ph := newTestHandler(newTestConfig()) // CensorReferer left at its default ("false")
 
 	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -1059,7 +1059,7 @@ func TestCensorRefererTrueDropsAlways(t *testing.T) {
 	defer backend.Close()
 
 	cfg := newTestConfig()
-	cfg.CensorReferer = 2 // true
+	cfg.CensorReferer = TristateTrue
 	ph := newTestHandler(cfg)
 
 	// Even a same-host Referer is dropped at "true".
@@ -1086,7 +1086,7 @@ func TestCensorRefererMaybeDropsOnlyCrossOrigin(t *testing.T) {
 	defer backend.Close()
 
 	cfg := newTestConfig()
-	cfg.CensorReferer = 1 // maybe
+	cfg.CensorReferer = TristateMaybe
 	ph := newTestHandler(cfg)
 
 	// Cross-origin Referer: dropped.
@@ -1282,7 +1282,7 @@ func TestRelaxTransparencyMaybeServesStaleOnFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
-	cfg.RelaxTransparency = 1 // maybe
+	cfg.RelaxTransparency = TristateMaybe
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
@@ -1311,7 +1311,7 @@ func TestRelaxTransparencyFalseStillErrorsOnFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
-	// RelaxTransparency left at its default (0/"false").
+	// RelaxTransparency left at its default ("false").
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
@@ -1339,7 +1339,7 @@ func TestRelaxTransparencyTrueServesStaleWithoutContactingOrigin(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
-	cfg.RelaxTransparency = 2 // true
+	cfg.RelaxTransparency = TristateTrue
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
@@ -1381,10 +1381,10 @@ func TestStaleForbiddenEntryNotServedStale(t *testing.T) {
 			target := live.URL + "/resource"
 			switch mode {
 			case "relaxTransparency=maybe":
-				cfg.RelaxTransparency = 1
+				cfg.RelaxTransparency = TristateMaybe
 				target = "http://" + deadLoopback + ":9999/resource" // unreachable
 			case "relaxTransparency=true":
-				cfg.RelaxTransparency = 2
+				cfg.RelaxTransparency = TristateTrue
 			case "proxyOffline":
 				cfg.ProxyOffline = true
 			}
@@ -1427,7 +1427,7 @@ func TestRelaxTransparencyMaybeStillContactsOriginWhenStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := newTestConfig()
 	cfg.DiskCacheRoot = tmpDir
-	cfg.RelaxTransparency = 1 // maybe: only failures fall back to stale
+	cfg.RelaxTransparency = TristateMaybe // only failures fall back to stale
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
@@ -1521,7 +1521,7 @@ func TestAddConditionalHeadersVaryTrustsOnlyETag(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	cfg := newTestConfig() // DontTrustVaryETag defaults to 1 ("maybe")
+	cfg := newTestConfig() // DontTrustVaryETag defaults to "maybe"
 	cfg.DiskCacheRoot = t.TempDir()
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
@@ -1587,7 +1587,7 @@ func TestAddConditionalHeadersDontTrustVaryETagTrue(t *testing.T) {
 
 	cfg := newTestConfig()
 	cfg.DiskCacheRoot = t.TempDir()
-	cfg.DontTrustVaryETag = 2 // "true": never trust an ETag on a Vary'd entry
+	cfg.DontTrustVaryETag = TristateTrue // never trust an ETag on a Vary'd entry
 	cm := NewCacheManager(cfg)
 	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
 
