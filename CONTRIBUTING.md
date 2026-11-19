@@ -81,6 +81,7 @@ Keeping files in step
   the English file only and say so in the pull request; the maintainer will
   update the twin.
 - **CHANGES**: describe user-visible changes in the topmost entry.
+  Refactoring and test-only changes need no entry.
 - **The golangci-lint version** is pinned in the `lint` target of `Makefile`
   and in the golangci-lint job of `.github/workflows/ci.yml`; change both.
 
