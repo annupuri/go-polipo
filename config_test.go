@@ -523,11 +523,13 @@ func TestRelaxTransparencyTristate(t *testing.T) {
 
 func TestParseLevelFormats(t *testing.T) {
 	cases := map[string]int{
-		"0xFF": 255,
-		"0X10": 16,
-		"010":  8,
-		"7":    7,
-		"0":    0,
+		"0xFF":  255,
+		"0X10":  16,
+		"010":   8,
+		"7":     7,
+		"0":     0,
+		"-0x10": -16,
+		" 0x07": 7,
 	}
 	for in, want := range cases {
 		got, err := parseLevel(in)
@@ -544,6 +546,12 @@ func TestParseLevelFormats(t *testing.T) {
 	}
 	if _, err := parseLevel("089"); err == nil {
 		t.Error("parseLevel(089) should fail (invalid octal)")
+	}
+	// The sign goes before the 0x prefix, not after it.
+	for _, in := range []string{"0x-1", "0x+1"} {
+		if _, err := parseLevel(in); err == nil {
+			t.Errorf("parseLevel(%s) should fail", in)
+		}
 	}
 }
 

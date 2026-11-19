@@ -6,6 +6,10 @@ Unreleased: go-polipo 2.0.1:
     days (by default) after it was stored.  A cache hit, from disk or from
     memory, now sets the entry file's modification time, at most once an
     hour, and -x counts from the later of that and X-Polipo-Access.
+  * logLevel is parsed like Polipo's strtol(..., 0): a sign before a hex
+    value (-0x10) is accepted, and a sign after the 0x prefix (0x-1),
+    which 2.0.0 accepted by mistake, is an error.  Go's 0b, 0o and _
+    forms are accepted too.
 
 18 November 2026: go-polipo 2.0.0:
 
