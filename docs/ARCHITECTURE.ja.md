@@ -15,7 +15,7 @@ Go言語版は、並行処理 (Goroutines) や標準ライブラリの利点を�
 | `atom.c`<br>`chunk.c`<br>`object.c` | *(メモリ管理 / ガベージコレクション)* | **メモリ管理**<br>メモリ上のオブジェクトやチャンク、文字列アトムテーブル・参照カウントなどの管理は、Goの標準マップや文字列型、ガベージコレクション (GC) に任せるため不要。 |
 | `client.c`<br>`http.c`<br>`http_parse.c`<br>`server.c`<br>`tunnel.c` | `proxy.go`<br>`parent_tunnel.go`<br>`headers.go` | **プロキシサーバーコア**<br>HTTPフォワード、`CONNECT` によるHTTPSトンネリングなどのプロキシ処理をGoの `http.Handler` および `http.Transport` に集約・再設計。コネクションの再利用・多重化・パイプライン化（旧`serverSlots*`/`smallRequestTime`/`replyUnpipeline*`/`maxPipelineTrain`/`maxSideBuffering`/`serverExpireTime`）は`http.Transport`に一任し、`MaxIdleConns: 100` の固定値になっている。設定で変えられるのは、Polipo と同じタイムアウト（`clientTimeout`・`serverTimeout`・`serverIdleTimeout`）と、go-polipo 独自の CONNECT トンネル用の `tunnelIdleTimeout`（既定は無効）だけ。Poor Man's Multiplexing（1つの大きな取得を複数の上流接続に分割する機能）に相当する仕組みは無く、`net/http`は1リソースを常に単一のコネクションで取得する。HTTP の親プロキシがあるときは、`tunnel.c` と同じく親に `CONNECT host:port` を送って CONNECT トンネルを開く（`parent_tunnel.go`）。go-polipo が使うヘッダ名は `headers.go` に定数としてまとめ、それぞれに定義している RFC の節を付けている。`http_parse.c` が `initHttpParser` でヘッダ名をアトムとして登録していたのに当たる。 |
 | `config.c` | `config.go` | **設定ファイルのパース**<br>Polipo 形式の設定ファイル（`key = value`）を読み込み、構造体 `Config` へパースして管理。 |
-| `diskcache.c` | `cache.go` | **キャッシュ管理**<br>Polipo のディレクトリ階層およびファイル名（URLのMD5ハッシュ値をカスタムBase64エンコード）と完全に互換性のあるディスクキャッシュの読み書き。`CacheManager.Expire`（`-x` オプション）でキャッシュツリーを走査し、破損・鮮度切れ・長期未アクセス（`diskCacheUnlinkTime`）のエントリ削除と空ディレクトリの整理を行う。書き込みポリシーは Polipo より厳格で、`Set-Cookie` を含む応答は既定でスキップ（`dontCacheCookies`）、`Authorization` 付きリクエストの応答は明示的に共有可能でない限りスキップ（RFC 9111 §3.5。`Proxy-Authorization` は go-polipo 自身へのクライアント認証で、上流へは転送されず、保存を妨げない）、ディスクキャッシュ自体の無効化も可能（`noDiskCache`、または空の `diskCacheRoot`）。 |
+| `diskcache.c` | `cache.go`<br>`cache_memory.go`<br>`cache_disk.go`<br>`cache_policy.go` | **キャッシュ管理**<br>Polipo のディレクトリ階層およびファイル名（URLのMD5ハッシュ値をカスタムBase64エンコード）と完全に互換性のあるディスクキャッシュの読み書き。`CacheManager.Expire`（`-x` オプション）でキャッシュツリーを走査し、破損・鮮度切れ・長期未アクセス（`diskCacheUnlinkTime`）のエントリ削除と空ディレクトリの整理を行う。書き込みポリシーは Polipo より厳格で、`Set-Cookie` を含む応答は既定でスキップ（`dontCacheCookies`）、`Authorization` 付きリクエストの応答は明示的に共有可能でない限りスキップ（RFC 9111 §3.5。`Proxy-Authorization` は go-polipo 自身へのクライアント認証で、上流へは転送されず、保存を妨げない）、ディスクキャッシュ自体の無効化も可能（`noDiskCache`、または空の `diskCacheRoot`）。コードは役割ごとに分けている。`cache.go` はメモリ、ディスクの順にリクエストを探し、レスポンスを両方に保存する `CacheManager`（`Lookup`、`Store`）、`cache_memory.go` はメモリ上の LRU、`cache_disk.go` はディスクの形式とエントリの読み書きと `-x`、`cache_policy.go` は RFC 9111 の規則（`Cache-Control`、経過時間、鮮度、期限切れの判定）。 |
 | `dns.c` | *(Go標準 `net.Resolver`)* | **DNS解決**<br>Goの標準ライブラリ `net.Resolver` に委ねられるため、非同期DNS処理や独自のDNSキャッシュの実装は不要。 |
 | `event.c` | *(Goroutines / 標準ライブラリ)* | **イベントループ**<br>C言語版のシングルスレッド・ノンブロッキングイベントループは、Goの Goroutine や `net/http` が提供する並行接続処理に置き換えられたため不要。 |
 | `dirent_compat.c`<br>`fts_compat.c`<br>`ftsimport.c`<br>`mingw.c` | *(Go標準 `os` / `path/filepath`)* | **OS互換性レイヤー / ディレクトリ巡回**<br>Windows/POSIX互換、ディレクトリ巡回用のコードは、Goが言語レベルでクロスプラットフォームに抽象化しているため不要。 |
@@ -27,7 +27,7 @@ Go言語版は、並行処理 (Goroutines) や標準ライブラリの利点を�
 | `md5.c`<br>`md5import.c` | *(Go標準 `crypto/md5`)* | **ハッシュ計算**<br>C言語用の MD5 インポートファイルは不要となり、標準ライブラリ `crypto/md5` を直接利用するため不要。 |
 | `parse_time.c` | *(Go標準 `time` / `net/http`)* | **日時パース**<br>HTTP日時文字列のパースは、Go標準ライブラリの `time.Parse` や `http.ParseTime` に置き換えられたため不要。 |
 | `socks.c` | `proxy.go` | **SOCKS親子プロキシ**<br>`socks.c` の親SOCKSプロキシ経由の接続処理は、`proxy.go` 内の `dialContext` にて `golang.org/x/net/proxy` を利用して実装・統合。 |
-| `util.c` | `cache.go` (一部統合) | **ユーティリティ**<br>C言語版の `b64cpy` 等のカスタムBase64エンコーディングロジックを `cache.go` 内の `b64fss` を用いた処理に統合。 |
+| `util.c` | `cache_disk.go` (一部統合) | **ユーティリティ**<br>C言語版の `b64cpy` 等のカスタムBase64エンコーディングロジックを `cache_disk.go` 内の `b64fss` を用いた処理に統合。 |
 
 ---
 
@@ -63,7 +63,7 @@ graph TD
 
 | 起動している関数 | 役割 | 終わるとき | 失敗の伝え方 |
 |---|---|---|---|
-| `CacheManager.startDiskWrite` (cache.go) | レスポンスの本文を返しながら、ディスクキャッシュのファイルに書き込む | 本文を書き終えたとき、または書き込みが止まったとき | `diskWrite.done` チャネルで `error` を送る |
+| `CacheManager.startDiskWrite` (cache_disk.go) | レスポンスの本文を返しながら、ディスクキャッシュのファイルに書き込む | 本文を書き終えたとき、または書き込みが止まったとき | `diskWrite.done` チャネルで `error` を送る |
 | `serve` (main.go) | `SIGINT` / `SIGTERM` を待ち、サーバーを閉じる | どちらかのシグナルを受けたとき | 不要 (終了をログに出す) |
 | `setupReloadSignals` (signal_unix.go。Windows にはない) | `SIGUSR1` / `SIGUSR2` を受けて、ログファイルを開き直し、forbidden / uncachable / forbiddenTunnels の各リストを読み直す (`SIGUSR2` ではメモリキャッシュも捨てる) | 終わらない (プロセスが動いている間ずっと続く) | 失敗をそのつどログに出し、待ち受けを続ける |
 | `tunnel` (proxy.go) の 2 つ | CONNECT トンネルを片方向ずつコピーする | その方向が EOF またはエラーになったとき | 不要 (`tunnel` が `sync.WaitGroup` で両方の終了を待つ) |
