@@ -162,7 +162,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | `diskCacheWriteoutOnClose`, `maxDiskEntries` | 64KB / 32 | 🔷 | FD 管理 / 書き込みバッチは Go ランタイムの責務。 |
 | `diskCacheDirectoryPermissions` / `diskCacheFilePermissions` | `0700` / `0600` | ⚠️ | `0700` / `0600` にハードコード（`MkdirAll`/`OpenFile`）。設定不可。既定値とは一致。 |
 | アトミック書き込み（一時ファイルに書いて rename） | — | ⚠️ | `Store` は `O_TRUNC` でインプレース書き込みし、失敗時に `os.Remove`。書き込み途中のクラッシュで短いファイルが残る（後で `Lookup`/`Expire` が「破損」として検出）。Polipo はインプレースの切り詰めを避ける。 |
-| ディスクキャッシュの書き込み/期限切れ失敗時のログ出力 | Polipo は `do_log_error` で記録 | ✅ | **完了（2026-09-14）。上記2行の作業中に発見:** `Store` の失敗分岐（`GetCachePath`、`MkdirAll`、`OpenFile`、`Write`）と `Expire` の削除処理は、これまで全て無言で握り潰されていた（`cache.go` は `log` パッケージすら import していなかった）。今回すべてログ出力するようにし、上記の「サイズ起因の早期削除」も通常の破損/HTTP鮮度切れ/unlink-time削除とは別にログ行を分けた。 |
+| ディスクキャッシュの書き込み/期限切れ失敗時のログ出力 | Polipo は `do_log_error` で記録 | ✅ | **完了（2026-09-14）。上記2行の作業中に発見:** `Store` の失敗分岐（`CachePath`、`MkdirAll`、`OpenFile`、`Write`）と `Expire` の削除処理は、これまで全て無言で握り潰されていた（`cache.go` は `log` パッケージすら import していなかった）。今回すべてログ出力するようにし、上記の「サイズ起因の早期削除」も通常の破損/HTTP鮮度切れ/unlink-time削除とは別にログ行を分けた。 |
 | `X-Polipo-Location` 衝突ガード | — | ✅ | 実装済み。読み出し時に URL 完全一致を比較。 |
 
 ## 12. DNS

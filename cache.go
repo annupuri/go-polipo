@@ -240,8 +240,9 @@ func (cc cacheControl) allowsAuthenticated() bool {
 	return cc.has("public") || cc.has("must-revalidate") || cc.has("s-maxage")
 }
 
-// getDirname gets the directory path for the host.
-func (cm *CacheManager) getDirname(rawURL string) (string, error) {
+// cacheDir returns the directory that holds the cache files for rawURL's
+// host.
+func (cm *CacheManager) cacheDir(rawURL string) (string, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return "", err
@@ -276,9 +277,9 @@ func (cm *CacheManager) getDirname(rawURL string) (string, error) {
 	return filepath.Join(cm.config.DiskCacheRoot, sb.String()), nil
 }
 
-// GetCachePath generates the cache file path for the given URL.
-func (cm *CacheManager) GetCachePath(rawURL string) (string, error) {
-	dir, err := cm.getDirname(rawURL)
+// CachePath returns the cache file path for rawURL.
+func (cm *CacheManager) CachePath(rawURL string) (string, error) {
+	dir, err := cm.cacheDir(rawURL)
 	if err != nil {
 		return "", err
 	}
@@ -318,7 +319,7 @@ func (cm *CacheManager) Invalidate(rawURL string) {
 	if cm.isDiskCacheDisabled() {
 		return
 	}
-	path, err := cm.GetCachePath(rawURL)
+	path, err := cm.CachePath(rawURL)
 	if err != nil {
 		return
 	}
@@ -384,7 +385,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 		return nil, false
 	}
 
-	path, err := cm.GetCachePath(key)
+	path, err := cm.CachePath(key)
 	if err != nil {
 		return nil, false
 	}
@@ -509,7 +510,7 @@ func (b fileBody) Close() error {
 // responses that this heuristic exists to close. If a real need turns up, one
 // "cap, or 0 to disable" duration is the knob to add - not the full Polipo set.
 // A response with no Last-Modified gets no heuristic lifetime at all; see
-// heuristicLifetime.
+// heuristicFreshnessLifetime.
 const (
 	heuristicFraction    = 0.1
 	heuristicMaxLifetime = 24 * time.Hour
@@ -574,14 +575,15 @@ func (cc cacheControl) freshnessDirective() (life time.Duration, ok bool) {
 	return 0, false
 }
 
-// heuristicLifetime derives a freshness lifetime for a response with no explicit
-// expiration. With a Last-Modified it is a fraction of the document's age at
+// heuristicFreshnessLifetime derives a freshness lifetime for a response
+// with no explicit expiration (RFC 9111 section 4.2.2, which gives it this
+// name). With a Last-Modified it is a fraction of the document's age at
 // fetch time, capped. Without one there is nothing to base a guess on, and
 // it is zero: the response is stored but revalidated (or re-fetched) on
 // every use, as browsers and Squid's default refresh_pattern do. Polipo
 // gave it maxNoModifiedAge, 23 minutes, which left pages generated afresh
 // on every request served stale for that long.
-func heuristicLifetime(resp *http.Response, date time.Time) time.Duration {
+func heuristicFreshnessLifetime(resp *http.Response, date time.Time) time.Duration {
 	lm, err := http.ParseTime(resp.Header.Get("Last-Modified"))
 	if err != nil {
 		return 0
@@ -616,7 +618,7 @@ func freshnessLifetime(resp *http.Response, birth time.Time) time.Duration {
 		}
 		return t.Sub(date)
 	}
-	return heuristicLifetime(resp, date)
+	return heuristicFreshnessLifetime(resp, date)
 }
 
 // isExpired reports whether resp, generated at birth (see responseBirth), is
@@ -780,7 +782,7 @@ type diskWrite struct {
 // startDiskWrite starts writing resp to a temporary file, or returns nil (after
 // logging why) if that cannot be set up.
 func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response, birth time.Time) *diskWrite {
-	path, err := cm.GetCachePath(req.URL.String())
+	path, err := cm.CachePath(req.URL.String())
 	if err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
 		return nil
