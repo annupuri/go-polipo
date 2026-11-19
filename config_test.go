@@ -68,27 +68,27 @@ func TestSetDiskCacheDisableKeys(t *testing.T) {
 
 	// Empty diskCacheRoot stays empty (no trailing slash appended) and reads
 	// as "disk cache disabled" downstream.
-	if err := c.Set("diskCacheRoot", ""); err != nil {
+	if err := c.Set(keyDiskCacheRoot, ""); err != nil {
 		t.Fatalf("Set diskCacheRoot empty: %v", err)
 	}
 	if c.DiskCacheRoot != "" {
 		t.Errorf("empty diskCacheRoot should stay empty, got %q", c.DiskCacheRoot)
 	}
 
-	c.Set("noDiskCache", "true")
+	c.Set(keyNoDiskCache, "true")
 	if !c.NoDiskCache {
 		t.Error(`noDiskCache "true" should be truthy`)
 	}
-	c.Set("noDiskCache", "false")
+	c.Set(keyNoDiskCache, "false")
 	if c.NoDiskCache {
 		t.Error(`noDiskCache "false" should be false`)
 	}
 
-	c.Set("dontCacheCookies", "false")
+	c.Set(keyDontCacheCookies, "false")
 	if c.DontCacheCookies {
 		t.Error(`dontCacheCookies "false" should be false`)
 	}
-	c.Set("dontCacheCookies", "1")
+	c.Set(keyDontCacheCookies, "1")
 	if !c.DontCacheCookies {
 		t.Error(`dontCacheCookies "1" should be true`)
 	}
@@ -162,7 +162,7 @@ func TestSet(t *testing.T) {
 	c := NewDefaultConfig()
 
 	// Test string list
-	err := c.Set("allowedClients", "127.0.0.1, 10.0.0.0/24")
+	err := c.Set(keyAllowedClients, "127.0.0.1, 10.0.0.0/24")
 	if err != nil {
 		t.Fatalf("Set allowedClients failed: %v", err)
 	}
@@ -171,14 +171,14 @@ func TestSet(t *testing.T) {
 	}
 
 	// Test port list (single ports and ranges)
-	err = c.Set("tunnelAllowedPorts", "443, 80, 8080")
+	err = c.Set(keyTunnelAllowedPorts, "443, 80, 8080")
 	if err != nil {
 		t.Fatalf("Set tunnelAllowedPorts failed: %v", err)
 	}
 	if got := c.TunnelAllowedPorts.String(); got != "443, 80, 8080" {
 		t.Errorf("tunnelAllowedPorts = %q, want %q", got, "443, 80, 8080")
 	}
-	if err := c.Set("allowedPorts", "80-100, 1024-65535"); err != nil {
+	if err := c.Set(keyAllowedPorts, "80-100, 1024-65535"); err != nil {
 		t.Fatalf("Set allowedPorts range failed: %v", err)
 	}
 	if got := c.AllowedPorts.String(); got != "80-100, 1024-65535" {
@@ -186,26 +186,26 @@ func TestSet(t *testing.T) {
 	}
 
 	// Test invalid port list
-	err = c.Set("tunnelAllowedPorts", "443, abc")
+	err = c.Set(keyTunnelAllowedPorts, "443, abc")
 	if err == nil {
 		t.Error("expected error for invalid port list")
 	}
 
 	// Test log level parsing (hex/octal/decimal)
-	c.Set("logLevel", "0xFF")
+	c.Set(keyLogLevel, "0xFF")
 	if c.LogLevel != 255 {
 		t.Errorf("expected 255, got %d", c.LogLevel)
 	}
-	c.Set("logLevel", "010") // Octal 8
+	c.Set(keyLogLevel, "010") // Octal 8
 	if c.LogLevel != 8 {
 		t.Errorf("expected 8, got %d", c.LogLevel)
 	}
-	c.Set("logLevel", "15") // Decimal 15
+	c.Set(keyLogLevel, "15") // Decimal 15
 	if c.LogLevel != 15 {
 		t.Errorf("expected 15, got %d", c.LogLevel)
 	}
 	// Test invalid log level
-	err = c.Set("logLevel", "invalid_level")
+	err = c.Set(keyLogLevel, "invalid_level")
 	if err == nil {
 		t.Error("expected error for invalid logLevel")
 	}
@@ -217,13 +217,13 @@ func TestSet(t *testing.T) {
 	}
 
 	// Test invalid proxyPort
-	err = c.Set("proxyPort", "invalid")
+	err = c.Set(keyProxyPort, "invalid")
 	if err == nil {
 		t.Error("expected error for invalid proxyPort")
 	}
 
 	// Test invalid allowedPorts
-	err = c.Set("allowedPorts", "80, invalid")
+	err = c.Set(keyAllowedPorts, "80, invalid")
 	if err == nil {
 		t.Error("expected error for invalid allowedPorts")
 	}
@@ -285,45 +285,45 @@ func TestSetAllKeys(t *testing.T) {
 		}
 	}
 
-	ok("proxyAddress", "0.0.0.0")
-	ok("proxyPort", "3128")
-	ok("diskCacheRoot", "/tmp/cache") // trailing slash appended
-	ok("forbiddenFile", "/etc/polipo/forbidden")
-	ok("uncachableFile", "/etc/polipo/uncachable")
-	ok("forbiddenTunnelsFile", "/etc/polipo/forbiddenTunnels")
-	ok("socksParentProxy", "localhost:9050")
-	ok("socksProxyType", "SOCKS5") // lowercased
-	ok("parentProxy", "upstream:8080")
-	ok("allowedClients", "10.0.0.0/8, 127.0.0.1")
-	ok("authCredentials", "alice:secret")
-	ok("authRealm", "My Proxy")
-	ok("parentAuthCredentials", "bob:hunter2")
-	ok("socksAuthCredentials", "carol:s3cret")
-	ok("censoredHeaders", "X-My-Header, X-Another")
-	ok("censorReferer", "maybe")
-	ok("tunnelAllowedPorts", "443,563")
-	ok("allowedPorts", "80,443")
-	ok("logLevel", "0x0f")
-	ok("logFile", "/var/log/go-polipo.log")
-	ok("logFilePermissions", "0600")
-	ok("disableLocalInterface", "true")
-	ok("maxConcurrentRequests", "50")
-	ok("disableVia", "true")
-	ok("clientTimeout", "3m")
-	ok("serverTimeout", "60")
-	ok("serverIdleTimeout", "0")
-	ok("tunnelIdleTimeout", "10m")
-	ok("diskCacheUnlinkTime", "16d")
-	ok("maxDiskCacheEntrySize", "5000000")
-	ok("diskCacheTruncateTime", "2d")
-	ok("diskCacheTruncateSize", "2097152")
-	ok("memoryCacheEntries", "512")
-	ok("memoryCacheMaxEntrySize", "2097152")
-	ok("noDiskCache", "true")
-	ok("dontCacheCookies", "false")
-	ok("proxyOffline", "true")
-	ok("relaxTransparency", "maybe")
-	ok("dontTrustVaryETag", "true")
+	ok(keyProxyAddress, "0.0.0.0")
+	ok(keyProxyPort, "3128")
+	ok(keyDiskCacheRoot, "/tmp/cache") // trailing slash appended
+	ok(keyForbiddenFile, "/etc/polipo/forbidden")
+	ok(keyUncachableFile, "/etc/polipo/uncachable")
+	ok(keyForbiddenTunnelsFile, "/etc/polipo/forbiddenTunnels")
+	ok(keySocksParentProxy, "localhost:9050")
+	ok(keySocksProxyType, "SOCKS5") // lowercased
+	ok(keyParentProxy, "upstream:8080")
+	ok(keyAllowedClients, "10.0.0.0/8, 127.0.0.1")
+	ok(keyAuthCredentials, "alice:secret")
+	ok(keyAuthRealm, "My Proxy")
+	ok(keyParentAuthCredentials, "bob:hunter2")
+	ok(keySocksAuthCredentials, "carol:s3cret")
+	ok(keyCensoredHeaders, "X-My-Header, X-Another")
+	ok(keyCensorReferer, "maybe")
+	ok(keyTunnelAllowedPorts, "443,563")
+	ok(keyAllowedPorts, "80,443")
+	ok(keyLogLevel, "0x0f")
+	ok(keyLogFile, "/var/log/go-polipo.log")
+	ok(keyLogFilePermissions, "0600")
+	ok(keyDisableLocalInterface, "true")
+	ok(keyMaxConcurrentRequests, "50")
+	ok(keyDisableVia, "true")
+	ok(keyClientTimeout, "3m")
+	ok(keyServerTimeout, "60")
+	ok(keyServerIdleTimeout, "0")
+	ok(keyTunnelIdleTimeout, "10m")
+	ok(keyDiskCacheUnlinkTime, "16d")
+	ok(keyMaxDiskCacheEntrySize, "5000000")
+	ok(keyDiskCacheTruncateTime, "2d")
+	ok(keyDiskCacheTruncateSize, "2097152")
+	ok(keyMemoryCacheEntries, "512")
+	ok(keyMemoryCacheMaxEntrySize, "2097152")
+	ok(keyNoDiskCache, "true")
+	ok(keyDontCacheCookies, "false")
+	ok(keyProxyOffline, "true")
+	ok(keyRelaxTransparency, "maybe")
+	ok(keyDontTrustVaryETag, "true")
 	ok("thisKeyDoesNotExist", "ignored")
 
 	if c.ProxyAddress != "0.0.0.0" || c.ProxyPort != 3128 {
@@ -403,41 +403,41 @@ func TestSetAllKeys(t *testing.T) {
 	}
 
 	// disableLocalInterface falls back to false for anything not true/1.
-	c.Set("disableLocalInterface", "false")
+	c.Set(keyDisableLocalInterface, "false")
 	if c.DisableLocalInterface {
 		t.Error(`disableLocalInterface "false" should be false`)
 	}
-	c.Set("disableLocalInterface", "1")
+	c.Set(keyDisableLocalInterface, "1")
 	if !c.DisableLocalInterface {
 		t.Error(`disableLocalInterface "1" should be true`)
 	}
 
-	fails("proxyPort", "not-a-port")
-	fails("tunnelAllowedPorts", "443,bad")
-	fails("allowedPorts", "80,bad")
-	fails("logLevel", "not-hex")
-	fails("logFilePermissions", "0999")
-	fails("logFilePermissions", "1777")
-	fails("maxConcurrentRequests", "lots")
-	fails("clientTimeout", "soon")
-	fails("serverTimeout", "5w")
-	fails("serverIdleTimeout", "-1")
-	fails("tunnelIdleTimeout", "later")
-	fails("diskCacheUnlinkTime", "5w")
-	fails("maxDiskCacheEntrySize", "big")
-	fails("diskCacheTruncateTime", "5w")
-	fails("diskCacheTruncateSize", "big")
-	fails("memoryCacheEntries", "lots")
-	fails("memoryCacheMaxEntrySize", "big")
-	fails("socksProxyType", "socks4a") // Polipo accepted it; go-polipo only does SOCKS5
-	fails("socksProxyType", "socks4")
-	fails("socksProxyType", "http")
-	fails("relaxTransparency", "yes")
-	fails("relaxTransparency", "2")
-	fails("censorReferer", "yes")
-	fails("censorReferer", "2")
-	fails("dontTrustVaryETag", "yes")
-	fails("dontTrustVaryETag", "2")
+	fails(keyProxyPort, "not-a-port")
+	fails(keyTunnelAllowedPorts, "443,bad")
+	fails(keyAllowedPorts, "80,bad")
+	fails(keyLogLevel, "not-hex")
+	fails(keyLogFilePermissions, "0999")
+	fails(keyLogFilePermissions, "1777")
+	fails(keyMaxConcurrentRequests, "lots")
+	fails(keyClientTimeout, "soon")
+	fails(keyServerTimeout, "5w")
+	fails(keyServerIdleTimeout, "-1")
+	fails(keyTunnelIdleTimeout, "later")
+	fails(keyDiskCacheUnlinkTime, "5w")
+	fails(keyMaxDiskCacheEntrySize, "big")
+	fails(keyDiskCacheTruncateTime, "5w")
+	fails(keyDiskCacheTruncateSize, "big")
+	fails(keyMemoryCacheEntries, "lots")
+	fails(keyMemoryCacheMaxEntrySize, "big")
+	fails(keySocksProxyType, "socks4a") // Polipo accepted it; go-polipo only does SOCKS5
+	fails(keySocksProxyType, "socks4")
+	fails(keySocksProxyType, "http")
+	fails(keyRelaxTransparency, "yes")
+	fails(keyRelaxTransparency, "2")
+	fails(keyCensorReferer, "yes")
+	fails(keyCensorReferer, "2")
+	fails(keyDontTrustVaryETag, "yes")
+	fails(keyDontTrustVaryETag, "2")
 }
 
 func TestPasswordEntriesAreRedacted(t *testing.T) {
@@ -457,7 +457,7 @@ func TestPasswordEntriesAreRedacted(t *testing.T) {
 	// credential is configured (checked here) and when it's left empty (the
 	// NewDefaultConfig() case covered by TestNewDefaultConfig's Entries doing
 	// the equivalent implicitly through this same map).
-	for _, key := range []configKey{"authCredentials", "parentAuthCredentials", "socksAuthCredentials"} {
+	for _, key := range []configKey{keyAuthCredentials, keyParentAuthCredentials, keySocksAuthCredentials} {
 		if got := entries[key]; got != "(hidden)" {
 			t.Errorf("%s entry = %q, want %q", key, got, "(hidden)")
 		}
@@ -505,7 +505,7 @@ func TestRelaxTransparencyTristate(t *testing.T) {
 		{"True", TristateTrue},
 	}
 	for _, tt := range tests {
-		if err := c.Set("relaxTransparency", tt.val); err != nil {
+		if err := c.Set(keyRelaxTransparency, tt.val); err != nil {
 			t.Errorf("Set(relaxTransparency, %q) unexpected error: %v", tt.val, err)
 		}
 		if c.RelaxTransparency != tt.want {
@@ -515,7 +515,7 @@ func TestRelaxTransparencyTristate(t *testing.T) {
 
 	// Entries() renders the tristate name, not the raw int, matching Polipo's -v.
 	for _, e := range c.Entries() {
-		if e.Name == "relaxTransparency" && e.Value != "true" {
+		if e.Name == keyRelaxTransparency && e.Value != "true" {
 			t.Errorf("relaxTransparency entry = %q, want %q", e.Value, "true")
 		}
 	}
@@ -614,7 +614,7 @@ func TestSocksProxyType(t *testing.T) {
 
 	// socks5 in any case is accepted and stored lowercased.
 	for _, v := range []string{"socks5", "SOCKS5", "Socks5"} {
-		if err := c.Set("socksProxyType", v); err != nil {
+		if err := c.Set(keySocksProxyType, v); err != nil {
 			t.Errorf("Set(socksProxyType, %q) unexpected error: %v", v, err)
 		}
 		if c.SocksProxyType != "socks5" {
@@ -624,7 +624,7 @@ func TestSocksProxyType(t *testing.T) {
 
 	// socks4a was valid in Polipo but is not implemented here: it must be a
 	// hard error, not a silent downgrade.
-	err := c.Set("socksProxyType", "socks4a")
+	err := c.Set(keySocksProxyType, "socks4a")
 	if err == nil {
 		t.Fatal("Set(socksProxyType, \"socks4a\") should fail")
 	}

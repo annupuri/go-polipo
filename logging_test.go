@@ -131,7 +131,7 @@ func TestLogFilePermissions(t *testing.T) {
 		t.Errorf("default logFilePermissions = %#o, want 0640", got)
 	}
 	cfg := NewDefaultConfig()
-	if err := cfg.Set("logFilePermissions", "600"); err != nil || cfg.LogFilePermissions != 0o600 {
+	if err := cfg.Set(keyLogFilePermissions, "600"); err != nil || cfg.LogFilePermissions != 0o600 {
 		t.Errorf("Set 600: mode = %#o, err = %v", cfg.LogFilePermissions, err)
 	}
 
