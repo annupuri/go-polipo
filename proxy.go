@@ -900,11 +900,13 @@ func (ph *ProxyHandler) serveOriginForm(w http.ResponseWriter, req *http.Request
 
 // isOriginForm reports whether req's request-target is origin-form (a bare
 // path, e.g. "GET /polipo/ HTTP/1.1"; RFC 9112 section 3.2.1), matching
-// Polipo's urlIsLocal. A proxy gets one when a client talks to it as if it
-// were an ordinary web server, so such a request is addressed to go-polipo
-// itself. The other forms are not: absolute-form (the normal case for a
-// proxied request) and authority-form (CONNECT). The fourth, asterisk-form
-// "OPTIONS *", never gets here; net/http answers it before ServeHTTP.
+// Polipo's urlIsLocal. As the name says, it is the form a client uses to
+// talk to an origin server directly. A proxy gets one only when a client
+// treats it as that origin server, so such a request is addressed to
+// go-polipo itself. The other forms are not: absolute-form (the normal
+// case for a proxied request) and authority-form (CONNECT). The fourth,
+// asterisk-form "OPTIONS *", never gets here; net/http answers it before
+// ServeHTTP.
 // Polipo challenges origin-form requests with 401/WWW-Authenticate and
 // everything else with 407/Proxy-Authenticate.
 func isOriginForm(req *http.Request) bool {
