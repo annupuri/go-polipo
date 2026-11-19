@@ -1,3 +1,12 @@
+Unreleased: go-polipo 2.0.1:
+
+  * "polipo -x" counts diskCacheUnlinkTime from an entry's last use, as
+    Polipo did.  2.0.0 recorded that time (X-Polipo-Access) only when it
+    stored an entry, so an entry served every day was still removed 32
+    days (by default) after it was stored.  A cache hit, from disk or from
+    memory, now sets the entry file's modification time, at most once an
+    hour, and -x counts from the later of that and X-Polipo-Access.
+
 18 November 2026: go-polipo 2.0.0:
 
   * Complete rewrite in Go (requires Go 1.27.4 or later), forked from
