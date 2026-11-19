@@ -231,13 +231,13 @@ func TestSet(t *testing.T) {
 func TestSetAllKeys(t *testing.T) {
 	c := NewDefaultConfig()
 
-	ok := func(key, val string) {
+	ok := func(key configKey, val string) {
 		t.Helper()
 		if err := c.Set(key, val); err != nil {
 			t.Errorf("Set(%q, %q) unexpected error: %v", key, val, err)
 		}
 	}
-	fails := func(key, val string) {
+	fails := func(key configKey, val string) {
 		t.Helper()
 		if err := c.Set(key, val); err == nil {
 			t.Errorf("Set(%q, %q) expected an error", key, val)
@@ -405,7 +405,7 @@ func TestPasswordEntriesAreRedacted(t *testing.T) {
 	c.ParentAuthCredentials = "bob:hunter2"
 	c.SocksAuthCredentials = "carol:s3cret"
 
-	entries := map[string]string{}
+	entries := map[configKey]string{}
 	for _, e := range c.Entries() {
 		entries[e.Name] = e.Value
 	}
@@ -416,7 +416,7 @@ func TestPasswordEntriesAreRedacted(t *testing.T) {
 	// credential is configured (checked here) and when it's left empty (the
 	// NewDefaultConfig() case covered by TestNewDefaultConfig's Entries doing
 	// the equivalent implicitly through this same map).
-	for _, key := range []string{"authCredentials", "parentAuthCredentials", "socksAuthCredentials"} {
+	for _, key := range []configKey{"authCredentials", "parentAuthCredentials", "socksAuthCredentials"} {
 		if got := entries[key]; got != "(hidden)" {
 			t.Errorf("%s entry = %q, want %q", key, got, "(hidden)")
 		}

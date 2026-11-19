@@ -819,7 +819,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 `)
 		for _, e := range ph.config.Entries() {
 			fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td></tr>\n",
-				html.EscapeString(e.Name), html.EscapeString(e.Value))
+				html.EscapeString(string(e.Name)), html.EscapeString(e.Value))
 		}
 		fmt.Fprint(w, `</table>
 <p><a href="/polipo/">Back</a></p>

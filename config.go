@@ -249,10 +249,60 @@ func NewDefaultConfig() *Config {
 	}
 }
 
+// configKey is the name of a configuration variable, as written in a
+// config file, after -- on the command line, and on /polipo/config.
+type configKey string
+
+// The configuration variables, in the order -v and /polipo/config list
+// them. Set and Entries both use these, so a name is spelled in one place.
+const (
+	keyProxyAddress              configKey = "proxyAddress"
+	keyProxyPort                 configKey = "proxyPort"
+	keyDiskCacheRoot             configKey = "diskCacheRoot"
+	keyNoDiskCache               configKey = "noDiskCache"
+	keyDiskCacheUnlinkTime       configKey = "diskCacheUnlinkTime"
+	keyMaxDiskCacheEntrySize     configKey = "maxDiskCacheEntrySize"
+	keyDiskCacheTruncateTime     configKey = "diskCacheTruncateTime"
+	keyDiskCacheTruncateSize     configKey = "diskCacheTruncateSize"
+	keyMemoryCacheEntries        configKey = "memoryCacheEntries"
+	keyMemoryCacheMaxEntrySize   configKey = "memoryCacheMaxEntrySize"
+	keyDontCacheCookies          configKey = "dontCacheCookies"
+	keyForbiddenFile             configKey = "forbiddenFile"
+	keyUncachableFile            configKey = "uncachableFile"
+	keyForbiddenTunnelsFile      configKey = "forbiddenTunnelsFile"
+	keySocksParentProxy          configKey = "socksParentProxy"
+	keySocksProxyType            configKey = "socksProxyType"
+	keyParentProxy               configKey = "parentProxy"
+	keyAllowedClients            configKey = "allowedClients"
+	keyAuthCredentials           configKey = "authCredentials"
+	keyAuthRealm                 configKey = "authRealm"
+	keyParentAuthCredentials     configKey = "parentAuthCredentials"
+	keySocksAuthCredentials      configKey = "socksAuthCredentials"
+	keyCensoredHeaders           configKey = "censoredHeaders"
+	keyCensorReferer             configKey = "censorReferer"
+	keyTunnelAllowedPorts        configKey = "tunnelAllowedPorts"
+	keyAllowedPorts              configKey = "allowedPorts"
+	keyLogLevel                  configKey = "logLevel"
+	keyLogFile                   configKey = "logFile"
+	keyLogFilePermissions        configKey = "logFilePermissions"
+	keyDisableLocalInterface     configKey = "disableLocalInterface"
+	keyMaxConcurrentRequests     configKey = "maxConcurrentRequests"
+	keyClientTimeout             configKey = "clientTimeout"
+	keyServerTimeout             configKey = "serverTimeout"
+	keyServerIdleTimeout         configKey = "serverIdleTimeout"
+	keyTunnelIdleTimeout         configKey = "tunnelIdleTimeout"
+	keyProxyOffline              configKey = "proxyOffline"
+	keyRelaxTransparency         configKey = "relaxTransparency"
+	keyDontTrustVaryETag         configKey = "dontTrustVaryETag"
+	keyDisableVia                configKey = "disableVia"
+	keyForbidLocalDestinations   configKey = "forbidLocalDestinations"
+	keyForbidPrivateDestinations configKey = "forbidPrivateDestinations"
+)
+
 // ConfigEntry is a single configuration variable rendered as a name/value
 // pair ready for display.
 type ConfigEntry struct {
-	Name  string
+	Name  configKey
 	Value string
 }
 
@@ -261,47 +311,47 @@ type ConfigEntry struct {
 // page, so the two never drift apart.
 func (c *Config) Entries() []ConfigEntry {
 	return []ConfigEntry{
-		{"proxyAddress", c.ProxyAddress},
-		{"proxyPort", strconv.Itoa(c.ProxyPort)},
-		{"diskCacheRoot", c.DiskCacheRoot},
-		{"noDiskCache", strconv.FormatBool(c.NoDiskCache)},
-		{"diskCacheUnlinkTime", c.DiskCacheUnlinkTime.String()},
-		{"maxDiskCacheEntrySize", strconv.FormatInt(c.MaxDiskCacheEntrySize, 10)},
-		{"diskCacheTruncateTime", c.DiskCacheTruncateTime.String()},
-		{"diskCacheTruncateSize", strconv.FormatInt(c.DiskCacheTruncateSize, 10)},
-		{"memoryCacheEntries", strconv.Itoa(c.MemoryCacheEntries)},
-		{"memoryCacheMaxEntrySize", strconv.FormatInt(c.MemoryCacheMaxEntrySize, 10)},
-		{"dontCacheCookies", strconv.FormatBool(c.DontCacheCookies)},
-		{"forbiddenFile", c.ForbiddenFile},
-		{"uncachableFile", c.UncachableFile},
-		{"forbiddenTunnelsFile", c.ForbiddenTunnelsFile},
-		{"socksParentProxy", redactProxyURL(c.SocksParentProxy)},
-		{"socksProxyType", c.SocksProxyType},
-		{"parentProxy", redactProxyURL(c.ParentProxy)},
-		{"allowedClients", strings.Join(c.AllowedClients, ", ")},
-		{"authCredentials", redactedPassword},
-		{"authRealm", c.AuthRealm},
-		{"parentAuthCredentials", redactedPassword},
-		{"socksAuthCredentials", redactedPassword},
-		{"censoredHeaders", strings.Join(c.CensoredHeaders, ", ")},
-		{"censorReferer", c.CensorReferer.String()},
-		{"tunnelAllowedPorts", c.TunnelAllowedPorts.String()},
-		{"allowedPorts", c.AllowedPorts.String()},
-		{"logLevel", fmt.Sprintf("0x%x", c.LogLevel)},
-		{"logFile", c.LogFile},
-		{"logFilePermissions", fmt.Sprintf("%#o", c.LogFilePermissions)},
-		{"disableLocalInterface", strconv.FormatBool(c.DisableLocalInterface)},
-		{"maxConcurrentRequests", strconv.Itoa(c.MaxConcurrentRequests)},
-		{"clientTimeout", c.ClientTimeout.String()},
-		{"serverTimeout", c.ServerTimeout.String()},
-		{"serverIdleTimeout", c.ServerIdleTimeout.String()},
-		{"tunnelIdleTimeout", c.TunnelIdleTimeout.String()},
-		{"proxyOffline", strconv.FormatBool(c.ProxyOffline)},
-		{"relaxTransparency", c.RelaxTransparency.String()},
-		{"dontTrustVaryETag", c.DontTrustVaryETag.String()},
-		{"disableVia", strconv.FormatBool(c.DisableVia)},
-		{"forbidLocalDestinations", strconv.FormatBool(c.ForbidLocalDestinations)},
-		{"forbidPrivateDestinations", strconv.FormatBool(c.ForbidPrivateDestinations)},
+		{keyProxyAddress, c.ProxyAddress},
+		{keyProxyPort, strconv.Itoa(c.ProxyPort)},
+		{keyDiskCacheRoot, c.DiskCacheRoot},
+		{keyNoDiskCache, strconv.FormatBool(c.NoDiskCache)},
+		{keyDiskCacheUnlinkTime, c.DiskCacheUnlinkTime.String()},
+		{keyMaxDiskCacheEntrySize, strconv.FormatInt(c.MaxDiskCacheEntrySize, 10)},
+		{keyDiskCacheTruncateTime, c.DiskCacheTruncateTime.String()},
+		{keyDiskCacheTruncateSize, strconv.FormatInt(c.DiskCacheTruncateSize, 10)},
+		{keyMemoryCacheEntries, strconv.Itoa(c.MemoryCacheEntries)},
+		{keyMemoryCacheMaxEntrySize, strconv.FormatInt(c.MemoryCacheMaxEntrySize, 10)},
+		{keyDontCacheCookies, strconv.FormatBool(c.DontCacheCookies)},
+		{keyForbiddenFile, c.ForbiddenFile},
+		{keyUncachableFile, c.UncachableFile},
+		{keyForbiddenTunnelsFile, c.ForbiddenTunnelsFile},
+		{keySocksParentProxy, redactProxyURL(c.SocksParentProxy)},
+		{keySocksProxyType, c.SocksProxyType},
+		{keyParentProxy, redactProxyURL(c.ParentProxy)},
+		{keyAllowedClients, strings.Join(c.AllowedClients, ", ")},
+		{keyAuthCredentials, redactedPassword},
+		{keyAuthRealm, c.AuthRealm},
+		{keyParentAuthCredentials, redactedPassword},
+		{keySocksAuthCredentials, redactedPassword},
+		{keyCensoredHeaders, strings.Join(c.CensoredHeaders, ", ")},
+		{keyCensorReferer, c.CensorReferer.String()},
+		{keyTunnelAllowedPorts, c.TunnelAllowedPorts.String()},
+		{keyAllowedPorts, c.AllowedPorts.String()},
+		{keyLogLevel, fmt.Sprintf("0x%x", c.LogLevel)},
+		{keyLogFile, c.LogFile},
+		{keyLogFilePermissions, fmt.Sprintf("%#o", c.LogFilePermissions)},
+		{keyDisableLocalInterface, strconv.FormatBool(c.DisableLocalInterface)},
+		{keyMaxConcurrentRequests, strconv.Itoa(c.MaxConcurrentRequests)},
+		{keyClientTimeout, c.ClientTimeout.String()},
+		{keyServerTimeout, c.ServerTimeout.String()},
+		{keyServerIdleTimeout, c.ServerIdleTimeout.String()},
+		{keyTunnelIdleTimeout, c.TunnelIdleTimeout.String()},
+		{keyProxyOffline, strconv.FormatBool(c.ProxyOffline)},
+		{keyRelaxTransparency, c.RelaxTransparency.String()},
+		{keyDontTrustVaryETag, c.DontTrustVaryETag.String()},
+		{keyDisableVia, strconv.FormatBool(c.DisableVia)},
+		{keyForbidLocalDestinations, strconv.FormatBool(c.ForbidLocalDestinations)},
+		{keyForbidPrivateDestinations, strconv.FormatBool(c.ForbidPrivateDestinations)},
 	}
 }
 
@@ -516,7 +566,7 @@ func (c *Config) ParseLine(line string) error {
 		return err
 	}
 
-	return c.Set(key, val)
+	return c.Set(configKey(key), val)
 }
 
 // unquoteConfigValue removes quotes and any trailing comment from the value
@@ -561,31 +611,31 @@ func unquoteConfigValue(raw string) (string, error) {
 }
 
 // Set parses value and sets it to the corresponding key.
-func (c *Config) Set(key, val string) error {
+func (c *Config) Set(key configKey, val string) error {
 	switch key {
-	case "proxyAddress":
+	case keyProxyAddress:
 		c.ProxyAddress = val
-	case "proxyPort":
+	case keyProxyPort:
 		port, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid proxyPort '%s': %w", val, err)
 		}
 		c.ProxyPort = port
-	case "diskCacheRoot":
+	case keyDiskCacheRoot:
 		// An empty value disables the disk cache; only normalise real paths.
 		if val != "" && !strings.HasSuffix(val, "/") && !strings.HasSuffix(val, "\\") {
 			val += "/"
 		}
 		c.DiskCacheRoot = val
-	case "forbiddenFile":
+	case keyForbiddenFile:
 		c.ForbiddenFile = val
-	case "uncachableFile":
+	case keyUncachableFile:
 		c.UncachableFile = val
-	case "forbiddenTunnelsFile":
+	case keyForbiddenTunnelsFile:
 		c.ForbiddenTunnelsFile = val
-	case "socksParentProxy":
+	case keySocksParentProxy:
 		c.SocksParentProxy = val
-	case "socksProxyType":
+	case keySocksProxyType:
 		t := strings.ToLower(val)
 		if t != "socks5" {
 			// golang.org/x/net/proxy only speaks SOCKS5. Polipo also accepted
@@ -595,140 +645,140 @@ func (c *Config) Set(key, val string) error {
 			return fmt.Errorf("unsupported socksProxyType %q: only \"socks5\" is implemented (SOCKS4/4a is not)", val)
 		}
 		c.SocksProxyType = t
-	case "parentProxy":
+	case keyParentProxy:
 		c.ParentProxy = val
-	case "allowedClients":
+	case keyAllowedClients:
 		c.AllowedClients = parseStringList(val)
-	case "authCredentials":
+	case keyAuthCredentials:
 		c.AuthCredentials = val
-	case "authRealm":
+	case keyAuthRealm:
 		c.AuthRealm = val
-	case "parentAuthCredentials":
+	case keyParentAuthCredentials:
 		c.ParentAuthCredentials = val
-	case "socksAuthCredentials":
+	case keySocksAuthCredentials:
 		c.SocksAuthCredentials = val
-	case "censoredHeaders":
+	case keyCensoredHeaders:
 		c.CensoredHeaders = parseStringList(val)
-	case "censorReferer":
+	case keyCensorReferer:
 		level, err := parseTristate(val)
 		if err != nil {
 			return fmt.Errorf("invalid censorReferer '%s': %w", val, err)
 		}
 		c.CensorReferer = level
-	case "tunnelAllowedPorts":
+	case keyTunnelAllowedPorts:
 		ports, err := parsePortSet(val)
 		if err != nil {
 			return fmt.Errorf("invalid tunnelAllowedPorts '%s': %w", val, err)
 		}
 		c.TunnelAllowedPorts = ports
-	case "allowedPorts":
+	case keyAllowedPorts:
 		ports, err := parsePortSet(val)
 		if err != nil {
 			return fmt.Errorf("invalid allowedPorts '%s': %w", val, err)
 		}
 		c.AllowedPorts = ports
-	case "logLevel":
+	case keyLogLevel:
 		level, err := parseLevel(val)
 		if err != nil {
 			return fmt.Errorf("invalid logLevel '%s': %w", val, err)
 		}
 		c.LogLevel = level
-	case "logFile":
+	case keyLogFile:
 		c.LogFile = val
-	case "logFilePermissions":
+	case keyLogFilePermissions:
 		// Octal, as in Polipo's CONFIG_OCTAL: "0640" or "640".
 		mode, err := strconv.ParseUint(strings.TrimSpace(val), 8, 32)
 		if err != nil || mode > 0o777 {
 			return fmt.Errorf("invalid logFilePermissions '%s': want an octal mode such as 0640", val)
 		}
 		c.LogFilePermissions = os.FileMode(mode)
-	case "disableLocalInterface":
+	case keyDisableLocalInterface:
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
-	case "noDiskCache":
+	case keyNoDiskCache:
 		c.NoDiskCache = strings.ToLower(val) == "true" || val == "1"
-	case "dontCacheCookies":
+	case keyDontCacheCookies:
 		c.DontCacheCookies = strings.ToLower(val) == "true" || val == "1"
-	case "proxyOffline":
+	case keyProxyOffline:
 		c.ProxyOffline = strings.ToLower(val) == "true" || val == "1"
-	case "disableVia":
+	case keyDisableVia:
 		c.DisableVia = strings.ToLower(val) == "true" || val == "1"
-	case "forbidLocalDestinations":
+	case keyForbidLocalDestinations:
 		c.ForbidLocalDestinations = strings.ToLower(val) == "true" || val == "1"
-	case "forbidPrivateDestinations":
+	case keyForbidPrivateDestinations:
 		c.ForbidPrivateDestinations = strings.ToLower(val) == "true" || val == "1"
-	case "relaxTransparency":
+	case keyRelaxTransparency:
 		level, err := parseTristate(val)
 		if err != nil {
 			return fmt.Errorf("invalid relaxTransparency '%s': %w", val, err)
 		}
 		c.RelaxTransparency = level
-	case "dontTrustVaryETag":
+	case keyDontTrustVaryETag:
 		level, err := parseTristate(val)
 		if err != nil {
 			return fmt.Errorf("invalid dontTrustVaryETag '%s': %w", val, err)
 		}
 		c.DontTrustVaryETag = level
-	case "maxConcurrentRequests":
+	case keyMaxConcurrentRequests:
 		limit, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid maxConcurrentRequests '%s': %w", val, err)
 		}
 		c.MaxConcurrentRequests = limit
-	case "clientTimeout":
+	case keyClientTimeout:
 		d, err := parseDuration(val)
 		if err != nil {
 			return fmt.Errorf("invalid clientTimeout '%s': %w", val, err)
 		}
 		c.ClientTimeout = d
-	case "serverTimeout":
+	case keyServerTimeout:
 		d, err := parseDuration(val)
 		if err != nil {
 			return fmt.Errorf("invalid serverTimeout '%s': %w", val, err)
 		}
 		c.ServerTimeout = d
-	case "serverIdleTimeout":
+	case keyServerIdleTimeout:
 		d, err := parseDuration(val)
 		if err != nil {
 			return fmt.Errorf("invalid serverIdleTimeout '%s': %w", val, err)
 		}
 		c.ServerIdleTimeout = d
-	case "tunnelIdleTimeout":
+	case keyTunnelIdleTimeout:
 		d, err := parseDuration(val)
 		if err != nil {
 			return fmt.Errorf("invalid tunnelIdleTimeout '%s': %w", val, err)
 		}
 		c.TunnelIdleTimeout = d
-	case "diskCacheUnlinkTime":
+	case keyDiskCacheUnlinkTime:
 		d, err := parseDuration(val)
 		if err != nil {
 			return fmt.Errorf("invalid diskCacheUnlinkTime '%s': %w", val, err)
 		}
 		c.DiskCacheUnlinkTime = d
-	case "maxDiskCacheEntrySize":
+	case keyMaxDiskCacheEntrySize:
 		size, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
 			return fmt.Errorf("invalid maxDiskCacheEntrySize '%s': %w", val, err)
 		}
 		c.MaxDiskCacheEntrySize = size
-	case "diskCacheTruncateTime":
+	case keyDiskCacheTruncateTime:
 		d, err := parseDuration(val)
 		if err != nil {
 			return fmt.Errorf("invalid diskCacheTruncateTime '%s': %w", val, err)
 		}
 		c.DiskCacheTruncateTime = d
-	case "diskCacheTruncateSize":
+	case keyDiskCacheTruncateSize:
 		size, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
 			return fmt.Errorf("invalid diskCacheTruncateSize '%s': %w", val, err)
 		}
 		c.DiskCacheTruncateSize = size
-	case "memoryCacheEntries":
+	case keyMemoryCacheEntries:
 		n, err := strconv.Atoi(val)
 		if err != nil {
 			return fmt.Errorf("invalid memoryCacheEntries '%s': %w", val, err)
 		}
 		c.MemoryCacheEntries = n
-	case "memoryCacheMaxEntrySize":
+	case keyMemoryCacheMaxEntrySize:
 		size, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
 			return fmt.Errorf("invalid memoryCacheMaxEntrySize '%s': %w", val, err)
