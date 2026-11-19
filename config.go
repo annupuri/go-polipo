@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"strconv"
@@ -830,6 +831,19 @@ func parseLevel(val string) (int, error) {
 	return int(i), err
 }
 
+// maxDurationSeconds is the most whole seconds a time.Duration can hold,
+// about 292 years.
+const maxDurationSeconds = math.MaxInt64 / int64(time.Second)
+
+// addSeconds returns total + num*unit, or an error if the sum would not
+// fit in a time.Duration. total is never above maxDurationSeconds.
+func addSeconds(total, num, unit int64) (int64, error) {
+	if num > (maxDurationSeconds-total)/unit {
+		return 0, fmt.Errorf("duration too long")
+	}
+	return total + num*unit, nil
+}
+
 // parseDuration parses a polipo time duration like "32d", "12h", "60s".
 func parseDuration(val string) (time.Duration, error) {
 	val = strings.TrimSpace(val)
@@ -851,17 +865,21 @@ func parseDuration(val string) (time.Duration, error) {
 				return 0, err
 			}
 			currNum = ""
+			var unit int64
 			switch c {
 			case 's':
-				totalSec += num
+				unit = 1
 			case 'm':
-				totalSec += num * 60
+				unit = 60
 			case 'h':
-				totalSec += num * 3600
+				unit = 3600
 			case 'd':
-				totalSec += num * 86400
+				unit = 86400
 			default:
 				return 0, fmt.Errorf("unknown time unit '%c'", c)
+			}
+			if totalSec, err = addSeconds(totalSec, num, unit); err != nil {
+				return 0, err
 			}
 		}
 	}
@@ -871,7 +889,9 @@ func parseDuration(val string) (time.Duration, error) {
 		if err != nil {
 			return 0, err
 		}
-		totalSec += num
+		if totalSec, err = addSeconds(totalSec, num, 1); err != nil {
+			return 0, err
+		}
 	}
 	return time.Duration(totalSec) * time.Second, nil
 }

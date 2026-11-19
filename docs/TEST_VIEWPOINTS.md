@@ -130,7 +130,7 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 | # | Viewpoint | Value classes | Tests | Gaps |
 |---|---|---|---|---|
 | P1 | Startup | no config file, valid, invalid line, unknown variable, command-line `var=val` | TestRunBadConfigFile, TestRunBadCommandLineVar, TestLoadConfig, TestParseLine* | |
-| P2 | Value syntax | each type: bool, int (hex / octal), duration, tristate, port set, list, quoted | TestSetAllKeys, TestParseLevelFormats, TestParseDuration, TestParsePortSet, TestRelaxTransparencyTristate | |
+| P2 | Value syntax | each type: bool, int (hex / octal), duration (incl. overflow), tristate, port set, list, quoted | TestSetAllKeys, TestParseLevelFormats, TestParseDuration, TestParsePortSet, TestRelaxTransparencyTristate | |
 | P3 | Commands | `-h`, `-v`, `-x` | TestRunHelp, TestRunVersion, TestRunExpire, TestRunExpireMissingRoot | |
 | P4 | Local pages | top, config, status, flush, reload; method; foreign Host; cross-site POST; `disableLocalInterface` | TestProxyLocalInterface, TestStatusPage, TestProxyFlushEndpoint, TestProxyReloadEndpoint, TestLocalInterfaceRefuses*, TestScenarioLocalPages | |
 | P5 | Signals | SIGUSR1/SIGUSR2, SIGTERM and SIGINT (stop serving, exit 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |
