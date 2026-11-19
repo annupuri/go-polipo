@@ -661,11 +661,15 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// A local-form request is addressed to go-polipo itself rather than
+	// forwarded; see serveLocalForm.
+	local := isLocalForm(req)
+
 	// 1.4 Proxy authentication (authCredentials)
 	if !ph.isAuthorized(req) {
 		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
-		if isLocalForm(req) {
+		if local {
 			w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
 			http.Error(w, "Authentication Required", http.StatusUnauthorized)
 		} else {
@@ -675,46 +679,10 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 1.4.5 A request addressed to go-polipo itself must name this machine
-	// in its Host, and a POST must not come from another site. Otherwise a
-	// web page could point a hostname of its own at this machine (DNS
-	// rebinding) and read /polipo/config or /polipo/status as same-origin,
-	// or have the browser submit a form to /polipo/flush. Polipo checked
-	// neither.
-	if isLocalForm(req) {
-		if !ph.localHostAllowed(req.Host) {
-			ph.stats.denied.Add(1)
-			logf(ph.config.LogLevel, LogForbidden, "Denied: %s asked for %s with Host %q", req.RemoteAddr, req.URL.Path, req.Host)
-			http.Error(w, "Forbidden: Host does not name this proxy", http.StatusForbidden)
-			return
-		}
-		if err := ph.crossOrigin.Check(req); err != nil {
-			ph.stats.denied.Add(1)
-			logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s from %s: %v", req.Method, req.URL.Path, req.RemoteAddr, err)
-			http.Error(w, "Forbidden: cross-site request", http.StatusForbidden)
-			return
-		}
-	}
-
-	// 1.5 Local Interface handle (Polipo local web page). Only a local-form
-	// request is addressed to go-polipo itself; an absolute-form
-	// http://example.com/polipo/... belongs to that origin and must be
-	// forwarded, or any website's scripts could read /polipo/config or POST
-	// /polipo/flush same-origin. Polipo's urlIsLocal (http_parse.c) makes the
-	// same split.
-	if !ph.config.DisableLocalInterface && isLocalForm(req) && strings.HasPrefix(req.URL.Path, "/polipo") {
-		ph.handleLocal(w, req)
-		return
-	}
-
-	// Any other local-form request (a browser pointed at go-polipo asking
-	// for /favicon.ico, say, or /polipo/ with the local interface disabled)
-	// is also addressed to go-polipo itself, and there is nothing else here
-	// to serve. Polipo answered these from localDocumentRoot, with 404 when
-	// the file was absent; go-polipo has no document root, so it is always
-	// 404. Forwarding them instead fails anyway: there is no target host.
-	if isLocalForm(req) {
-		http.NotFound(w, req)
+	// 1.5 Local interface (Polipo's local web pages) and other requests
+	// addressed to go-polipo itself.
+	if local {
+		ph.serveLocalForm(w, req)
 		return
 	}
 
@@ -889,6 +857,45 @@ func (ph *ProxyHandler) isClientAllowed(remoteAddr string) bool {
 		}
 	}
 	return false
+}
+
+// serveLocalForm answers a local-form request, one addressed to go-polipo
+// itself. Only such a request may reach the local interface: an
+// absolute-form http://example.com/polipo/... belongs to that origin and is
+// forwarded, or any website's scripts could read /polipo/config or POST
+// /polipo/flush same-origin. Polipo's urlIsLocal (http_parse.c) makes the
+// same split.
+func (ph *ProxyHandler) serveLocalForm(w http.ResponseWriter, req *http.Request) {
+	// The request must name this machine in its Host, and a POST must not
+	// come from another site. Otherwise a web page could point a hostname of
+	// its own at this machine (DNS rebinding) and read /polipo/config or
+	// /polipo/status as same-origin, or have the browser submit a form to
+	// /polipo/flush. Polipo checked neither.
+	if !ph.localHostAllowed(req.Host) {
+		ph.stats.denied.Add(1)
+		logf(ph.config.LogLevel, LogForbidden, "Denied: %s asked for %s with Host %q", req.RemoteAddr, req.URL.Path, req.Host)
+		http.Error(w, "Forbidden: Host does not name this proxy", http.StatusForbidden)
+		return
+	}
+	if err := ph.crossOrigin.Check(req); err != nil {
+		ph.stats.denied.Add(1)
+		logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s from %s: %v", req.Method, req.URL.Path, req.RemoteAddr, err)
+		http.Error(w, "Forbidden: cross-site request", http.StatusForbidden)
+		return
+	}
+
+	if !ph.config.DisableLocalInterface && strings.HasPrefix(req.URL.Path, "/polipo") {
+		ph.handleLocal(w, req)
+		return
+	}
+
+	// Any other local-form request (a browser pointed at go-polipo asking
+	// for /favicon.ico, say, or /polipo/ with the local interface disabled)
+	// has nothing here to serve. Polipo answered these from
+	// localDocumentRoot, with 404 when the file was absent; go-polipo has no
+	// document root, so it is always 404. Forwarding them instead fails
+	// anyway: there is no target host.
+	http.NotFound(w, req)
 }
 
 // isLocalForm reports whether req's request-target is origin-form (a bare
