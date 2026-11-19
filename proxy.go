@@ -58,7 +58,7 @@ type ProxyHandler struct {
 	viaName string
 
 	// hostname is the machine's name, lower-cased, one of the Host values a
-	// request addressed to go-polipo itself may carry; see localHostAllowed.
+	// request addressed to go-polipo itself may carry; see isLocalHostAllowed.
 	hostname string
 	// crossOrigin refuses cross-site POSTs to the local interface.
 	crossOrigin *http.CrossOriginProtection
@@ -184,11 +184,11 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 	}
 	// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
 	// error when the origin cannot be reached at all, unless the
-	// entry forbids being served stale (see staleServable).
+	// entry forbids being served stale (see canServeStale).
 	if ph.config.RelaxTransparency >= 1 {
 		if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
 			defer staleResp.Body.Close()
-			if !stale || staleServable(staleResp) {
+			if !stale || canServeStale(staleResp) {
 				w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
 				copyHeader(w.Header(), staleResp.Header)
 				w.WriteHeader(staleResp.StatusCode)
@@ -322,7 +322,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	// 9111 section 4.4). Polipo dropped the entry as soon as such a request
 	// came in, whatever came of it, and counted OPTIONS among them, which
 	// RFC 9110 section 9.2.1 makes safe.
-	if !safeMethod(req.Method) && resp.StatusCode < 400 {
+	if !isSafeMethod(req.Method) && resp.StatusCode < 400 {
 		ph.cacheManager.Invalidate(req.URL.String())
 	}
 	if ph.uncachable.Load().Match(req.URL.String(), req.URL.Host) {
@@ -354,9 +354,9 @@ func viaNames(h http.Header, name string) bool {
 	return false
 }
 
-// safeMethod reports whether method is one RFC 9110 section 9.2.1 defines as
+// isSafeMethod reports whether method is one RFC 9110 section 9.2.1 defines as
 // safe: one that does not ask the origin to change anything.
-func safeMethod(method string) bool {
+func isSafeMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
 		return true
@@ -871,7 +871,7 @@ func (ph *ProxyHandler) serveOriginForm(w http.ResponseWriter, req *http.Request
 	// its own at this machine (DNS rebinding) and read /polipo/config or
 	// /polipo/status as same-origin, or have the browser submit a form to
 	// /polipo/flush. Polipo checked neither.
-	if !ph.localHostAllowed(req.Host) {
+	if !ph.isLocalHostAllowed(req.Host) {
 		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s asked for %s with Host %q", req.RemoteAddr, req.URL.Path, req.Host)
 		http.Error(w, "Forbidden: Host does not name this proxy", http.StatusForbidden)
@@ -913,12 +913,12 @@ func isOriginForm(req *http.Request) bool {
 	return req.Method != http.MethodConnect && !req.URL.IsAbs()
 }
 
-// localHostAllowed reports whether host, the Host of a request addressed to
+// isLocalHostAllowed reports whether host, the Host of a request addressed to
 // go-polipo itself, names this machine in a way a web page cannot choose: an
 // IP address, localhost, the machine's hostname or proxyAddress. A page that
 // points a hostname of its own at this machine sends that hostname, so it is
 // refused. An empty Host (an HTTP/1.0 client, never a browser) is allowed.
-func (ph *ProxyHandler) localHostAllowed(host string) bool {
+func (ph *ProxyHandler) isLocalHostAllowed(host string) bool {
 	if host == "" {
 		return true
 	}
@@ -1243,12 +1243,12 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 
 	// relaxTransparency "true": an existing entry, even if stale, is served
 	// without even attempting to reach the origin - only a true miss, or an
-	// entry that forbids being served stale (see staleServable), falls
+	// entry that forbids being served stale (see canServeStale), falls
 	// through to the network.
 	if ph.config.RelaxTransparency >= 2 {
 		if staleResp, stale := ph.cacheManager.LookupStale(req); staleResp != nil {
 			defer staleResp.Body.Close()
-			if !stale || staleServable(staleResp) {
+			if !stale || canServeStale(staleResp) {
 				if stale {
 					w.Header().Set("Warning", `110 go-polipo "Object is stale"`)
 				}
@@ -1261,7 +1261,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// only-if-cached: the client wants nothing from the origin, and nothing
 	// stored suits the request (RFC 9111 section 5.2.1.7). Polipo answered
 	// the same way, but served a stale entry first.
-	if requestOnlyIfCached(req) {
+	if requestHasOnlyIfCached(req) {
 		http.Error(w, "Object not in cache", http.StatusGatewayTimeout)
 		return
 	}
@@ -1307,7 +1307,7 @@ func (ph *ProxyHandler) answerMaxForwards(w http.ResponseWriter, req *http.Reque
 // serveOffline answers a forwarded request under proxyOffline, which never
 // dials the origin: a cached entry (fresh or stale) is served as-is, and a
 // true miss becomes a 502 rather than a network attempt. A stale entry that
-// forbids being served stale (see staleServable) is a 504, as RFC 9111
+// forbids being served stale (see canServeStale) is a 504, as RFC 9111
 // section 5.2.2.2 asks of a disconnected cache.
 func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 	resp, stale := ph.cacheManager.LookupStale(req)
@@ -1316,7 +1316,7 @@ func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
-	if stale && !staleServable(resp) {
+	if stale && !canServeStale(resp) {
 		http.Error(w, "Disconnected operation and object must be revalidated", http.StatusGatewayTimeout)
 		return
 	}

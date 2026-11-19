@@ -93,13 +93,13 @@ func (e *memEntry) response(req *http.Request) *http.Response {
 	}
 }
 
-// diskCacheDisabled reports whether the on-disk cache is turned off, either
+// isDiskCacheDisabled reports whether the on-disk cache is turned off, either
 // explicitly (noDiskCache) or by having no root to read from or write into.
-func (cm *CacheManager) diskCacheDisabled() bool {
+func (cm *CacheManager) isDiskCacheDisabled() bool {
 	return cm.config.NoDiskCache || cm.config.DiskCacheRoot == ""
 }
 
-// requestIsAuthenticated reports whether req carries HTTP credentials that make
+// isRequestAuthenticated reports whether req carries HTTP credentials that make
 // its response unsafe for a shared cache to reuse for other clients.
 //
 // This checks only Authorization, not Proxy-Authorization: Authorization is
@@ -113,7 +113,7 @@ func (cm *CacheManager) diskCacheDisabled() bool {
 // authCredentials is configured, every legitimate request carries
 // Proxy-Authorization, so treating it the same here would make almost
 // nothing cacheable.
-func requestIsAuthenticated(req *http.Request) bool {
+func isRequestAuthenticated(req *http.Request) bool {
 	return req.Header.Get("Authorization") != ""
 }
 
@@ -132,7 +132,7 @@ func responseVaries(resp *http.Response) bool {
 	return strings.TrimSpace(resp.Header.Get("Vary")) != ""
 }
 
-// responseNoCache reports whether resp carries a Cache-Control: no-cache
+// responseHasNoCache reports whether resp carries a Cache-Control: no-cache
 // directive. Such a response may be stored, but RFC 9111 section 5.2.2.4
 // forbids reusing it without first revalidating with the origin, however fresh
 // its max-age says it is - the same rule as Polipo's objectMustRevalidate
@@ -140,19 +140,19 @@ func responseVaries(resp *http.Response) bool {
 // therefore always reports it stale. The qualified form (no-cache="field")
 // is treated as unqualified, as RFC 9111 allows. Directive names are
 // case-insensitive, and Cache-Control may span several header lines.
-// Without any Cache-Control, Pragma: no-cache counts too (see pragmaNoCache).
-func responseNoCache(resp *http.Response) bool {
-	return parseCacheControl(resp.Header).has("no-cache") || pragmaNoCache(resp.Header)
+// Without any Cache-Control, Pragma: no-cache counts too (see hasPragmaNoCache).
+func responseHasNoCache(resp *http.Response) bool {
+	return parseCacheControl(resp.Header).has("no-cache") || hasPragmaNoCache(resp.Header)
 }
 
-// pragmaNoCache reports whether h carries Pragma: no-cache and no
+// hasPragmaNoCache reports whether h carries Pragma: no-cache and no
 // Cache-Control at all; when Cache-Control is present, it alone decides. In
 // a request, RFC 7234 section 5.4 required treating that as Cache-Control:
 // no-cache; RFC 9111 section 5.4 deprecates Pragma and drops the rule, but
 // an HTTP/1.0 client may still send it alone, and Polipo (http_parse.c)
 // honoured it, so go-polipo keeps doing so. In a response its meaning was
 // never specified; Polipo honoured it there as well, and so does go-polipo.
-func pragmaNoCache(h http.Header) bool {
+func hasPragmaNoCache(h http.Header) bool {
 	if len(h.Values("Cache-Control")) > 0 {
 		return false
 	}
@@ -206,10 +206,10 @@ func parseDeltaSeconds(v string) (time.Duration, bool) {
 	return time.Duration(min(n, maxAgeValue)) * time.Second, true
 }
 
-// requestOnlyIfCached reports whether req carries Cache-Control:
+// requestHasOnlyIfCached reports whether req carries Cache-Control:
 // only-if-cached, under which the client wants nothing fetched from the
 // origin (RFC 9111 section 5.2.1.7).
-func requestOnlyIfCached(req *http.Request) bool {
+func requestHasOnlyIfCached(req *http.Request) bool {
 	return parseCacheControl(req.Header).has("only-if-cached")
 }
 
@@ -222,15 +222,15 @@ func responseForbidsStale(resp *http.Response) bool {
 	return cc.has("must-revalidate") || cc.has("proxy-revalidate") || cc.has("s-maxage")
 }
 
-// staleServable reports whether resp may be served stale at all, as
+// canServeStale reports whether resp may be served stale at all, as
 // relaxTransparency and proxyOffline do. Not when it carries
 // must-revalidate, proxy-revalidate or s-maxage (see responseForbidsStale),
-// nor no-cache (see responseNoCache): RFC 9111 sections 4.2.4 and 5.2.2
+// nor no-cache (see responseHasNoCache): RFC 9111 sections 4.2.4 and 5.2.2
 // require a successful validation with the origin before any reuse of
 // those once they are stale, even by a disconnected cache. Polipo served
 // them stale anyway.
-func staleServable(resp *http.Response) bool {
-	return !responseForbidsStale(resp) && !responseNoCache(resp)
+func canServeStale(resp *http.Response) bool {
+	return !responseForbidsStale(resp) && !responseHasNoCache(resp)
 }
 
 // allowsAuthenticated reports whether a response's Cache-Control carries a
@@ -315,7 +315,7 @@ func (cm *CacheManager) Invalidate(rawURL string) {
 	if cm.memCache != nil {
 		cm.memCache.Remove(rawURL)
 	}
-	if cm.diskCacheDisabled() {
+	if cm.isDiskCacheDisabled() {
 		return
 	}
 	path, err := cm.GetCachePath(rawURL)
@@ -363,13 +363,13 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	}
 
 	// Cache-Control checks
-	if cc := parseCacheControl(req.Header); cc.has("no-cache") || cc.has("no-store") || pragmaNoCache(req.Header) {
+	if cc := parseCacheControl(req.Header); cc.has("no-cache") || cc.has("no-store") || hasPragmaNoCache(req.Header) {
 		return nil, false
 	}
 
 	key := req.URL.String()
 
-	// Checked first, and independently of diskCacheDisabled: MemoryCacheEntries
+	// Checked first, and independently of isDiskCacheDisabled: MemoryCacheEntries
 	// is meant to work the same whether or not the disk cache is enabled.
 	if cm.memCache != nil {
 		if entry, ok := cm.memCache.Get(key); ok {
@@ -380,7 +380,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 		}
 	}
 
-	if cm.diskCacheDisabled() {
+	if cm.isDiskCacheDisabled() {
 		return nil, false
 	}
 
@@ -425,7 +425,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// there is no usable validator - see addConditionalHeaders) can settle
 	// which variant is correct. See responseVaries. A no-cache response is
 	// always stale for the same reason: only the origin may approve its
-	// reuse. See responseNoCache.
+	// reuse. See responseHasNoCache.
 	birth := storedBirth(resp)
 	stale = cm.isStaleFor(req, resp, birth)
 
@@ -636,9 +636,9 @@ func (cm *CacheManager) isExpired(resp *http.Response, birth time.Time) bool {
 // resp forbids serving it stale.
 // When a request has both min-fresh and max-stale, min-fresh wins, as in
 // Polipo. A Vary or no-cache response is always stale, whatever req says;
-// see responseVaries and responseNoCache.
+// see responseVaries and responseHasNoCache.
 func (cm *CacheManager) isStaleFor(req *http.Request, resp *http.Response, birth time.Time) bool {
-	if responseVaries(resp) || responseNoCache(resp) {
+	if responseVaries(resp) || responseHasNoCache(resp) {
 		return true
 	}
 	cc := parseCacheControl(req.Header)
@@ -709,11 +709,11 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	// RFC 9111 section 3.5 (RFC 2616 section 14.8): a shared cache must not
 	// reuse a response to a request carrying Authorization unless the response
 	// explicitly permits it.
-	if requestIsAuthenticated(req) && !cc.allowsAuthenticated() {
+	if isRequestAuthenticated(req) && !cc.allowsAuthenticated() {
 		return
 	}
 
-	diskEnabled := !cm.diskCacheDisabled()
+	diskEnabled := !cm.isDiskCacheDisabled()
 	memEnabled := cm.memCache != nil
 	if !diskEnabled && !memEnabled {
 		return
