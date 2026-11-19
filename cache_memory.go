@@ -138,7 +138,7 @@ func (cm *CacheManager) promote(key string, resp *http.Response, birth time.Time
 		}{io.MultiReader(bytes.NewReader(body), resp.Body), resp.Body}
 		return
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
 	cm.memCache.Add(key, newMemEntry(resp, body, birth))

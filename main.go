@@ -117,7 +117,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		defer func() {
 			log.SetOutput(os.Stderr)
-			w.Close()
+			_ = w.Close()
 		}()
 		log.SetOutput(w)
 		reopenLog = w.Reopen
@@ -144,7 +144,7 @@ func serve(config *Config, reopenLog func() error) int {
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
 		logf(config.LogLevel, LogInfo, "Shutting down go-polipo...")
-		server.Close()
+		_ = server.Close()
 	}()
 
 	logf(config.LogLevel, LogInfo, "go-polipo version %s starting on http://%s", Version, addr)

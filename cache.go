@@ -67,7 +67,7 @@ func (cm *CacheManager) Lookup(req *http.Request) *http.Response {
 		// (ProxyHandler's rewrite/ModifyResponse) is what turns this into a
 		// conditional GET and merges a 304 back into the entry - see
 		// addConditionalHeaders and reviveFromCache in proxy.go.
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil
 	}
 	return resp
@@ -304,7 +304,7 @@ func (b *cacheBody) Close() error {
 func (b *cacheBody) commit() {
 	if w := b.disk; w != nil {
 		b.disk = nil
-		w.pw.Close()
+		_ = w.pw.Close()
 		if err := <-w.done; err != nil {
 			logf(b.cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't write cache file %s: %v", b.key, w.path, err)
 			os.Remove(w.tmp)

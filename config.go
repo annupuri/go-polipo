@@ -548,7 +548,7 @@ func forEachLine(path string, fn func(lineNum int, line string) error) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0

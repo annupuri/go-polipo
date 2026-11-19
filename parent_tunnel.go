@@ -63,7 +63,7 @@ func (ph *ProxyHandler) dialViaParent(ctx context.Context, addr string) (net.Con
 	}
 	conn, early, err := ph.connectParent(ctx, conn, addr)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, nil, err
 	}
 	return conn, early, nil
@@ -74,7 +74,7 @@ func (ph *ProxyHandler) dialViaParent(ctx context.Context, addr string) (net.Con
 // an https parent), which the caller closes if err is not nil.
 func (ph *ProxyHandler) connectParent(ctx context.Context, conn net.Conn, addr string) (net.Conn, []byte, error) {
 	if t := ph.config.ServerTimeout; t > 0 {
-		conn.SetDeadline(time.Now().Add(t))
+		_ = conn.SetDeadline(time.Now().Add(t))
 	}
 	if ph.parentURL.Scheme == "https" {
 		// The same TLS settings the Transport uses for the parent on
@@ -105,10 +105,10 @@ func (ph *ProxyHandler) connectParent(ctx context.Context, conn net.Conn, addr s
 		return conn, nil, fmt.Errorf("reading the parent proxy's reply: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return conn, nil, &errParentRefused{status: resp.Status}
 	}
-	conn.SetDeadline(time.Time{})
+	_ = conn.SetDeadline(time.Time{})
 	var early []byte
 	if n := br.Buffered(); n > 0 {
 		early, _ = br.Peek(n)

@@ -133,7 +133,7 @@ func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Respons
 	resp, err := http.ReadResponse(bufio.NewReader(file), req)
 	if err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
-		file.Close()
+		_ = file.Close()
 		return nil, time.Time{}
 	}
 
@@ -141,8 +141,8 @@ func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Respons
 	loc := resp.Header.Get(headerPolipoLocation)
 	if loc != req.URL.String() {
 		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
-		resp.Body.Close()
-		file.Close()
+		_ = resp.Body.Close()
+		_ = file.Close()
 		return nil, time.Time{}
 	}
 
@@ -172,7 +172,7 @@ type fileBody struct {
 var _ io.ReadCloser = fileBody{}
 
 func (b fileBody) Close() error {
-	b.ReadCloser.Close()
+	_ = b.ReadCloser.Close()
 	return b.file.Close()
 }
 
@@ -345,13 +345,13 @@ func (cm *CacheManager) judgeExpire(path string, info fs.FileInfo) expireReason 
 	if err != nil {
 		return expireKeep
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	resp, err := http.ReadResponse(bufio.NewReader(file), nil)
 	if err != nil {
 		return expireCorrupt
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if cm.isExpired(resp, storedBirth(resp)) {
 		return expireHTTPStale
