@@ -130,7 +130,8 @@ func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Respons
 	}
 
 	// Parse response from file
-	resp, err := http.ReadResponse(bufio.NewReader(file), req)
+	br := bufio.NewReader(file)
+	resp, err := http.ReadResponse(br, req)
 	if err != nil {
 		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
 		_ = file.Close()
@@ -148,7 +149,12 @@ func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Respons
 
 	// resp.Body reads through a bufio.Reader, so closing it would leave the
 	// file itself open until the garbage collector got to it.
-	resp.Body = fileBody{ReadCloser: resp.Body, file: file}
+	body := fileBody{ReadCloser: resp.Body, file: file}
+	body.start, body.raw = rawBodyStart(file, br, resp)
+	if body.raw {
+		body.size = resp.ContentLength
+	}
+	resp.Body = body
 
 	// The birth is in X-Polipo-Date, so read it before the metadata goes.
 	birth := storedBirth(resp)
@@ -167,6 +173,11 @@ func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Respons
 type fileBody struct {
 	io.ReadCloser
 	file *os.File
+
+	// raw is set when the file holds the body byte for byte, size bytes
+	// from start to the end of the file (see rawBodyStart).
+	raw         bool
+	start, size int64
 }
 
 var _ io.ReadCloser = fileBody{}
@@ -174,6 +185,35 @@ var _ io.ReadCloser = fileBody{}
 func (b fileBody) Close() error {
 	_ = b.ReadCloser.Close()
 	return b.file.Close()
+}
+
+func (b fileBody) bodyAt() (io.ReaderAt, int64, bool) {
+	if !b.raw {
+		return nil, 0, false
+	}
+	return io.NewSectionReader(b.file, b.start, b.size), b.size, true
+}
+
+// rawBodyStart returns the offset in file where resp's body starts, with
+// true when the rest of the file is that body byte for byte: resp has a
+// Content-Length and no transfer coding, and exactly that many bytes
+// follow the header. A body written chunked or close-delimited, or a file
+// of any other size, reports false, and must be read through resp.Body. br is the reader resp was
+// parsed from; whatever it has buffered is the start of the body.
+func rawBodyStart(file *os.File, br *bufio.Reader, resp *http.Response) (int64, bool) {
+	if resp.ContentLength < 0 || len(resp.TransferEncoding) > 0 {
+		return 0, false
+	}
+	pos, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return 0, false
+	}
+	start := pos - int64(br.Buffered())
+	info, err := file.Stat()
+	if err != nil || info.Size()-start != resp.ContentLength {
+		return 0, false
+	}
+	return start, true
 }
 
 // cacheTempPrefix starts the name of a disk cache entry that is still being

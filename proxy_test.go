@@ -2497,6 +2497,91 @@ func TestRangeIgnoredForHead(t *testing.T) {
 	}
 }
 
+// A Range request served from a disk entry reads only the range when the
+// file holds the body byte for byte, and falls back to reading it whole
+// otherwise; either way the client gets the same bytes.
+func TestRangeServedFromDisk(t *testing.T) {
+	const body = "0123456789"
+	tests := []struct {
+		name    string
+		chunked bool // stored without a Content-Length, so written chunked
+		extra   string
+		wantRaw bool
+	}{
+		{name: "content-length", wantRaw: true},
+		{name: "chunked", chunked: true},
+		{name: "file size mismatch", extra: "junk"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := newTestConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			cfg.MemoryCacheEntries = 0 // every hit comes from disk
+			cm := NewCacheManager(cfg)
+			ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+
+			target := "http://cached.example.com/disk-range"
+			resp := mkResp(body, "Cache-Control", "max-age=3600", "Date", timeHeader(0))
+			resp.ContentLength = int64(len(body))
+			if tt.chunked {
+				resp.ContentLength = -1
+				resp.TransferEncoding = []string{"chunked"}
+			}
+			if err := storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil), resp); err != nil {
+				t.Fatalf("seed Store failed: %v", err)
+			}
+			if tt.extra != "" {
+				path, err := cm.CachePath(target)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = f.WriteString(tt.extra)
+				_ = f.Close()
+			}
+
+			hit := cm.Lookup(httptest.NewRequest(http.MethodGet, target, nil))
+			if hit == nil {
+				t.Fatal("no cache hit")
+			}
+			rb, ok := hit.Body.(rangeBody)
+			if !ok {
+				t.Fatalf("disk hit body %T is not a rangeBody", hit.Body)
+			}
+			src, size, raw := rb.bodyAt()
+			if raw != tt.wantRaw {
+				t.Fatalf("bodyAt ok = %v, want %v", raw, tt.wantRaw)
+			}
+			if raw {
+				got, err := io.ReadAll(io.NewSectionReader(src, 2, 3))
+				if err != nil || string(got) != "234" || size != int64(len(body)) {
+					t.Errorf("bodyAt section = %q, %v (size %d), want \"234\" (size %d)", got, err, size, len(body))
+				}
+			}
+			// Reading through the ReaderAt leaves the body readable from the start.
+			if got, err := io.ReadAll(hit.Body); err != nil || string(got) != body {
+				t.Errorf("body after bodyAt = %q, %v; want %q", got, err, body)
+			}
+			_ = hit.Body.Close()
+
+			rr := httptest.NewRecorder()
+			ph.ServeHTTP(rr, rangeRequest(target, "bytes=2-4", ""))
+			if rr.Code != http.StatusPartialContent {
+				t.Fatalf("status = %d, want %d", rr.Code, http.StatusPartialContent)
+			}
+			if got := rr.Body.String(); got != "234" {
+				t.Errorf("body = %q, want %q", got, "234")
+			}
+			if got, want := rr.Header().Get("Content-Range"), "bytes 2-4/10"; got != want {
+				t.Errorf("Content-Range = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 // closeTracker is a body that records whether it was closed.
 type closeTracker struct {
 	io.Reader

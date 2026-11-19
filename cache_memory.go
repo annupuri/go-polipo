@@ -66,7 +66,7 @@ func (e *memEntry) response(req *http.Request) *http.Response {
 		ProtoMajor:    e.protoMajor,
 		ProtoMinor:    e.protoMinor,
 		Header:        e.header.Clone(),
-		Body:          io.NopCloser(bytes.NewReader(e.body)),
+		Body:          memBody{bytes.NewReader(e.body)},
 		ContentLength: int64(len(e.body)),
 		Request:       req,
 	}
@@ -139,7 +139,19 @@ func (cm *CacheManager) promote(key string, resp *http.Response, birth time.Time
 		return
 	}
 	_ = resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.Body = memBody{bytes.NewReader(body)}
 	resp.ContentLength = int64(len(body))
 	cm.memCache.Add(key, newMemEntry(resp, body, birth))
+}
+
+// memBody is a memory cache entry's body. It shares the entry's bytes, so
+// writeRange can slice it without a copy.
+type memBody struct {
+	*bytes.Reader
+}
+
+func (memBody) Close() error { return nil }
+
+func (b memBody) bodyAt() (io.ReaderAt, int64, bool) {
+	return b.Reader, b.Size(), true
 }
