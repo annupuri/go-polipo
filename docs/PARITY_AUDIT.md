@@ -162,7 +162,7 @@ at the end groups findings by how much they matter before a public release.
 | `diskCacheWriteoutOnClose`, `maxDiskEntries` | 64KB / 32 | 🔷 | FD management / write batching owned by the Go runtime. |
 | `diskCacheDirectoryPermissions` / `diskCacheFilePermissions` | `0700` / `0600` | ⚠️ | Hard-coded to `0700` / `0600` (`MkdirAll`/`OpenFile`); not configurable. Matches the defaults. |
 | Atomic write (write temp, rename) | — | ⚠️ | `Store` writes in place with `O_TRUNC` and `os.Remove` on failure — a crash mid-write leaves a short file (caught later as "corrupt" by `Lookup`/`Expire`). Polipo avoids in-place truncation. |
-| Logging on disk-cache write/expire failures | Polipo logs via `do_log_error` | ✅ | **Done (2026-09-14), found while working the two rows above:** every failure branch in `Store` (`GetCachePath`, `MkdirAll`, `OpenFile`, `Write`) and in `Expire`'s removal step was silently swallowed — `cache.go` didn't even import `log`. These are now logged; the new size-based removal above also gets its own log line, distinct from ordinary corrupt/stale/unlink-time removals. |
+| Logging on disk-cache write/expire failures | Polipo logs via `do_log_error` | ✅ | **Done (2026-09-14), found while working the two rows above:** every failure branch in `Store` (`CachePath`, `MkdirAll`, `OpenFile`, `Write`) and in `Expire`'s removal step was silently swallowed — `cache.go` didn't even import `log`. These are now logged; the new size-based removal above also gets its own log line, distinct from ordinary corrupt/stale/unlink-time removals. |
 | `X-Polipo-Location` collision guard | — | ✅ | Present; exact-URL compare on read. |
 
 ## 12. DNS

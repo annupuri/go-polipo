@@ -56,7 +56,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 |---|---|---|---|---|
 | O1 | ステータス | 200、206、304、3xx、4xx、5xx、407(親プロキシの有無) | TestCacheInvalidAndNonGetCases, TestConditionalRevalidation304ServesCachedBodyAndRefreshes, TestParentProxyRefusesCredentials | |
 | O2 | 応答の Cache-Control | max-age、s-maxage、no-store、no-cache、private、must-revalidate、proxy-revalidate、複数行 | TestFreshnessLifetime, TestStoreReadsEveryCacheControlLine, TestStoreCachesNoCacheButAlwaysStale, TestStaleForbiddenEntryNotServedStale | |
-| O3 | Cache-Control がないときの鮮度 | Expires、Last-Modified からの推定、どちらもない、Date がない | TestHeuristicLifetime, TestFreshnessLifetime, TestMissingDateIsAppended | |
+| O3 | Cache-Control がないときの鮮度 | Expires、Last-Modified からの推定、どちらもない、Date がない | TestHeuristicFreshnessLifetime, TestFreshnessLifetime, TestMissingDateIsAppended | |
 | O4 | 検証子 | 強い/弱い ETag、Last-Modified、なし | TestConditionalRevalidationSendsIfModifiedSince, TestNoConditionalHeadersWithoutValidators | |
 | O5 | Vary | なし、ETag 付きの Vary、ETag なしの Vary、`dontTrustVaryETag` | TestStoreCachesVaryButAlwaysStale, TestAddConditionalHeadersVary*, TestAddConditionalHeadersDontTrustVaryETagTrue | |
 | O6 | Set-Cookie | あり、`dontCacheCookies` | TestStoreSkipsSetCookie | |

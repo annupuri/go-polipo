@@ -20,9 +20,9 @@ import (
 // mtime override. It returns the file path. Empty header strings are omitted.
 func writeCacheEntry(t *testing.T, cm *CacheManager, rawURL, cacheControl, date, access string, mtime time.Time) string {
 	t.Helper()
-	p, err := cm.GetCachePath(rawURL)
+	p, err := cm.CachePath(rawURL)
 	if err != nil {
-		t.Fatalf("GetCachePath(%q): %v", rawURL, err)
+		t.Fatalf("CachePath(%q): %v", rawURL, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
 		t.Fatal(err)
@@ -84,9 +84,9 @@ func TestCachePathGeneration(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		path, err := cm.GetCachePath(tt.urlStr)
+		path, err := cm.CachePath(tt.urlStr)
 		if err != nil {
-			t.Errorf("GetCachePath(%s) unexpected error: %v", tt.urlStr, err)
+			t.Errorf("CachePath(%s) unexpected error: %v", tt.urlStr, err)
 			continue
 		}
 
@@ -136,7 +136,7 @@ func TestCacheStoreAndLookup(t *testing.T) {
 	}
 
 	// Verify file was created
-	path, _ := cm.GetCachePath(targetURL)
+	path, _ := cm.CachePath(targetURL)
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("expected cache file %s to exist, error: %v", path, err)
 	}
@@ -411,7 +411,7 @@ func TestStoredBirth(t *testing.T) {
 	}
 }
 
-func TestHeuristicLifetime(t *testing.T) {
+func TestHeuristicFreshnessLifetime(t *testing.T) {
 	tests := []struct {
 		name string
 		lm   string // Last-Modified; "" for none
@@ -431,8 +431,8 @@ func TestHeuristicLifetime(t *testing.T) {
 		if tt.lm != "" {
 			hdr = []string{"Last-Modified", tt.lm}
 		}
-		if got := heuristicLifetime(mkResp("", hdr...), testT0); got != tt.want {
-			t.Errorf("%s: heuristicLifetime = %v, want %v", tt.name, got, tt.want)
+		if got := heuristicFreshnessLifetime(mkResp("", hdr...), testT0); got != tt.want {
+			t.Errorf("%s: heuristicFreshnessLifetime = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }
@@ -545,7 +545,7 @@ func TestDiskEntryTimesAreUTC(t *testing.T) {
 	if err := storeNow(cm, httptest.NewRequest(http.MethodGet, url, nil), resp); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
-	p, err := cm.GetCachePath(url)
+	p, err := cm.CachePath(url)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,12 +597,12 @@ func TestCacheInvalidAndNonGetCases(t *testing.T) {
 	cm := NewCacheManager(cfg)
 
 	// 1. Invalid schemes or URLs
-	_, err := cm.GetCachePath("https://example.com")
+	_, err := cm.CachePath("https://example.com")
 	if err == nil {
 		t.Error("expected error for non-http cache path generation")
 	}
 
-	_, err = cm.GetCachePath("http://%4ghst") // invalid escape URL
+	_, err = cm.CachePath("http://%4ghst") // invalid escape URL
 	if err == nil {
 		t.Error("expected error for invalid URL path generation")
 	}
@@ -678,9 +678,9 @@ func mkResp(body string, hdr ...string) *http.Response {
 
 func fileExistsForURL(t *testing.T, cm *CacheManager, rawURL string) bool {
 	t.Helper()
-	p, err := cm.GetCachePath(rawURL)
+	p, err := cm.CachePath(rawURL)
 	if err != nil {
-		t.Fatalf("GetCachePath(%q): %v", rawURL, err)
+		t.Fatalf("CachePath(%q): %v", rawURL, err)
 	}
 	_, err = os.Stat(p)
 	return err == nil
@@ -1148,7 +1148,7 @@ func TestCacheLookupRejections(t *testing.T) {
 	// 1. X-Polipo-Location mismatch (hash collision guard): the file lives at
 	// the path for urlA but records urlB as its origin.
 	urlA := "http://collision.example.com/a"
-	pA, err := cm.GetCachePath(urlA)
+	pA, err := cm.CachePath(urlA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1186,7 +1186,7 @@ func TestCacheLookupRejections(t *testing.T) {
 
 	// 3. Corrupt file.
 	urlC := "http://corrupt.example.com/c"
-	pC, _ := cm.GetCachePath(urlC)
+	pC, _ := cm.CachePath(urlC)
 	os.MkdirAll(filepath.Dir(pC), 0700)
 	os.WriteFile(pC, []byte("garbage"), 0600)
 	if got := cm.Lookup(httptest.NewRequest(http.MethodGet, urlC, nil)); got != nil {
@@ -1203,7 +1203,7 @@ func TestCacheLookupRejections(t *testing.T) {
 	// 5. Entry carrying Vary (e.g. written by Polipo or an older go-polipo):
 	// cannot be matched to the request, so it must not be served.
 	urlV := "http://vary.example.com/v"
-	pV, _ := cm.GetCachePath(urlV)
+	pV, _ := cm.CachePath(urlV)
 	os.MkdirAll(filepath.Dir(pV), 0700)
 	varied := &http.Response{
 		StatusCode: 200, Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
@@ -1350,9 +1350,9 @@ func TestMemoryCacheServesWithoutDisk(t *testing.T) {
 		t.Fatalf("Store: %v", err)
 	}
 
-	path, err := cm.GetCachePath(url)
+	path, err := cm.CachePath(url)
 	if err != nil {
-		t.Fatalf("GetCachePath: %v", err)
+		t.Fatalf("CachePath: %v", err)
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("removing disk copy: %v", err)
@@ -1713,7 +1713,7 @@ func TestDiskHitPromotedToMemory(t *testing.T) {
 		t.Fatal("a GET disk hit should be promoted to the memory cache")
 	}
 	// The promoted copy now answers on its own.
-	path, _ := cm.GetCachePath("http://example.com/small")
+	path, _ := cm.CachePath("http://example.com/small")
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}

@@ -67,7 +67,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 |---|---|---|---|---|
 | O1 | Status | 200, 206, 304, 3xx, 4xx, 5xx, 407 (with / without a parent) | TestCacheInvalidAndNonGetCases, TestConditionalRevalidation304ServesCachedBodyAndRefreshes, TestParentProxyRefusesCredentials | |
 | O2 | Response Cache-Control | max-age, s-maxage, no-store, no-cache, private, must-revalidate, proxy-revalidate; several lines | TestFreshnessLifetime, TestStoreReadsEveryCacheControlLine, TestStoreCachesNoCacheButAlwaysStale, TestStaleForbiddenEntryNotServedStale | |
-| O3 | Freshness without Cache-Control | Expires, Last-Modified heuristic, none; missing Date | TestHeuristicLifetime, TestFreshnessLifetime, TestMissingDateIsAppended | |
+| O3 | Freshness without Cache-Control | Expires, Last-Modified heuristic, none; missing Date | TestHeuristicFreshnessLifetime, TestFreshnessLifetime, TestMissingDateIsAppended | |
 | O4 | Validators | strong / weak ETag, Last-Modified, none | TestConditionalRevalidationSendsIfModifiedSince, TestNoConditionalHeadersWithoutValidators | |
 | O5 | Vary | none, Vary with ETag, Vary without ETag, `dontTrustVaryETag` | TestStoreCachesVaryButAlwaysStale, TestAddConditionalHeadersVary*, TestAddConditionalHeadersDontTrustVaryETagTrue | |
 | O6 | Set-Cookie | present, `dontCacheCookies` | TestStoreSkipsSetCookie | |
