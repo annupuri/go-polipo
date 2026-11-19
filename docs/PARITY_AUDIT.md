@@ -35,6 +35,7 @@ at the end groups findings by how much they matter before a public release.
 | :--- | :--: | :--- |
 | `-h`, `-v`, `-x`, `-c` | ✅ | All present (`main.go`). |
 | `-v` output | ✅ | Rendered from `Config.Entries()`, shared with `/polipo/config`. |
+| Time values in the config file | ✅ | `parseDuration` reads them as Polipo's `parseTime` (`config.c`) did: numbers with `d`/`h`/`m`/`s` in any order (`4d12h`, `12h1d`), a trailing bare number counts as seconds (`1h30`), no sign or fraction. Checked 2026-11-19, when replacing it with `time.ParseDuration` was considered and dropped because that would reject `1h30` and `12h1d` and accept negative values. **Deliberate difference (2026-11-19):** a value too long for a `time.Duration` (over about 292 years) is an error; Polipo's `int` wrapped it, and so did go-polipo 2.0.0 (to a negative duration). |
 
 ## 2. Listening socket & client access
 

@@ -116,7 +116,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | # | 観点 | 値の分類 | テスト | 抜け |
 |---|---|---|---|---|
 | P1 | 起動 | 設定ファイルなし、正しい、不正な行、知らない変数、コマンドラインの `var=val` | TestRunBadConfigFile, TestRunBadCommandLineVar, TestLoadConfig, TestParseLine* | |
-| P2 | 値の書き方 | 型ごと:bool、int(16進/8進)、時間、tristate、ポートの集合、リスト、引用符付き | TestSetAllKeys, TestParseLevelFormats, TestParseDuration, TestParsePortSet, TestRelaxTransparencyTristate | |
+| P2 | 値の書き方 | 型ごと:bool、int(16進/8進)、時間(桁あふれを含む)、tristate、ポートの集合、リスト、引用符付き | TestSetAllKeys, TestParseLevelFormats, TestParseDuration, TestParsePortSet, TestRelaxTransparencyTristate | |
 | P3 | コマンド | `-h`、`-v`、`-x` | TestRunHelp, TestRunVersion, TestRunExpire, TestRunExpireMissingRoot | |
 | P4 | ローカルページ | トップ、config、status、flush、reload、メソッド、よその Host、クロスサイトの POST、`disableLocalInterface` | TestProxyLocalInterface, TestStatusPage, TestProxyFlushEndpoint, TestProxyReloadEndpoint, TestLocalInterfaceRefuses*, TestScenarioLocalPages | |
 | P5 | シグナル | SIGUSR1/SIGUSR2、SIGTERM と SIGINT(待ち受けをやめ、終了コード 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |

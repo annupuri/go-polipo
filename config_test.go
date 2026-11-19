@@ -569,8 +569,14 @@ func TestParseDuration(t *testing.T) {
 		{"", 0, false},
 		{"30", 30 * time.Second, false}, // No suffix defaults to seconds
 		{"invalid", 0, true},
-		{"30x", 0, true}, // Unknown unit
-		{"d", 0, true},   // No number
+		{"30x", 0, true},                            // Unknown unit
+		{"d", 0, true},                              // No number
+		{"1h30", time.Hour + 30*time.Second, false}, // Trailing number is seconds, as in Polipo
+		{"12h1d", 36 * time.Hour, false},            // Units in any order, as in Polipo
+		{"106751d", 106751 * 24 * time.Hour, false}, // Just fits in a time.Duration
+		{"106752d", 0, true},                        // Would overflow into a negative duration
+		{"106751d23h48m", 0, true},                  // Overflow from the sum, not one term
+		{"9223372036854775807", 0, true},            // Bare seconds overflow too
 	}
 
 	for _, tt := range tests {

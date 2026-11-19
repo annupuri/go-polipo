@@ -10,6 +10,9 @@ Unreleased: go-polipo 2.0.1:
     value (-0x10) is accepted, and a sign after the 0x prefix (0x-1),
     which 2.0.0 accepted by mistake, is an error.  Go's 0b, 0o and _
     forms are accepted too.
+  * A time setting too long for Go's time.Duration (over about 292
+    years, e.g. diskCacheUnlinkTime = 200000d) is now an error.  2.0.0
+    wrapped it around to a negative duration.
 
 18 November 2026: go-polipo 2.0.0:
 
