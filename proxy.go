@@ -187,7 +187,7 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 	// entry forbids being served stale (see canServeStale).
 	if ph.config.RelaxTransparency >= TristateMaybe {
 		if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
-			defer staleResp.Body.Close()
+			defer func() { _ = staleResp.Body.Close() }()
 			if !stale || canServeStale(staleResp) {
 				w.Header().Set(headerWarning, `111 go-polipo "Revalidation failed"`)
 				copyHeader(w.Header(), staleResp.Header)
@@ -393,7 +393,7 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 	if cached == nil {
 		return fmt.Errorf("304 Not Modified for %s, but no cached entry to revalidate", req.URL)
 	}
-	defer cached.Body.Close()
+	defer func() { _ = cached.Body.Close() }()
 	body, err := io.ReadAll(cached.Body)
 	if err != nil {
 		return fmt.Errorf("reading cached body for %s: %w", req.URL, err)
@@ -456,7 +456,7 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 	if cached == nil {
 		return
 	}
-	defer cached.Body.Close()
+	defer func() { _ = cached.Body.Close() }()
 	if !stale {
 		// A fresh hit is served straight from disk by handleForward and never
 		// reaches rewrite; this would only happen for a request Lookup
@@ -586,12 +586,12 @@ type idleTimeoutConn struct {
 var _ net.Conn = (*idleTimeoutConn)(nil)
 
 func (c *idleTimeoutConn) Read(p []byte) (int, error) {
-	c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
+	_ = c.Conn.SetReadDeadline(time.Now().Add(c.timeout))
 	return c.Conn.Read(p)
 }
 
 func (c *idleTimeoutConn) Write(p []byte) (int, error) {
-	c.Conn.SetDeadline(time.Now().Add(c.timeout))
+	_ = c.Conn.SetDeadline(time.Now().Add(c.timeout))
 	return c.Conn.Write(p)
 }
 
@@ -1040,7 +1040,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	// Dial the target, or have the HTTP parent proxy do it (as Polipo did);
 	// either may go through the SOCKS parent. parentEarly is what the parent
@@ -1064,7 +1064,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
-	defer destConn.Close()
+	defer func() { _ = destConn.Close() }()
 
 	// A client may send the first bytes of the tunnel (a TLS ClientHello,
 	// say) right behind the CONNECT headers without waiting for the 200.
@@ -1125,14 +1125,14 @@ func tunnel(a, b net.Conn) {
 		defer wg.Done()
 		io.Copy(a, b)
 		if hc, ok := a.(halfCloser); ok {
-			hc.CloseWrite()
+			_ = hc.CloseWrite()
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		io.Copy(b, a)
 		if hc, ok := b.(halfCloser); ok {
-			hc.CloseWrite()
+			_ = hc.CloseWrite()
 		}
 	}()
 	wg.Wait()
@@ -1162,8 +1162,8 @@ func tunnelWithIdleTimeout(a, b net.Conn, timeout time.Duration) bool {
 				idle := time.Since(start) - time.Duration(last.Load())
 				if idle >= timeout {
 					expired.Store(true)
-					a.Close()
-					b.Close()
+					_ = a.Close()
+					_ = b.Close()
 					return
 				}
 				t.Reset(timeout - idle)
@@ -1235,7 +1235,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 
 	// A fresh cache hit is served straight from disk.
 	if cachedResp := ph.cacheManager.Lookup(req); cachedResp != nil {
-		defer cachedResp.Body.Close()
+		defer func() { _ = cachedResp.Body.Close() }()
 		ph.serveCached(w, req, cachedResp)
 		return
 	}
@@ -1246,7 +1246,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// through to the network.
 	if ph.config.RelaxTransparency >= TristateTrue {
 		if staleResp, stale := ph.cacheManager.LookupStale(req); staleResp != nil {
-			defer staleResp.Body.Close()
+			defer func() { _ = staleResp.Body.Close() }()
 			if !stale || canServeStale(staleResp) {
 				if stale {
 					w.Header().Set(headerWarning, `110 go-polipo "Object is stale"`)
@@ -1314,7 +1314,7 @@ func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Disconnected operation and object not in cache", http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if stale && !canServeStale(resp) {
 		http.Error(w, "Disconnected operation and object must be revalidated", http.StatusGatewayTimeout)
 		return

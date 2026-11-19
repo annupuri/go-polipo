@@ -20,13 +20,11 @@ linters:
 
   exclusions:
     rules:
-      # Errors go-polipo ignores on purpose: closing, deadlines, writes to a
-      # client that may be gone, removing a file that may be gone, and
-      # copying a body or tunnel until either side stops. Reviewed one by
-      # one on 2026-11-09; none needs handling. Mark them with `_ =` and
-      # shrink this list instead of adding to it.
-      - linters: [errcheck]
-        text: "Error return value of `[^`]*\\.(Close|CloseWrite|SetDeadline|SetReadDeadline)` is not checked"
+      # Errors go-polipo ignores on purpose: writes to a client that may be
+      # gone, removing a file that may be gone, and copying a body or tunnel
+      # until either side stops. Reviewed one by one on 2026-11-09; none
+      # needs handling. Closes and deadlines are marked with `_ =` in the
+      # code instead; do the same for new cases rather than adding here.
       - linters: [errcheck]
         text: "Error return value of `(fmt\\.Fprint|fmt\\.Fprintf|fmt\\.Fprintln|io\\.Copy|os\\.Remove|filepath\\.WalkDir|clientConn\\.Write|w\\.Write)` is not checked"
       # Tests ignore errors from their own fixtures; a failure there shows
