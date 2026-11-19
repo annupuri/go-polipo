@@ -44,7 +44,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | R6 | リクエストの Cache-Control | なし、no-cache、no-store、max-age(0/n/不正)、max-stale(なし/値なし/n/不正)、min-fresh、only-if-cached、複数行 | TestRequestCacheControlBoundsFreshness, TestLookupReadsEveryRequestCacheControlLine, TestStoreSkipsRequestNoStore, TestOnlyIfCached, TestReloadRevalidatesFreshEntry | |
 | R7 | Pragma | Cache-Control の有無と `no-cache` | TestPragmaNoCache | |
 | R8 | クライアント自身の条件付きヘッダー | If-None-Match、If-Modified-Since、キャッシュの有無 | TestClientConditionalHeaderNotOverridden, TestClient304PassesThroughWithoutCachedEntry | |
-| R9 | Range | 単一、終端なし、末尾指定、複数、満たせない、不正、If-Range の一致/不一致 | TestParseByteRange, TestRangeServedFromCache, TestRangeUnsatisfiableFromCache, TestRangeIgnoredWhenNotApplicable, TestRangeIfRangeMatchServesPartial, TestRangeIfRangeMismatchServesWhole | |
+| R9 | Range | 単一、終端なし、末尾指定、複数、満たせない、不正、If-Range の一致/不一致、応えたあとキャッシュの本文がきちんと閉じられること | TestParseByteRange, TestWriteRangeKeepsOriginalCloser, TestRangeServedFromCache, TestRangeUnsatisfiableFromCache, TestRangeIgnoredWhenNotApplicable, TestRangeIfRangeMatchServesPartial, TestRangeIfRangeMismatchServesWhole | |
 | R10 | ホップバイホップと転送系のヘッダー | エンドツーエンドのヘッダーを指す Connection、X-Forwarded-*、Forwarded、`censoredHeaders`、Referer(`censorReferer`) | TestForwardedRequestHeaders, TestConditionalHeadersSurviveConnection, TestCensoredHeadersStrippedFromRequest, TestCensorReferer* | |
 | R11 | Via、Max-Forwards | Via のループ、`disableVia`、Max-Forwards 0/n/不正 | TestVia, TestViaLoopDetected, TestMaxForwards | |
 | R12 | 認証付きリクエスト | Authorization あり | TestStoreSkipsAuthenticated | |

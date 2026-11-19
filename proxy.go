@@ -1386,8 +1386,13 @@ func (ph *ProxyHandler) writeRange(w http.ResponseWriter, req *http.Request, res
 	}
 	// Restore resp.Body so the normal-path fallback (any return false below)
 	// can still read it from the start, exactly as if writeRange had never
-	// been called.
-	resp.Body = io.NopCloser(bytes.NewReader(body))
+	// been called. Closing it must still close the original body: callers
+	// close whatever resp.Body is when they return, and a disk entry's body
+	// holds the cache file open.
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{bytes.NewReader(body), resp.Body}
 
 	start, end, result := parseByteRange(rangeHeader, int64(len(body)))
 	switch result {

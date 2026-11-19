@@ -2497,6 +2497,37 @@ func TestRangeIgnoredForHead(t *testing.T) {
 	}
 }
 
+// closeTracker is a body that records whether it was closed.
+type closeTracker struct {
+	io.Reader
+	closed bool
+}
+
+func (c *closeTracker) Close() error {
+	c.closed = true
+	return nil
+}
+
+// writeRange reads the body to slice it and puts a copy in resp.Body.
+// Callers close whatever resp.Body is when they return, so closing the copy
+// must close the original, which for a disk entry holds the cache file open.
+func TestWriteRangeKeepsOriginalCloser(t *testing.T) {
+	for _, rangeHeader := range []string{"bytes=2-4", "bytes=1-2,5-6"} { // served; left to the normal path
+		t.Run(rangeHeader, func(t *testing.T) {
+			ph := NewProxyHandler(newTestConfig(), nil, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+			orig := &closeTracker{Reader: strings.NewReader("0123456789")}
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: orig, ContentLength: 10}
+
+			ph.writeRange(httptest.NewRecorder(), rangeRequest("http://example.com/", rangeHeader, ""), resp)
+			_ = resp.Body.Close()
+
+			if !orig.closed {
+				t.Error("closing resp.Body after writeRange did not close the original body")
+			}
+		})
+	}
+}
+
 func TestRangeServedViaProxyOffline(t *testing.T) {
 	const body = "0123456789"
 	cfg := newTestConfig()
