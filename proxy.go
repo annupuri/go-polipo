@@ -189,7 +189,7 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 		if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
 			defer staleResp.Body.Close()
 			if !stale || canServeStale(staleResp) {
-				w.Header().Set("Warning", `111 go-polipo "Revalidation failed"`)
+				w.Header().Set(headerWarning, `111 go-polipo "Revalidation failed"`)
 				copyHeader(w.Header(), staleResp.Header)
 				w.WriteHeader(staleResp.StatusCode)
 				n, _ := io.Copy(w, staleResp.Body)
@@ -290,15 +290,15 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	// did (server.c). Done first, so that a Date-less 304 refreshes the
 	// stored Date rather than leaving the old one, which would make the
 	// revalidated entry stale at once.
-	if len(resp.Header.Values("Date")) == 0 {
-		resp.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
+	if len(resp.Header.Values(headerDate)) == 0 {
+		resp.Header.Set(headerDate, time.Now().UTC().Format(http.TimeFormat))
 	}
 	// Via goes on before anything is stored, so a cache hit carries the
 	// same Via as the response first passed on. A 304 merged into a stored
 	// entry gets it only if it brought a Via of its own, which replaces
 	// the stored one; otherwise the stored Via, already naming this
 	// instance, stays as it is.
-	needVia := len(resp.Header.Values("Via")) > 0
+	needVia := len(resp.Header.Values(headerVia)) > 0
 	// A 304 for a request the client made conditional itself answers the
 	// client's validators, not ours (addConditionalHeaders leaves those
 	// requests alone), so it goes back to the client as-is; Store ignores it.
@@ -337,14 +337,14 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 // disableVia is set.
 func (ph *ProxyHandler) addVia(h http.Header, major, minor int) {
 	if !ph.config.DisableVia {
-		h.Add("Via", fmt.Sprintf("%d.%d %s", major, minor, ph.viaName))
+		h.Add(headerVia, fmt.Sprintf("%d.%d %s", major, minor, ph.viaName))
 	}
 }
 
 // viaNames reports whether any entry of h's Via names name as the
 // intermediary that received it - Polipo's checkVia (http_parse.c).
 func viaNames(h http.Header, name string) bool {
-	for _, line := range h.Values("Via") {
+	for _, line := range h.Values(headerVia) {
 		for _, entry := range strings.Split(line, ",") {
 			if fields := strings.Fields(entry); len(fields) >= 2 && strings.EqualFold(fields[1], name) {
 				return true
@@ -368,11 +368,11 @@ func isSafeMethod(method string) bool {
 // response (RFC 9111 section 3.2): they describe the stored body, which the
 // 304 says has not changed and does not itself carry.
 var bodyHeaders = map[string]bool{
-	"Content-Encoding":  true,
-	"Content-Length":    true,
-	"Content-Range":     true,
-	"Content-Type":      true,
-	"Transfer-Encoding": true,
+	headerContentEncoding:  true,
+	headerContentLength:    true,
+	headerContentRange:     true,
+	headerContentType:      true,
+	headerTransferEncoding: true,
 }
 
 // reviveFromCache turns a 304 Not Modified response, received for a
@@ -402,7 +402,7 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 	// The stored Age described the response as first received; only the
 	// 304's own Age, if any, says how old the revalidated one is.
 	merged := cached.Header.Clone()
-	merged.Del("Age")
+	merged.Del(headerAge)
 	for name, v := range resp.Header {
 		if !bodyHeaders[name] {
 			merged[name] = v
@@ -430,7 +430,7 @@ type requestTimeKey struct{}
 // hasConditionalHeaders reports whether req carries a validator, i.e.
 // whether the origin may answer it with a 304.
 func hasConditionalHeaders(req *http.Request) bool {
-	return req.Header.Get("If-None-Match") != "" || req.Header.Get("If-Modified-Since") != ""
+	return req.Header.Get(headerIfNoneMatch) != "" || req.Header.Get(headerIfModifiedSince) != ""
 }
 
 // addConditionalHeaders is part of rewrite: when there is a stale cache
@@ -465,20 +465,20 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 		return
 	}
 
-	etag := cached.Header.Get("ETag")
+	etag := cached.Header.Get(headerETag)
 	if responseVaries(cached) {
 		if etag == "" || ph.config.DontTrustVaryETag >= TristateTrue {
 			return
 		}
-		outReq.Header.Set("If-None-Match", etag)
+		outReq.Header.Set(headerIfNoneMatch, etag)
 		return
 	}
 
 	if etag != "" {
-		outReq.Header.Set("If-None-Match", etag)
+		outReq.Header.Set(headerIfNoneMatch, etag)
 	}
-	if lm := cached.Header.Get("Last-Modified"); lm != "" {
-		outReq.Header.Set("If-Modified-Since", lm)
+	if lm := cached.Header.Get(headerLastModified); lm != "" {
+		outReq.Header.Set(headerIfModifiedSince, lm)
 	}
 }
 
@@ -489,17 +489,17 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 // compare that only recognises a literal "http://" scheme), the host
 // comparison here goes through net/url, so it also covers https:// referrers.
 func (ph *ProxyHandler) censorReferer(outReq *http.Request) {
-	referer := outReq.Header.Get("Referer")
+	referer := outReq.Header.Get(headerReferer)
 	if referer == "" {
 		return
 	}
 	switch ph.config.CensorReferer {
 	case TristateTrue:
-		outReq.Header.Del("Referer")
+		outReq.Header.Del(headerReferer)
 	case TristateMaybe:
 		refURL, err := url.Parse(referer)
 		if err != nil || !strings.EqualFold(refURL.Host, outReq.URL.Host) {
-			outReq.Header.Del("Referer")
+			outReq.Header.Del(headerReferer)
 		}
 	}
 }
@@ -646,7 +646,7 @@ var _ http.RoundTripper = (*parentProxyAuthTransport)(nil)
 
 func (t *parentProxyAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set("Proxy-Authorization", t.header)
+	req.Header.Set(headerProxyAuthorization, t.header)
 	return t.RoundTripper.RoundTrip(req)
 }
 
@@ -669,10 +669,10 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
 		if originForm {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
+			w.Header().Set(headerWWWAuthenticate, fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
 			http.Error(w, "Authentication Required", http.StatusUnauthorized)
 		} else {
-			w.Header().Set("Proxy-Authenticate", fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
+			w.Header().Set(headerProxyAuthenticate, fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
 			http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
 		}
 		return
@@ -739,7 +739,7 @@ func targetURL(req *http.Request) string {
 func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 	if path == "/polipo" || path == "/polipo/" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set(headerContentType, "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<html><head><title>go-polipo</title></head>
 <body>
 <h1>go-polipo Local Interface</h1>
@@ -760,7 +760,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 
 	if path == "/polipo/flush" {
 		if req.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
+			w.Header().Set(headerAllow, http.MethodPost)
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -772,7 +772,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 		}
 		logf(ph.config.LogLevel, LogInfo, "Cache flush: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale), freed %d bytes",
 			stats.Scanned, stats.Removed, stats.RemovedForSize, stats.Freed)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set(headerContentType, "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<html><head><title>go-polipo Cache Flush</title></head>
 <body>
 <h1>Cache Flush Complete</h1>
@@ -788,7 +788,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 
 	if path == "/polipo/reload" {
 		if req.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
+			w.Header().Set(headerAllow, http.MethodPost)
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -803,14 +803,14 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if path == "/polipo/status" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set(headerContentType, "text/html; charset=utf-8")
+		w.Header().Set(headerCacheControl, "no-store")
 		ph.writeStatus(w)
 		return
 	}
 
 	if path == "/polipo/config" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set(headerContentType, "text/html; charset=utf-8")
 		fmt.Fprint(w, `<html><head><title>go-polipo Configuration</title></head>
 <body>
 <h1>go-polipo Configuration</h1>
@@ -946,9 +946,9 @@ func (ph *ProxyHandler) isAuthorized(req *http.Request) bool {
 		return true
 	}
 
-	headerName := "Proxy-Authorization"
+	headerName := headerProxyAuthorization
 	if isOriginForm(req) {
-		headerName = "Authorization"
+		headerName = headerAuthorization
 	}
 
 	const prefix = "Basic "
@@ -1249,7 +1249,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 			defer staleResp.Body.Close()
 			if !stale || canServeStale(staleResp) {
 				if stale {
-					w.Header().Set("Warning", `110 go-polipo "Object is stale"`)
+					w.Header().Set(headerWarning, `110 go-polipo "Object is stale"`)
 				}
 				ph.serveCached(w, req, staleResp)
 				return
@@ -1285,20 +1285,20 @@ func (ph *ProxyHandler) answerMaxForwards(w http.ResponseWriter, req *http.Reque
 	if req.Method != http.MethodTrace && req.Method != http.MethodOptions {
 		return false
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(req.Header.Get("Max-Forwards")))
+	n, err := strconv.Atoi(strings.TrimSpace(req.Header.Get(headerMaxForwards)))
 	if err != nil || n < 0 {
 		return false
 	}
 	if n > 0 {
-		req.Header.Set("Max-Forwards", strconv.Itoa(n-1))
+		req.Header.Set(headerMaxForwards, strconv.Itoa(n-1))
 		return false
 	}
 	if req.Method == http.MethodOptions {
-		w.Header().Set("Content-Length", "0")
+		w.Header().Set(headerContentLength, "0")
 		w.WriteHeader(http.StatusOK)
 		return true
 	}
-	w.Header().Set("Allow", "OPTIONS")
+	w.Header().Set(headerAllow, "OPTIONS")
 	http.Error(w, "TRACE is not answered by the proxy", http.StatusMethodNotAllowed)
 	return true
 }
@@ -1320,7 +1320,7 @@ func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if stale {
-		w.Header().Set("Warning", `112 go-polipo "Disconnected operation"`)
+		w.Header().Set(headerWarning, `112 go-polipo "Disconnected operation"`)
 	}
 	ph.serveCached(w, req, resp)
 }
@@ -1349,7 +1349,7 @@ func (ph *ProxyHandler) serveCached(rw http.ResponseWriter, req *http.Request, r
 		ph.stats.cacheHitBytes.Add(w.n)
 	}()
 	copyHeader(w.Header(), resp.Header)
-	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set(headerAcceptRanges, "bytes")
 
 	if ph.writeRange(w, req, resp) {
 		return
@@ -1372,11 +1372,11 @@ func (ph *ProxyHandler) writeRange(w http.ResponseWriter, req *http.Request, res
 	if req.Method != http.MethodGet {
 		return false // HEAD+Range and others are left to the normal path
 	}
-	rangeHeader := req.Header.Get("Range")
+	rangeHeader := req.Header.Get(headerRange)
 	if rangeHeader == "" {
 		return false
 	}
-	if ifRange := req.Header.Get("If-Range"); ifRange != "" && !ifRangeMatches(ifRange, resp.Header) {
+	if ifRange := req.Header.Get(headerIfRange); ifRange != "" && !ifRangeMatches(ifRange, resp.Header) {
 		return false
 	}
 
@@ -1394,13 +1394,13 @@ func (ph *ProxyHandler) writeRange(w http.ResponseWriter, req *http.Request, res
 	case rangeNotApplicable:
 		return false
 	case rangeUnsatisfiable:
-		w.Header().Del("Content-Length")
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", len(body)))
+		w.Header().Del(headerContentLength)
+		w.Header().Set(headerContentRange, fmt.Sprintf("bytes */%d", len(body)))
 		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 		return true
 	default: // rangeSatisfiable
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(body)))
-		w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+		w.Header().Set(headerContentRange, fmt.Sprintf("bytes %d-%d/%d", start, end, len(body)))
+		w.Header().Set(headerContentLength, strconv.FormatInt(end-start+1, 10))
 		w.WriteHeader(http.StatusPartialContent)
 		w.Write(body[start : end+1])
 		return true
@@ -1491,14 +1491,14 @@ func ifRangeMatches(ifRange string, header http.Header) bool {
 	case strings.HasPrefix(ifRange, "W/"):
 		return false // weak validators never satisfy If-Range
 	case strings.HasPrefix(ifRange, `"`):
-		etag := header.Get("ETag")
+		etag := header.Get(headerETag)
 		return etag != "" && !strings.HasPrefix(etag, "W/") && etag == ifRange
 	default:
 		t, err := http.ParseTime(ifRange)
 		if err != nil {
 			return false
 		}
-		lm, err := http.ParseTime(header.Get("Last-Modified"))
+		lm, err := http.ParseTime(header.Get(headerLastModified))
 		if err != nil {
 			return false
 		}
