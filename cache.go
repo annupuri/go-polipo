@@ -114,7 +114,7 @@ func (cm *CacheManager) isDiskCacheDisabled() bool {
 // Proxy-Authorization, so treating it the same here would make almost
 // nothing cacheable.
 func isRequestAuthenticated(req *http.Request) bool {
-	return req.Header.Get("Authorization") != ""
+	return req.Header.Get(headerAuthorization) != ""
 }
 
 // responseVaries reports whether resp's body depends on request headers (a
@@ -129,7 +129,7 @@ func isRequestAuthenticated(req *http.Request) bool {
 // reusing a Vary response; forced revalidation is how Polipo satisfies that
 // without actually keying the cache on those headers.)
 func responseVaries(resp *http.Response) bool {
-	return strings.TrimSpace(resp.Header.Get("Vary")) != ""
+	return strings.TrimSpace(resp.Header.Get(headerVary)) != ""
 }
 
 // responseHasNoCache reports whether resp carries a Cache-Control: no-cache
@@ -153,10 +153,10 @@ func responseHasNoCache(resp *http.Response) bool {
 // honoured it, so go-polipo keeps doing so. In a response its meaning was
 // never specified; Polipo honoured it there as well, and so does go-polipo.
 func hasPragmaNoCache(h http.Header) bool {
-	if len(h.Values("Cache-Control")) > 0 {
+	if len(h.Values(headerCacheControl)) > 0 {
 		return false
 	}
-	pragma := strings.ToLower(strings.Join(h.Values("Pragma"), ","))
+	pragma := strings.ToLower(strings.Join(h.Values(headerPragma), ","))
 	return strings.Contains(pragma, "no-cache")
 }
 
@@ -168,7 +168,7 @@ type cacheControl map[string]string
 // parseCacheControl reads every Cache-Control line in h.
 func parseCacheControl(h http.Header) cacheControl {
 	cc := make(cacheControl)
-	for _, line := range h.Values("Cache-Control") {
+	for _, line := range h.Values(headerCacheControl) {
 		for _, part := range strings.Split(line, ",") {
 			name, value, _ := strings.Cut(strings.TrimSpace(part), "=")
 			if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
@@ -407,7 +407,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	}
 
 	// Verify X-Polipo-Location to prevent hash collisions
-	loc := resp.Header.Get("X-Polipo-Location")
+	loc := resp.Header.Get(headerPolipoLocation)
 	if loc != req.URL.String() {
 		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
 		resp.Body.Close()
@@ -431,10 +431,10 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	stale = cm.isStaleFor(req, resp, birth)
 
 	// Clean up X-Polipo headers before returning
-	resp.Header.Del("X-Polipo-Location")
-	resp.Header.Del("X-Polipo-Date")
-	resp.Header.Del("X-Polipo-Access")
-	resp.Header.Del("X-Polipo-Body-Offset")
+	resp.Header.Del(headerPolipoLocation)
+	resp.Header.Del(headerPolipoDate)
+	resp.Header.Del(headerPolipoAccess)
+	resp.Header.Del(headerPolipoBodyOffset)
 
 	// Copy the entry into the memory cache, so that later hits skip the
 	// disk - otherwise the memory cache would only ever hold what was
@@ -454,7 +454,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 // Polipo (client.c) sent it too, though only once it reached a second.
 func setAge(resp *http.Response, birth time.Time) {
 	age := max(int64(time.Since(birth)/time.Second), 0)
-	resp.Header.Set("Age", strconv.FormatInt(age, 10))
+	resp.Header.Set(headerAge, strconv.FormatInt(age, 10))
 }
 
 // promote copies a disk hit into the memory cache, subject to the same
@@ -519,7 +519,7 @@ const (
 // responseDate returns the response's Date, or the current time when the header
 // is missing or unparseable.
 func responseDate(resp *http.Response) time.Time {
-	if d, err := http.ParseTime(resp.Header.Get("Date")); err == nil {
+	if d, err := http.ParseTime(resp.Header.Get(headerDate)); err == nil {
 		return d
 	}
 	return time.Now()
@@ -539,10 +539,10 @@ const maxAgeValue = 1 << 31
 // stored it on disk as X-Polipo-Date.
 func responseBirth(h http.Header, requestTime time.Time) time.Time {
 	birth := requestTime
-	if age, ok := parseDeltaSeconds(strings.TrimSpace(h.Get("Age"))); ok {
+	if age, ok := parseDeltaSeconds(strings.TrimSpace(h.Get(headerAge))); ok {
 		birth = birth.Add(-age)
 	}
-	if d, err := http.ParseTime(h.Get("Date")); err == nil && d.Before(birth) {
+	if d, err := http.ParseTime(h.Get(headerDate)); err == nil && d.Before(birth) {
 		birth = d
 	}
 	return birth
@@ -554,7 +554,7 @@ func responseBirth(h http.Header, requestTime time.Time) time.Time {
 // Date, when earlier, still wins.
 func storedBirth(resp *http.Response) time.Time {
 	date := responseDate(resp)
-	if t, err := http.ParseTime(resp.Header.Get("X-Polipo-Date")); err == nil && t.Before(date) {
+	if t, err := http.ParseTime(resp.Header.Get(headerPolipoDate)); err == nil && t.Before(date) {
 		return t
 	}
 	return date
@@ -584,7 +584,7 @@ func (cc cacheControl) freshnessDirective() (life time.Duration, ok bool) {
 // gave it maxNoModifiedAge, 23 minutes, which left pages generated afresh
 // on every request served stale for that long.
 func heuristicFreshnessLifetime(resp *http.Response, date time.Time) time.Duration {
-	lm, err := http.ParseTime(resp.Header.Get("Last-Modified"))
+	lm, err := http.ParseTime(resp.Header.Get(headerLastModified))
 	if err != nil {
 		return 0
 	}
@@ -608,10 +608,10 @@ func freshnessLifetime(resp *http.Response, birth time.Time) time.Duration {
 		return life
 	}
 	date := birth
-	if d, err := http.ParseTime(resp.Header.Get("Date")); err == nil {
+	if d, err := http.ParseTime(resp.Header.Get(headerDate)); err == nil {
 		date = d
 	}
-	if expiresStr := resp.Header.Get("Expires"); expiresStr != "" {
+	if expiresStr := resp.Header.Get(headerExpires); expiresStr != "" {
 		t, err := http.ParseTime(expiresStr)
 		if err != nil {
 			return 0 // an invalid Expires (e.g. "0") means "already expired" (RFC 9111 5.3)
@@ -704,7 +704,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	// A Set-Cookie response is meant for a single client; a cached copy would be
 	// replayed to everyone who later requests the same URL. Polipo cached these,
 	// so this is opt-out via dontCacheCookies.
-	if cm.config.DontCacheCookies && len(resp.Header["Set-Cookie"]) > 0 {
+	if cm.config.DontCacheCookies && len(resp.Header[headerSetCookie]) > 0 {
 		return
 	}
 
@@ -808,9 +808,9 @@ func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response, b
 	clone := *resp
 	clone.Body = pr
 	clone.Header = resp.Header.Clone()
-	clone.Header.Set("X-Polipo-Location", req.URL.String())
-	clone.Header.Set("X-Polipo-Date", birth.UTC().Format(http.TimeFormat))
-	clone.Header.Set("X-Polipo-Access", time.Now().UTC().Format(http.TimeFormat))
+	clone.Header.Set(headerPolipoLocation, req.URL.String())
+	clone.Header.Set(headerPolipoDate, birth.UTC().Format(http.TimeFormat))
+	clone.Header.Set(headerPolipoAccess, time.Now().UTC().Format(http.TimeFormat))
 
 	w := &diskWrite{path: path, tmp: file.Name(), pw: pw, done: make(chan error, 1)}
 	go func() {
@@ -1056,7 +1056,7 @@ func (cm *CacheManager) judgeExpire(path string, info fs.FileInfo) expireReason 
 
 	// Absolute age cap based on last recorded access (fall back to mtime).
 	lastAccess := info.ModTime()
-	if a := resp.Header.Get("X-Polipo-Access"); a != "" {
+	if a := resp.Header.Get(headerPolipoAccess); a != "" {
 		if t, err := http.ParseTime(a); err == nil {
 			lastAccess = t
 		}
