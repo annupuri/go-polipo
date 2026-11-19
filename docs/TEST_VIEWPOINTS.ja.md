@@ -78,7 +78,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | S1 | エントリ | なし、メモリの新鮮なヒット、ディスクの新鮮なヒット、古い、古いが古いまま返せない、Vary/no-cache のエントリ | TestCacheStoreAndLookup, TestDiskHitPromotedToMemory, TestMemoryCacheRespectsFreshnessAndVary, TestVaryEntryNeverServedWithoutRevalidation, TestScenarioCacheLifecycle | |
 | S2 | 再検証 | 304 でヘッダーを合成、200 で置き換え、エントリなしの 304 | TestConditionalRevalidation200ReplacesCache, TestRevalidation304UpdatesStoredHeaders, TestRevalidation304WithoutCachedEntryIsAnError | |
 | S3 | 階層 | ディスクなし、メモリなし、両方なし、追い出し | TestDiskCacheDisabled, TestMemoryCacheDisabled, TestMemoryCacheEntriesEviction, TestMemoryCacheIndependentOfNoDiskCache | |
-| S4 | ディスク上のファイル | 壊れている、一時ファイル(書き込み中/放置)、`diskCacheUnlinkTime` を過ぎて未使用、大きくて未使用(`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries | |
+| S4 | ディスク上のファイル | 壊れている、一時ファイル(書き込み中/放置)、`diskCacheUnlinkTime` を過ぎて未使用、保存は古いが最近使った(ディスクから/メモリから。1時間以内は書き換えない)、大きくて未使用(`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries, TestCacheHitRefreshesAccess | |
 | S5 | ディスクのエラー | キャッシュディレクトリに書けない、エントリが読めない、ディスクがいっぱい | TestScenarioDiskErrors | ディスクがいっぱい(テストで起こす移植性のある方法がない) |
 | S6 | 無効化 | 安全でないメソッドがその URL を無効にする | TestUnsafeRequestInvalidatesCache | |
 
