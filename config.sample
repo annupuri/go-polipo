@@ -39,8 +39,8 @@
 
 # diskCacheRoot = "/var/cache/polipo/"
 
-# Disable the on-disk cache entirely (memory-only proxying).  Setting
-# diskCacheRoot = "" has the same effect.
+# Disable the on-disk cache entirely (memory-only proxying).  An empty
+# diskCacheRoot ("") has the same effect.
 # noDiskCache = false
 
 # Keep responses carrying a Set-Cookie header out of the disk cache.  On by
@@ -66,7 +66,7 @@
 # place would leave a corrupt entry (a stored Content-Length past the actual
 # end of the file) that gets served as if complete.  Deleting instead gets
 # the same "reclaim space early" effect without that risk.
-# diskCacheTruncateSize = 0 disables this early removal.
+# Setting diskCacheTruncateSize to 0 disables this early removal.
 # diskCacheTruncateTime = 4d12h  # 4.5 days, Polipo's default
 # diskCacheTruncateSize = 1048576
 #
