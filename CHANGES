@@ -13,6 +13,8 @@ Unreleased: go-polipo 2.0.1:
   * A time setting too long for Go's time.Duration (over about 292
     years, e.g. diskCacheUnlinkTime = 200000d) is now an error.  2.0.0
     wrapped it around to a negative duration.
+  * "polipo -v" and the /polipo/config page list the variables sorted by
+    name, as Polipo did, instead of in declaration order.
 
 18 November 2026: go-polipo 2.0.0:
 

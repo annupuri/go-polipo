@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -438,6 +439,28 @@ func TestSetAllKeys(t *testing.T) {
 	fails(keyCensorReferer, "2")
 	fails(keyDontTrustVaryETag, "yes")
 	fails(keyDontTrustVaryETag, "2")
+}
+
+// Polipo listed its variables sorted by strcmp, on -v and on the config
+// page alike; Entries feeds both.
+func TestEntriesSortedByName(t *testing.T) {
+	entries := NewDefaultConfig().Entries()
+	if !slices.IsSortedFunc(entries, compareEntryNames) {
+		var names []string
+		for _, e := range entries {
+			names = append(names, string(e.Name))
+		}
+		t.Errorf("Entries() not sorted by name: %v", names)
+	}
+	// Byte order, as strcmp: an uppercase letter sorts before any
+	// lowercase one.
+	index := func(key configKey) int {
+		return slices.IndexFunc(entries, func(e ConfigEntry) bool { return e.Name == key })
+	}
+	local, file := index(keyForbidLocalDestinations), index(keyForbiddenFile)
+	if local < 0 || file < 0 || local > file {
+		t.Errorf("forbidLocalDestinations at %d, forbiddenFile at %d; want the former first", local, file)
+	}
 }
 
 func TestPasswordEntriesAreRedacted(t *testing.T) {

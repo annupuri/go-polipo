@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -309,9 +310,12 @@ type ConfigEntry struct {
 
 // Entries returns every configuration variable, formatted for display. It is
 // the single source of truth for both the `-v` dump and the /polipo/config
-// page, so the two never drift apart.
+// page, so the two never drift apart. They are sorted by name in byte
+// order, as Polipo's declareConfigVariable kept them (strcmp, config.c),
+// so uppercase sorts before lowercase: forbidLocalDestinations comes
+// before forbiddenFile.
 func (c *Config) Entries() []ConfigEntry {
-	return []ConfigEntry{
+	entries := []ConfigEntry{
 		{keyProxyAddress, c.ProxyAddress},
 		{keyProxyPort, strconv.Itoa(c.ProxyPort)},
 		{keyDiskCacheRoot, c.DiskCacheRoot},
@@ -354,6 +358,12 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyForbidLocalDestinations, strconv.FormatBool(c.ForbidLocalDestinations)},
 		{keyForbidPrivateDestinations, strconv.FormatBool(c.ForbidPrivateDestinations)},
 	}
+	slices.SortFunc(entries, compareEntryNames)
+	return entries
+}
+
+func compareEntryNames(a, b ConfigEntry) int {
+	return strings.Compare(string(a.Name), string(b.Name))
 }
 
 // redactedPassword is what Polipo's CONFIG_PASSWORD variables show on `-v`
