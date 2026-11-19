@@ -821,18 +821,13 @@ func parseStringList(val string) []string {
 	return res
 }
 
+// parseLevel parses logLevel the way Polipo's strtol(..., 0) did: a 0x
+// prefix means hex, a leading 0 octal, otherwise decimal, with an
+// optional sign. Unlike strtol it rejects trailing text instead of
+// ignoring it, and base 0 also takes Go's 0b, 0o and _ forms.
 func parseLevel(val string) (int, error) {
-	val = strings.TrimSpace(val)
-	if strings.HasPrefix(val, "0x") || strings.HasPrefix(val, "0X") {
-		i, err := strconv.ParseInt(val[2:], 16, 32)
-		return int(i), err
-	}
-	if strings.HasPrefix(val, "0") && len(val) > 1 {
-		i, err := strconv.ParseInt(val[1:], 8, 32)
-		return int(i), err
-	}
-	i, err := strconv.Atoi(val)
-	return i, err
+	i, err := strconv.ParseInt(strings.TrimSpace(val), 0, 32)
+	return int(i), err
 }
 
 // parseDuration parses a polipo time duration like "32d", "12h", "60s".
