@@ -526,11 +526,26 @@ func parsePortSet(val string) (PortSet, error) {
 
 // LoadConfig parses the given configuration file path and applies settings.
 func (c *Config) LoadConfig(filePath string) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // It's fine if the config file doesn't exist (like ~/.polipo)
+	err := forEachLine(filePath, func(lineNum int, line string) error {
+		if err := c.ParseLine(line); err != nil {
+			return fmt.Errorf("config error at %s:%d: %w", filePath, lineNum, err)
 		}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil // It's fine if the config file doesn't exist (like ~/.polipo)
+	}
+	return err
+}
+
+// forEachLine calls fn with each line of the file at path, numbered from 1,
+// and stops at the first error fn returns. The configuration file and the
+// forbidden/uncachable lists are both read this way; what counts as a
+// comment differs between them, so that is left to fn. An error opening
+// the file is returned as is, so a caller can test it with os.IsNotExist.
+func forEachLine(path string, fn func(lineNum int, line string) error) error {
+	file, err := os.Open(path)
+	if err != nil {
 		return err
 	}
 	defer file.Close()
@@ -539,9 +554,8 @@ func (c *Config) LoadConfig(filePath string) error {
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
-		line := scanner.Text()
-		if err := c.ParseLine(line); err != nil {
-			return fmt.Errorf("config error at %s:%d: %w", filePath, lineNum, err)
+		if err := fn(lineNum, scanner.Text()); err != nil {
+			return err
 		}
 	}
 	return scanner.Err()

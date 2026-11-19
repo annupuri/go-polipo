@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -66,17 +65,10 @@ func (f *ForbiddenList) Load(path string, logLevel int) error {
 
 // loadFile reads one domain file into f.
 func (f *ForbiddenList) loadFile(filePath string, logLevel int) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	return forEachLine(filePath, func(_ int, line string) error {
+		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+			return nil
 		}
 
 		// Strip inline comments
@@ -85,7 +77,7 @@ func (f *ForbiddenList) loadFile(filePath string, logLevel int) error {
 		}
 
 		if line == "" {
-			continue
+			return nil
 		}
 
 		// Check if it's a regex: contains '\', '*', or '/'
@@ -104,8 +96,8 @@ func (f *ForbiddenList) loadFile(filePath string, logLevel int) error {
 			// Domain match
 			f.Domains = append(f.Domains, strings.ToLower(line))
 		}
-	}
-	return scanner.Err()
+		return nil
+	})
 }
 
 // MatchTunnel reports whether hostPort ("host:port", as sent in a CONNECT
