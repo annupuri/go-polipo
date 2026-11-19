@@ -419,49 +419,13 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 		return nil, false
 	}
 
-	path, err := cm.CachePath(key)
-	if err != nil {
-		return nil, false
-	}
-
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	// Record the use before opening the file: on Windows os.Chtimes opens
-	// the file without sharing it for reading, so it fails while this
-	// function holds the file open. (Another request reading the same entry
-	// can still make it fail there; the next hit then records the use.)
-	info, err := os.Stat(path)
-	if err != nil {
+	resp, birth := cm.lookupDisk(req, key)
+	if resp == nil {
 		return nil, false
 	}
-	noteAccess(path, info.ModTime())
-
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, false
-	}
-
-	// Parse response from file
-	resp, err = http.ReadResponse(bufio.NewReader(file), req)
-	if err != nil {
-		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
-		file.Close()
-		return nil, false
-	}
-
-	// Verify X-Polipo-Location to prevent hash collisions
-	loc := resp.Header.Get(headerPolipoLocation)
-	if loc != req.URL.String() {
-		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
-		resp.Body.Close()
-		file.Close()
-		return nil, false
-	}
-
-	// resp.Body reads through a bufio.Reader, so closing it would leave the
-	// file itself open until the garbage collector got to it.
-	resp.Body = fileBody{ReadCloser: resp.Body, file: file}
 
 	// A response carrying Vary is always reported stale, regardless of its
 	// actual HTTP freshness: the cache key is the URL alone, so this entry
@@ -471,14 +435,7 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 	// which variant is correct. See responseVaries. A no-cache response is
 	// always stale for the same reason: only the origin may approve its
 	// reuse. See responseHasNoCache.
-	birth := storedBirth(resp)
 	stale = cm.isStaleFor(req, resp, birth)
-
-	// Clean up X-Polipo headers before returning
-	resp.Header.Del(headerPolipoLocation)
-	resp.Header.Del(headerPolipoDate)
-	resp.Header.Del(headerPolipoAccess)
-	resp.Header.Del(headerPolipoBodyOffset)
 
 	// Copy the entry into the memory cache, so that later hits skip the
 	// disk - otherwise the memory cache would only ever hold what was
@@ -491,6 +448,64 @@ func (cm *CacheManager) lookupEntry(req *http.Request) (resp *http.Response, sta
 
 	setAge(resp, birth)
 	return resp, stale
+}
+
+// lookupDisk reads key's entry from the disk cache for req: the response,
+// with go-polipo's X-Polipo-* metadata removed and its body still streaming
+// from the file, and its birth (see storedBirth). It returns a nil response
+// when there is no usable entry. The caller must hold cm.mu for reading.
+func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Response, time.Time) {
+	path, err := cm.CachePath(key)
+	if err != nil {
+		return nil, time.Time{}
+	}
+
+	// Record the use before opening the file: on Windows os.Chtimes opens
+	// the file without sharing it for reading, so it fails while this
+	// function holds the file open. (Another request reading the same entry
+	// can still make it fail there; the next hit then records the use.)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, time.Time{}
+	}
+	noteAccess(path, info.ModTime())
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, time.Time{}
+	}
+
+	// Parse response from file
+	resp, err := http.ReadResponse(bufio.NewReader(file), req)
+	if err != nil {
+		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
+		file.Close()
+		return nil, time.Time{}
+	}
+
+	// Verify X-Polipo-Location to prevent hash collisions
+	loc := resp.Header.Get(headerPolipoLocation)
+	if loc != req.URL.String() {
+		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
+		resp.Body.Close()
+		file.Close()
+		return nil, time.Time{}
+	}
+
+	// resp.Body reads through a bufio.Reader, so closing it would leave the
+	// file itself open until the garbage collector got to it.
+	resp.Body = fileBody{ReadCloser: resp.Body, file: file}
+
+	// The birth is in X-Polipo-Date, so read it before the metadata goes.
+	birth := storedBirth(resp)
+
+	// Clean up X-Polipo headers before returning
+	resp.Header.Del(headerPolipoLocation)
+	resp.Header.Del(headerPolipoDate)
+	resp.Header.Del(headerPolipoAccess)
+	resp.Header.Del(headerPolipoBodyOffset)
+
+	return resp, birth
 }
 
 // noteMemoryAccess records a memory hit's use on the entry's disk copy, if
