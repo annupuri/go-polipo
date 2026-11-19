@@ -185,7 +185,7 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 	// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
 	// error when the origin cannot be reached at all, unless the
 	// entry forbids being served stale (see canServeStale).
-	if ph.config.RelaxTransparency >= 1 {
+	if ph.config.RelaxTransparency >= TristateMaybe {
 		if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
 			defer staleResp.Body.Close()
 			if !stale || canServeStale(staleResp) {
@@ -445,7 +445,7 @@ func hasConditionalHeaders(req *http.Request) bool {
 // narrowly, matching client.c's conditional-request logic: only its ETag is
 // trusted - a bare Last-Modified is not, since it says nothing about which
 // negotiated variant it describes - and only when dontTrustVaryETag hasn't
-// disabled that trust (config.DontTrustVaryETag == 2, "true"). Without a
+// disabled that trust (config.DontTrustVaryETag is TristateTrue). Without a
 // usable ETag there, no conditional headers are added at all, so the
 // request goes through as a full, unconditional fetch instead.
 func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
@@ -467,7 +467,7 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 
 	etag := cached.Header.Get("ETag")
 	if responseVaries(cached) {
-		if etag == "" || ph.config.DontTrustVaryETag >= 2 {
+		if etag == "" || ph.config.DontTrustVaryETag >= TristateTrue {
 			return
 		}
 		outReq.Header.Set("If-None-Match", etag)
@@ -483,10 +483,9 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 }
 
 // censorReferer applies the censorReferer policy to outReq's Referer header,
-// using Polipo's three levels (config.CensorReferer): 0 ("false", the
-// default) leaves it untouched; 1 ("maybe") drops it when it names a
-// different host than the request's own target (cross-origin); 2 ("true")
-// drops it unconditionally. Unlike Polipo's urlSameHost (an ASCII prefix
+// using Polipo's three levels (config.CensorReferer): "false" (the default)
+// leaves it untouched; "maybe" drops it when it names a different host than
+// the request's own target (cross-origin); "true" drops it unconditionally. Unlike Polipo's urlSameHost (an ASCII prefix
 // compare that only recognises a literal "http://" scheme), the host
 // comparison here goes through net/url, so it also covers https:// referrers.
 func (ph *ProxyHandler) censorReferer(outReq *http.Request) {
@@ -495,9 +494,9 @@ func (ph *ProxyHandler) censorReferer(outReq *http.Request) {
 		return
 	}
 	switch ph.config.CensorReferer {
-	case 2: // true
+	case TristateTrue:
 		outReq.Header.Del("Referer")
-	case 1: // maybe
+	case TristateMaybe:
 		refURL, err := url.Parse(referer)
 		if err != nil || !strings.EqualFold(refURL.Host, outReq.URL.Host) {
 			outReq.Header.Del("Referer")
@@ -1245,7 +1244,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// without even attempting to reach the origin - only a true miss, or an
 	// entry that forbids being served stale (see canServeStale), falls
 	// through to the network.
-	if ph.config.RelaxTransparency >= 2 {
+	if ph.config.RelaxTransparency >= TristateTrue {
 		if staleResp, stale := ph.cacheManager.LookupStale(req); staleResp != nil {
 			defer staleResp.Body.Close()
 			if !stale || canServeStale(staleResp) {

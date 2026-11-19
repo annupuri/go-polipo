@@ -66,7 +66,7 @@ func (ph *ProxyHandler) writeStatus(w io.Writer) {
 	switch {
 	case ph.config.ProxyOffline:
 		mode = "off line"
-	case ph.config.RelaxTransparency > 0:
+	case ph.config.RelaxTransparency > TristateFalse:
 		mode = "on line (transparency relaxed)"
 	}
 
