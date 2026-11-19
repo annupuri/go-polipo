@@ -661,15 +661,15 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// A local-form request is addressed to go-polipo itself rather than
-	// forwarded; see serveLocalForm.
-	local := isLocalForm(req)
+	// An origin-form request is addressed to go-polipo itself rather than
+	// forwarded; see serveOriginForm.
+	originForm := isOriginForm(req)
 
 	// 1.4 Proxy authentication (authCredentials)
 	if !ph.isAuthorized(req) {
 		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
-		if local {
+		if originForm {
 			w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
 			http.Error(w, "Authentication Required", http.StatusUnauthorized)
 		} else {
@@ -681,8 +681,8 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// 1.5 Local interface (Polipo's local web pages) and other requests
 	// addressed to go-polipo itself.
-	if local {
-		ph.serveLocalForm(w, req)
+	if originForm {
+		ph.serveOriginForm(w, req)
 		return
 	}
 
@@ -859,13 +859,13 @@ func (ph *ProxyHandler) isClientAllowed(remoteAddr string) bool {
 	return false
 }
 
-// serveLocalForm answers a local-form request, one addressed to go-polipo
+// serveOriginForm answers an origin-form request, one addressed to go-polipo
 // itself. Only such a request may reach the local interface: an
 // absolute-form http://example.com/polipo/... belongs to that origin and is
 // forwarded, or any website's scripts could read /polipo/config or POST
 // /polipo/flush same-origin. Polipo's urlIsLocal (http_parse.c) makes the
 // same split.
-func (ph *ProxyHandler) serveLocalForm(w http.ResponseWriter, req *http.Request) {
+func (ph *ProxyHandler) serveOriginForm(w http.ResponseWriter, req *http.Request) {
 	// The request must name this machine in its Host, and a POST must not
 	// come from another site. Otherwise a web page could point a hostname of
 	// its own at this machine (DNS rebinding) and read /polipo/config or
@@ -889,7 +889,7 @@ func (ph *ProxyHandler) serveLocalForm(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	// Any other local-form request (a browser pointed at go-polipo asking
+	// Any other origin-form request (a browser pointed at go-polipo asking
 	// for /favicon.ico, say, or /polipo/ with the local interface disabled)
 	// has nothing here to serve. Polipo answered these from
 	// localDocumentRoot, with 404 when the file was absent; go-polipo has no
@@ -898,14 +898,16 @@ func (ph *ProxyHandler) serveLocalForm(w http.ResponseWriter, req *http.Request)
 	http.NotFound(w, req)
 }
 
-// isLocalForm reports whether req's request-target is origin-form (a bare
-// path, e.g. "GET /polipo/ HTTP/1.1"), matching Polipo's urlIsLocal. That
-// happens when a client talks to go-polipo as if it were an ordinary web
-// server rather than as a configured proxy - CONNECT and absolute-form
-// targets (the normal case for a proxied request) are not local-form.
-// Polipo challenges local-form requests with 401/WWW-Authenticate and
+// isOriginForm reports whether req's request-target is origin-form (a bare
+// path, e.g. "GET /polipo/ HTTP/1.1"; RFC 9112 section 3.2.1), matching
+// Polipo's urlIsLocal. A proxy gets one when a client talks to it as if it
+// were an ordinary web server, so such a request is addressed to go-polipo
+// itself. The other forms are not: absolute-form (the normal case for a
+// proxied request) and authority-form (CONNECT). The fourth, asterisk-form
+// "OPTIONS *", never gets here; net/http answers it before ServeHTTP.
+// Polipo challenges origin-form requests with 401/WWW-Authenticate and
 // everything else with 407/Proxy-Authenticate.
-func isLocalForm(req *http.Request) bool {
+func isOriginForm(req *http.Request) bool {
 	return req.Method != http.MethodConnect && !req.URL.IsAbs()
 }
 
@@ -934,7 +936,7 @@ func (ph *ProxyHandler) localHostAllowed(host string) bool {
 // isAuthorized reports whether req carries valid proxy credentials. It
 // always returns true when AuthCredentials is unset (the default, matching
 // Polipo, which only enforces authentication once both authCredentials and
-// authRealm are configured). Local-form requests are checked against
+// authRealm are configured). Origin-form requests are checked against
 // Authorization; everything else (proxied requests and CONNECT) against
 // Proxy-Authorization - Polipo makes the same split, since only one of the
 // two headers is meaningful depending on how the client is talking to it.
@@ -944,7 +946,7 @@ func (ph *ProxyHandler) isAuthorized(req *http.Request) bool {
 	}
 
 	headerName := "Proxy-Authorization"
-	if isLocalForm(req) {
+	if isOriginForm(req) {
 		headerName = "Authorization"
 	}
 
