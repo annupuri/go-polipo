@@ -1,4 +1,4 @@
-go-polipo (v2.0.0)
+go-polipo (v2.0.1)
 ==================
 
 [English](README.md) | **日本語**

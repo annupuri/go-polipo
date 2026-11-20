@@ -80,8 +80,10 @@ Keeping files in step
   each have a `.ja.md` (Japanese) twin. If you cannot write Japanese, update
   the English file only and say so in the pull request; the maintainer will
   update the twin.
-- **CHANGES**: describe user-visible changes in the topmost entry.
-  Refactoring and test-only changes need no entry.
+- **CHANGES**: describe user-visible changes in the topmost "Unreleased"
+  entry. If the topmost entry already has a release date, start a new
+  "Unreleased: go-polipo X.Y.Z" entry above it. Refactoring and test-only
+  changes need no entry.
 - **The golangci-lint version** is pinned in the `lint` target of `Makefile`
   and in the golangci-lint job of `.github/workflows/ci.yml`; change both.
 

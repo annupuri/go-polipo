@@ -2,7 +2,7 @@
 
 (日本語版は ARCHITECTURE.ja.md を参照してください / A Japanese version is available in ARCHITECTURE.ja.md)
 
-This maps each source file of the original C Polipo (1.1.1) to its Go (v2.0.0)
+This maps each source file of the original C Polipo (1.1.1) to its Go (v2.0.x)
 counterpart, and summarizes how the corresponding functionality moved over.
 The Go rewrite leans on goroutines and the standard library to achieve a
 large simplification and improved memory safety compared to the C version.

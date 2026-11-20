@@ -1,4 +1,4 @@
-Unreleased: go-polipo 2.0.1:
+20 November 2026: go-polipo 2.0.1:
 
   * "polipo -x" counts diskCacheUnlinkTime from an entry's last use, as
     Polipo did.  2.0.0 recorded that time (X-Polipo-Access) only when it
@@ -20,6 +20,13 @@ Unreleased: go-polipo 2.0.1:
     logging the shutdown.
   * "polipo -v" and /polipo/config show time values as Polipo did, e.g.
     diskCacheUnlinkTime = 32d rather than Go's 768h0m0s.
+  * A Range request answered from the cache reads only the requested
+    bytes when the cache file holds the body as is.  2.0.0 read the whole
+    body first, so each seek in a large cached file, such as a video,
+    read the entire file again.
+  * golang.org/x/net is updated to v0.63.0.  govulncheck reported two
+    issues in the html package of v0.60.0; go-polipo does not use that
+    package, so 2.0.0 was not affected.
 
 18 November 2026: go-polipo 2.0.0:
 
