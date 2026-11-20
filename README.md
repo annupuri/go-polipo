@@ -1,7 +1,7 @@
 go-polipo (v2.0.0)
 ==================
 
-(日本語版は README.ja.md を参照してください / A Japanese version is available in README.ja.md)
+(日本語版は [README.ja.md](README.ja.md) を参照してください / A Japanese version is available in [README.ja.md](README.ja.md))
 
 go-polipo is a complete rewrite/re-implementation of the classic Polipo caching web proxy in Go (v1.27.4).
 
@@ -79,11 +79,11 @@ Main configuration variables
 Documentation
 -------------
 
-See `docs/INSTALL.md` for building and installation instructions. On
+See [docs/INSTALL.md](docs/INSTALL.md) for building and installation instructions. On
 Windows, running go-polipo inside WSL is the recommended way; the native
 Windows build and running it at Windows startup are covered too.
-For architecture details and C-to-Go file mapping, refer to `docs/ARCHITECTURE.md`.
-To contribute, see `CONTRIBUTING.md`.
+For architecture details and C-to-Go file mapping, refer to [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Acknowledgements and license
 ---------------------------
@@ -95,5 +95,5 @@ go-polipo reuses Polipo's on-disk cache format and configuration-file syntax,
 and started from Polipo 1.1.1's Git history, so the original authors appear in
 this repository's history and contributor list.
 
-Both projects are distributed under the MIT license; see `LICENSE`. Polipo's
+Both projects are distributed under the MIT license; see [LICENSE](LICENSE). Polipo's
 copyright notice is retained in full.
