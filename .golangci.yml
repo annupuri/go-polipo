@@ -31,3 +31,9 @@ linters:
       # up in what the test checks.
       - linters: [errcheck]
         path: _test\.go
+
+issues:
+  # Report every finding. By default golangci-lint shows at most 3 with the
+  # same text and 50 per linter, which hides how many sites a change touches.
+  max-issues-per-linter: 0
+  max-same-issues: 0
