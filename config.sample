@@ -43,6 +43,16 @@
 # diskCacheRoot ("") has the same effect.
 # noDiskCache = false
 
+# An in-memory LRU cache sits in front of the disk cache and works the same
+# whether or not the disk cache is on.  It holds up to memoryCacheEntries
+# responses (0 turns it off), each with a body of at most
+# memoryCacheMaxEntrySize bytes (-1 means no limit); a larger body is kept
+# out of memory but may still go to the disk cache.  It is not kept across
+# restarts.  Worst-case memory use is
+# about memoryCacheEntries x memoryCacheMaxEntrySize.
+# memoryCacheEntries = 1024
+# memoryCacheMaxEntrySize = 1048576
+
 # Keep responses carrying a Set-Cookie header out of the disk cache.  On by
 # default: a cached Set-Cookie is replayed to every later requester of the same
 # URL.  Set false for Polipo's historical behaviour.

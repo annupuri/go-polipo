@@ -63,6 +63,8 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `proxyPort` | `8123` | 待ち受けポート |
 | `diskCacheRoot` | `/var/cache/polipo/` | ディスクキャッシュのルートディレクトリ (空でキャッシュ無効) |
 | `noDiskCache` | `false` | `true` でディスクキャッシュを完全に無効化 |
+| `memoryCacheEntries` | `1024` | ディスクキャッシュの手前に置くメモリキャッシュ(LRU)に保持する応答の数 (0 でメモリキャッシュを無効化)。ディスクキャッシュの有無に関係なく働き、再起動すると空になる |
+| `memoryCacheMaxEntrySize` | `1048576` | この値(バイト)を超える本文はメモリキャッシュに置かない(ディスクキャッシュには置ける)。`-1` で無制限 |
 | `dontCacheCookies` | `true` | `Set-Cookie` を含む応答をキャッシュしない |
 | `diskCacheUnlinkTime` | `32d` | 最終アクセスからこの期間を過ぎたキャッシュを `-x` で削除 |
 | `maxDiskCacheEntrySize` | `-1`(無制限) | この値(バイト)を超える応答本文はキャッシュしない(転送は行う) |
