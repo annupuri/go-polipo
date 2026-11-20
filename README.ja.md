@@ -1,7 +1,7 @@
 go-polipo (v2.0.0)
 ==================
 
-(For the English version, see README.md / 英語版は README.md を参照してください)
+(For the English version, see [README.md](README.md) / 英語版は [README.md](README.md) を参照してください)
 
 go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.27.4) で
 完全に書き直した再実装です。
@@ -90,12 +90,12 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 ドキュメント
 ------------
 
-- ビルドとインストール手順は `docs/INSTALL.ja.md` を参照してください。Windows では
+- ビルドとインストール手順は [docs/INSTALL.ja.md](docs/INSTALL.ja.md) を参照してください。Windows では
   WSL の中で動かす方法を推奨しています(Windows 向けのビルドと、Windows 起動時の
   自動実行の手順も含みます)。
-- アーキテクチャの詳細と C から Go へのファイル対応表は `docs/ARCHITECTURE.ja.md`
+- アーキテクチャの詳細と C から Go へのファイル対応表は [docs/ARCHITECTURE.ja.md](docs/ARCHITECTURE.ja.md)
   を参照してください。
-- 開発への参加方法は `CONTRIBUTING.md`(英語)を参照してください。
+- 開発への参加方法は [CONTRIBUTING.md](CONTRIBUTING.md)(英語)を参照してください。
 
 謝辞とライセンス
 ----------------
@@ -107,5 +107,5 @@ go-polipo は、Juliusz Chroboczek 氏らによるキャッシュ Web プロキ�
 います。そのため、オリジナルの作者陣が本リポジトリの履歴および
 Contributors 一覧に含まれています。
 
-両プロジェクトとも MIT ライセンスで配布されています。詳細は `LICENSE` を
+両プロジェクトとも MIT ライセンスで配布されています。詳細は [LICENSE](LICENSE) を
 参照してください。Polipo の著作権表示はそのまま保持しています。
