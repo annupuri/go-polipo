@@ -1,7 +1,7 @@
 go-polipo (v2.0.0)
 ==================
 
-(日本語版は [README.ja.md](README.ja.md) を参照してください / A Japanese version is available in [README.ja.md](README.ja.md))
+**English** | [日本語](README.ja.md)
 
 go-polipo is a complete rewrite/re-implementation of the classic Polipo caching web proxy in Go (v1.27.4).
 

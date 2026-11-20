@@ -1,7 +1,7 @@
 go-polipo (v2.0.0)
 ==================
 
-(For the English version, see [README.md](README.md) / 英語版は [README.md](README.md) を参照してください)
+[English](README.md) | **日本語**
 
 go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.27.4) で
 完全に書き直した再実装です。
