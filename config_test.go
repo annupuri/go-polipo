@@ -614,6 +614,39 @@ func TestParseDuration(t *testing.T) {
 	}
 }
 
+// formatDuration shows time variables as Polipo's -v did (config.c,
+// CONFIG_TIME), in a form parseDuration reads back.
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{0, "0s"},
+		{45 * time.Second, "45s"},
+		{90 * time.Second, "1m30s"},
+		{120 * time.Second, "2m"},
+		{time.Hour, "1h"},
+		{time.Hour + 30*time.Second, "1h30s"},
+		{4*24*time.Hour + 12*time.Hour, "4d12h"},
+		{32 * 24 * time.Hour, "32d"},
+		{24*time.Hour + time.Hour + time.Minute + time.Second, "1d1h1m1s"},
+		{1500 * time.Millisecond, "1.5s"}, // not whole seconds: Go's form
+	}
+	for _, tt := range tests {
+		got := formatDuration(tt.d)
+		if got != tt.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
+			continue
+		}
+		if tt.d%time.Second != 0 {
+			continue
+		}
+		if back, err := parseDuration(got); err != nil || back != tt.d {
+			t.Errorf("parseDuration(%q) = %v, %v; want %v", got, back, err, tt.d)
+		}
+	}
+}
+
 func TestParsePortSet(t *testing.T) {
 	tests := []struct {
 		in      string

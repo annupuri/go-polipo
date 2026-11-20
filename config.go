@@ -320,9 +320,9 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyProxyPort, strconv.Itoa(c.ProxyPort)},
 		{keyDiskCacheRoot, c.DiskCacheRoot},
 		{keyNoDiskCache, strconv.FormatBool(c.NoDiskCache)},
-		{keyDiskCacheUnlinkTime, c.DiskCacheUnlinkTime.String()},
+		{keyDiskCacheUnlinkTime, formatDuration(c.DiskCacheUnlinkTime)},
 		{keyMaxDiskCacheEntrySize, strconv.FormatInt(c.MaxDiskCacheEntrySize, 10)},
-		{keyDiskCacheTruncateTime, c.DiskCacheTruncateTime.String()},
+		{keyDiskCacheTruncateTime, formatDuration(c.DiskCacheTruncateTime)},
 		{keyDiskCacheTruncateSize, strconv.FormatInt(c.DiskCacheTruncateSize, 10)},
 		{keyMemoryCacheEntries, strconv.Itoa(c.MemoryCacheEntries)},
 		{keyMemoryCacheMaxEntrySize, strconv.FormatInt(c.MemoryCacheMaxEntrySize, 10)},
@@ -347,10 +347,10 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyLogFilePermissions, fmt.Sprintf("%#o", c.LogFilePermissions)},
 		{keyDisableLocalInterface, strconv.FormatBool(c.DisableLocalInterface)},
 		{keyMaxConcurrentRequests, strconv.Itoa(c.MaxConcurrentRequests)},
-		{keyClientTimeout, c.ClientTimeout.String()},
-		{keyServerTimeout, c.ServerTimeout.String()},
-		{keyServerIdleTimeout, c.ServerIdleTimeout.String()},
-		{keyTunnelIdleTimeout, c.TunnelIdleTimeout.String()},
+		{keyClientTimeout, formatDuration(c.ClientTimeout)},
+		{keyServerTimeout, formatDuration(c.ServerTimeout)},
+		{keyServerIdleTimeout, formatDuration(c.ServerIdleTimeout)},
+		{keyTunnelIdleTimeout, formatDuration(c.TunnelIdleTimeout)},
 		{keyProxyOffline, strconv.FormatBool(c.ProxyOffline)},
 		{keyRelaxTransparency, c.RelaxTransparency.String()},
 		{keyDontTrustVaryETag, c.DontTrustVaryETag.String()},
@@ -839,6 +839,34 @@ func parseStringList(val string) []string {
 func parseLevel(val string) (int, error) {
 	i, err := strconv.ParseInt(strings.TrimSpace(val), 0, 32)
 	return int(i), err
+}
+
+// formatDuration renders d the way Polipo showed a time variable on -v and
+// its config page (config.c, CONFIG_TIME): days, hours, minutes and seconds,
+// largest first, leaving out the zero ones, so 32 days is "32d" rather than
+// time.Duration's "768h0m0s"; zero is "0s". The result reads back through
+// parseDuration. A duration that is not whole seconds, which parseDuration
+// never produces, keeps time.Duration's form so nothing is lost.
+func formatDuration(d time.Duration) string {
+	if d%time.Second != 0 || d < 0 {
+		return d.String()
+	}
+	if d == 0 {
+		return "0s"
+	}
+	secs := int64(d / time.Second)
+	var b strings.Builder
+	for _, u := range []struct {
+		suffix byte
+		size   int64
+	}{{'d', 86400}, {'h', 3600}, {'m', 60}, {'s', 1}} {
+		if n := secs / u.size; n > 0 {
+			b.WriteString(strconv.FormatInt(n, 10))
+			b.WriteByte(u.suffix)
+			secs %= u.size
+		}
+	}
+	return b.String()
 }
 
 // maxDurationSeconds is the most whole seconds a time.Duration can hold,

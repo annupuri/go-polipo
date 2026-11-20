@@ -121,7 +121,7 @@ func TestProxyLocalInterface(t *testing.T) {
 	// The table is rendered from Config.Entries; spot-check a couple of rows.
 	for _, want := range []string{
 		"<tr><td>proxyPort</td><td>8123</td></tr>",
-		"<tr><td>diskCacheUnlinkTime</td><td>768h0m0s</td></tr>",
+		"<tr><td>diskCacheUnlinkTime</td><td>32d</td></tr>", // Polipo's form, not time.Duration's 768h0m0s
 	} {
 		if !strings.Contains(bodyConfig, want) {
 			t.Errorf("config page missing row %q\nbody:\n%s", want, bodyConfig)

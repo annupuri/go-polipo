@@ -18,6 +18,8 @@ Unreleased: go-polipo 2.0.1:
   * SIGHUP shuts go-polipo down in order, like SIGTERM and SIGINT, as in
     Polipo.  2.0.0 did not catch it, so the process ended at once without
     logging the shutdown.
+  * "polipo -v" and /polipo/config show time values as Polipo did, e.g.
+    diskCacheUnlinkTime = 32d rather than Go's 768h0m0s.
 
 18 November 2026: go-polipo 2.0.0:
 
