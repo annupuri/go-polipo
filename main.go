@@ -127,7 +127,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 // serve builds the proxy handler and blocks serving requests until the
-// process receives SIGINT or SIGTERM. All of its messages go through the log
+// process receives SIGINT, SIGTERM or SIGHUP. All of its messages go through the log
 // package (respecting logFile), so headless deployments (e.g. a Windows Task
 // Scheduler entry with no console) still leave a record of whether the
 // server actually started. reopenLog, nil when logFile is unset, reopens the
@@ -141,7 +141,10 @@ func serve(config *Config, reopenLog func() error) int {
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		// SIGHUP shuts down like the other two, as in Polipo (event.c's
+		// sigexit). Without it, Go's default would end the process at once,
+		// skipping this shutdown and the log line.
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		<-sigChan
 		logf(config.LogLevel, LogInfo, "Shutting down go-polipo...")
 		_ = server.Close()
