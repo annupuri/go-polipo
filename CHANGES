@@ -15,6 +15,9 @@ Unreleased: go-polipo 2.0.1:
     wrapped it around to a negative duration.
   * "polipo -v" and the /polipo/config page list the variables sorted by
     name, as Polipo did, instead of in declaration order.
+  * SIGHUP shuts go-polipo down in order, like SIGTERM and SIGINT, as in
+    Polipo.  2.0.0 did not catch it, so the process ended at once without
+    logging the shutdown.
 
 18 November 2026: go-polipo 2.0.0:
 

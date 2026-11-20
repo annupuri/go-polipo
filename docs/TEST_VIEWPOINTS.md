@@ -133,7 +133,7 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 | P2 | Value syntax | each type: bool, int (hex / octal), duration (incl. overflow), tristate, port set, list, quoted | TestSetAllKeys, TestParseLevelFormats, TestParseDuration, TestParsePortSet, TestRelaxTransparencyTristate | |
 | P3 | Commands | `-h`, `-v` (sorted by name, as Polipo), `-x` | TestRunHelp, TestRunVersion, TestEntriesSortedByName, TestRunExpire, TestRunExpireMissingRoot | |
 | P4 | Local pages | top, config, status, flush, reload; method; foreign Host; cross-site POST; `disableLocalInterface` | TestProxyLocalInterface, TestStatusPage, TestProxyFlushEndpoint, TestProxyReloadEndpoint, TestLocalInterfaceRefuses*, TestScenarioLocalPages | |
-| P5 | Signals | SIGUSR1/SIGUSR2, SIGTERM and SIGINT (stop serving, exit 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |
+| P5 | Signals | SIGUSR1/SIGUSR2, SIGTERM, SIGINT and SIGHUP (stop serving, exit 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |
 | P6 | Logging | levels, `logFile`, permissions, reopen | TestLogfGatesByCategory, TestLogFileWriterReopen*, TestLogFilePermissions, TestRunLogFileWritten | |
 | P7 | Passwords shown | `-v`, `/polipo/config`, log | TestPasswordEntriesAreRedacted, TestParentProxyPasswordHidden, TestInvalidParentProxyWarningHidesPassword | |
 

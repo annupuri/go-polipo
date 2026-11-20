@@ -50,9 +50,10 @@ func TestSetupReloadSignals(t *testing.T) {
 
 // TestRunStopsOnSignal: the proxy started by run stops serving and run
 // returns 0 when the process receives SIGTERM, as systemd sends on stop,
-// or SIGINT, as Ctrl-C sends.
+// SIGINT, as Ctrl-C sends, or SIGHUP, as closing the terminal sends.
+// Polipo shut down the same way on all three.
 func TestRunStopsOnSignal(t *testing.T) {
-	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP} {
 		t.Run(sig.String(), func(t *testing.T) { runStopsOn(t, sig) })
 	}
 }

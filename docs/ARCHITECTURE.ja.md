@@ -64,7 +64,7 @@ graph TD
 | 起動している関数 | 役割 | 終わるとき | 失敗の伝え方 |
 |---|---|---|---|
 | `CacheManager.startDiskWrite` (cache_disk.go) | レスポンスの本文を返しながら、ディスクキャッシュのファイルに書き込む | 本文を書き終えたとき、または書き込みが止まったとき | `diskWrite.done` チャネルで `error` を送る |
-| `serve` (main.go) | `SIGINT` / `SIGTERM` を待ち、サーバーを閉じる | どちらかのシグナルを受けたとき | 不要 (終了をログに出す) |
+| `serve` (main.go) | `SIGINT` / `SIGTERM` / `SIGHUP` を待ち、サーバーを閉じる | いずれかのシグナルを受けたとき | 不要 (終了をログに出す) |
 | `setupReloadSignals` (signal_unix.go。Windows にはない) | `SIGUSR1` / `SIGUSR2` を受けて、ログファイルを開き直し、forbidden / uncachable / forbiddenTunnels の各リストを読み直す (`SIGUSR2` ではメモリキャッシュも捨てる) | 終わらない (プロセスが動いている間ずっと続く) | 失敗をそのつどログに出し、待ち受けを続ける |
 | `tunnel` (proxy.go) の 2 つ | CONNECT トンネルを片方向ずつコピーする | その方向が EOF またはエラーになったとき | 不要 (`tunnel` が `sync.WaitGroup` で両方の終了を待つ) |
 | `tunnelWithIdleTimeout` (proxy.go) | トンネルを `tunnelIdleTimeout` で監視し、時間切れになったら両方の接続を閉じる | トンネルが終わったとき、またはタイムアウトしたとき | 関数の戻り値になる `expired` フラグを立てる |
