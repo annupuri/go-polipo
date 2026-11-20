@@ -10,7 +10,7 @@
 ; Keep AppVersion below in sync with the Version constant in version.go.
 
 #define MyAppName "go-polipo"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppExeName "polipo.exe"
 
 [Setup]

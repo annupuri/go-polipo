@@ -46,11 +46,13 @@ Run gofmt, vet, `make lint` and the tests before every commit.
 - **`CONTRIBUTING.md`** repeats the principles, test rules and commit rules
   in this file for outside contributors; when one of them changes here,
   change it there too.
-- **CHANGES**: 2.0.0 was released on 2026-11-18 and its entry is final. The
-  topmost entry, "Unreleased: go-polipo 2.0.1", collects user-visible
-  changes since then; fold new work into it instead of adding entries.
+- **CHANGES**: a released entry (one with a dateline) is final. User-visible
+  changes since the last release go in a topmost "Unreleased: go-polipo
+  X.Y.Z" entry; if the topmost entry is already released, start one with
+  the next version, and fold later work into it instead of adding entries.
   Refactoring and test-only changes need no entry. The dateline,
-  `version.go` and the release tag are settled when it is released.
+  `version.go` (with `windows/polipo.iss`) and the release tag are settled
+  when it is released.
 - Defaults appear in `config.go`, `config.sample`, the README tables and
   `docs/PARITY_AUDIT*.md`; keep them consistent.
 

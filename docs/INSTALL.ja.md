@@ -1,4 +1,4 @@
-go-polipo (v2.0.0) インストール手順
+go-polipo (v2.0.1) インストール手順
 =============================================
 
 (For the English version, see INSTALL.md / 英語版は INSTALL.md を参照してください)
