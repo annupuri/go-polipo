@@ -623,12 +623,19 @@ func (ph *ProxyHandler) createTransport() *http.Transport {
 }
 
 // normalizeProxyURL parses a parent proxy setting, defaulting to http:// when
-// no scheme is given.
+// no scheme is given. The scheme is matched without regard to case
+// (RFC 3986 section 3.1), and url.Parse lowers it, so "HTTPS://" selects
+// TLS just as "https://" does.
 func normalizeProxyURL(raw string) (*url.URL, error) {
-	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+	if !hasPrefixFold(raw, "http://") && !hasPrefixFold(raw, "https://") {
 		raw = "http://" + raw
 	}
 	return url.Parse(raw)
+}
+
+// hasPrefixFold reports whether s begins with prefix, ignoring ASCII case.
+func hasPrefixFold(s, prefix string) bool {
+	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
 // parentProxyAuthTransport adds a fixed Proxy-Authorization header to every

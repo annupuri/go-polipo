@@ -120,7 +120,7 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 | # | Viewpoint | Value classes | Tests | Gaps |
 |---|---|---|---|---|
 | U1 | Direct | HTTP, CONNECT | TestProxyHandleForward, TestProxyConnectTunnel, TestScenarioHTTPS | |
-| U2 | HTTP parent | forwarded, CONNECT, credentials correct / wrong / in the URL, parent refuses, `https://` parent (trusted / untrusted certificate) | TestParentProxyAuthCredentials, TestParentProxyRefusesCredentials, TestConnectThroughParentProxy*, TestScenarioHTTPParentProxy, TestScenarioHTTPSParentProxy | |
+| U2 | HTTP parent | forwarded, CONNECT, credentials correct / wrong / in the URL, parent refuses, `https://` parent (trusted / untrusted certificate), scheme in upper case | TestNormalizeProxyURL, TestParentProxyAuthCredentials, TestParentProxyRefusesCredentials, TestConnectThroughParentProxy*, TestScenarioHTTPParentProxy, TestScenarioHTTPSParentProxy | |
 | U3 | SOCKS5 parent | forwarded, CONNECT, credentials correct / wrong | TestDialContextSocks, TestSocksAuthCredentials, TestScenarioSocksParentProxy | |
 | U4 | HTTP parent through SOCKS | both set: forwarded and CONNECT reach the parent through the SOCKS server | TestScenarioHTTPParentThroughSocks | |
 | U5 | Tunnel lifetime | busy, idle past `tunnelIdleTimeout`, half-close with and without `tunnelIdleTimeout` | TestTunnelIdleTimeout*, TestTunnelOutlivesTimeouts, TestConnectForwardsBytesSentWithTheRequest, TestTunnelHalfClose | |
