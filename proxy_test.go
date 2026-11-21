@@ -675,6 +675,17 @@ func TestNormalizeProxyURL(t *testing.T) {
 		t.Errorf("https passthrough failed: %+v err=%v", u, err)
 	}
 
+	// A scheme is case-insensitive (RFC 3986 section 3.1). An upper-case
+	// one must not get a second "http://" in front of it, which turned
+	// "HTTPS://secure:8443" into a plain-HTTP URL for a host named "HTTPS".
+	for _, raw := range []string{"HTTPS://secure:8443", "httpS://secure:8443", "HTTP://secure:8443"} {
+		u, err = normalizeProxyURL(raw)
+		want := strings.ToLower(raw[:strings.Index(raw, ":")])
+		if err != nil || u.Scheme != want || u.Host != "secure:8443" {
+			t.Errorf("normalizeProxyURL(%q) = %+v err=%v, want scheme %s and host secure:8443", raw, u, err, want)
+		}
+	}
+
 	if _, err := normalizeProxyURL("http://%zz"); err == nil {
 		t.Error("expected error for malformed proxy URL")
 	}

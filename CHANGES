@@ -1,3 +1,11 @@
+Unreleased: go-polipo 2.0.2:
+
+  * A parentProxy URL whose scheme is not in lower case, such as
+    HTTPS://parent:8443, is read like its lower-case form.  2.0.0 and
+    2.0.1 put a second "http://" in front of it without a warning, so
+    instead of using TLS to the parent, go-polipo tried plain HTTP to a
+    host named "HTTPS", with parentAuthCredentials unencrypted.
+
 20 November 2026: go-polipo 2.0.1:
 
   * "polipo -x" counts diskCacheUnlinkTime from an entry's last use, as
