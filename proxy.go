@@ -1033,15 +1033,14 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	// Hijack client connection
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
+	// Hijack the client connection. ResponseController reaches it through
+	// any ResponseWriter wrapper that has an Unwrap method.
+	clientConn, brw, err := http.NewResponseController(w).Hijack()
+	if errors.Is(err, http.ErrNotSupported) {
 		logf(ph.config.LogLevel, LogError, "CONNECT failed: hijacking not supported (target=%s)", req.RequestURI)
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
-
-	clientConn, brw, err := hijacker.Hijack()
 	if err != nil {
 		logf(ph.config.LogLevel, LogError, "CONNECT failed: hijack error (target=%s): %v", req.RequestURI, err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
@@ -1097,7 +1096,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	}
 	ph.stats.tunnels.Add(1)
 	if t := ph.config.TunnelIdleTimeout; t > 0 {
-		if tunnelWithIdleTimeout(clientConn, destConn, t) {
+		if _, _, expired := tunnelWithIdleTimeout(clientConn, destConn, t); expired {
 			logf(ph.config.LogLevel, LogInfo, "CONNECT %s closed after %v without traffic", req.RequestURI, t)
 		}
 		return
@@ -1124,40 +1123,43 @@ var (
 // tunnel often multiplexes many logical requests (HTTP/2 over one CONNECT),
 // so it must not close either connection until BOTH directions have finished;
 // closing after just the first direction's EOF would cut off any other
-// in-flight exchange sharing the connection.
-func tunnel(a, b net.Conn) {
+// in-flight exchange sharing the connection. It returns the bytes copied
+// from b to a and from a to b.
+func tunnel(a, b net.Conn) (toA, toB int64) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		io.Copy(a, b)
+		toA, _ = io.Copy(a, b)
 		if hc, ok := a.(halfCloser); ok {
 			_ = hc.CloseWrite()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		io.Copy(b, a)
+		toB, _ = io.Copy(b, a)
 		if hc, ok := b.(halfCloser); ok {
 			_ = hc.CloseWrite()
 		}
 	}()
 	wg.Wait()
+	return toA, toB
 }
 
 // tunnelWithIdleTimeout runs tunnel between a and b, closing both once
-// neither direction has read a byte for timeout (tunnelIdleTimeout), and
-// reports whether that is how it ended. Reads are what count: every byte a
-// direction moves is read first, and a peer that stops reading leaves the
-// other direction blocked in a write with no new reads, so it times out too.
+// neither direction has read a byte for timeout (tunnelIdleTimeout). It
+// returns tunnel's byte counts, and reports whether the timeout is how it
+// ended. Reads are what count: every byte a direction moves is read first,
+// and a peer that stops reading leaves the other direction blocked in a
+// write with no new reads, so it times out too.
 // Watching the reads means wrapping the connections, which takes the copy off
 // the kernel's splice path; that is why tunnel without a timeout keeps the
 // raw connections.
-func tunnelWithIdleTimeout(a, b net.Conn, timeout time.Duration) bool {
+func tunnelWithIdleTimeout(a, b net.Conn, timeout time.Duration) (toA, toB int64, expired bool) {
 	start := time.Now()
 	var last atomic.Int64 // nanoseconds since start, on the monotonic clock
 	done := make(chan struct{})
-	var expired atomic.Bool
+	var timedOut atomic.Bool
 	go func() {
 		t := time.NewTimer(timeout)
 		defer t.Stop()
@@ -1168,7 +1170,7 @@ func tunnelWithIdleTimeout(a, b net.Conn, timeout time.Duration) bool {
 			case <-t.C:
 				idle := time.Since(start) - time.Duration(last.Load())
 				if idle >= timeout {
-					expired.Store(true)
+					timedOut.Store(true)
 					_ = a.Close()
 					_ = b.Close()
 					return
@@ -1177,9 +1179,9 @@ func tunnelWithIdleTimeout(a, b net.Conn, timeout time.Duration) bool {
 			}
 		}
 	}()
-	tunnel(&activityConn{Conn: a, start: start, last: &last}, &activityConn{Conn: b, start: start, last: &last})
+	toA, toB = tunnel(&activityConn{Conn: a, start: start, last: &last}, &activityConn{Conn: b, start: start, last: &last})
 	close(done)
-	return expired.Load()
+	return toA, toB, timedOut.Load()
 }
 
 // activityConn records when it last read anything, for tunnelWithIdleTimeout.
