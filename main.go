@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -108,7 +109,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	// Redirect the logger to a file when asked. This matters for background
 	// use on Windows, where a -H windowsgui build has no console for stderr.
-	var reopenLog func() error
+	var reopeners []func() error
 	if config.LogFile != "" {
 		w, err := openLogFileWriter(config.LogFile, config.LogFilePermissions)
 		if err != nil {
@@ -120,20 +121,54 @@ func run(args []string, stdout, stderr io.Writer) int {
 			_ = w.Close()
 		}()
 		log.SetOutput(w)
-		reopenLog = w.Reopen
+		reopeners = append(reopeners, w.Reopen)
 	}
 
-	return serve(config, reopenLog)
+	var accessLog io.Writer
+	if config.AccessLogFile != "" {
+		w, err := openLogFileWriter(config.AccessLogFile, config.LogFilePermissions)
+		if err != nil {
+			fmt.Fprintf(stderr, "Cannot open accessLogFile %q: %v\n", config.AccessLogFile, err)
+			return 1
+		}
+		defer func() { _ = w.Close() }()
+		accessLog = w
+		reopeners = append(reopeners, w.Reopen)
+	}
+
+	return serve(config, reopenAll(reopeners), accessLog)
+}
+
+// reopenAll returns a function that reopens each of the log files, going
+// on past a failure, or nil when there are none. The error says which file
+// it was, since logFile and accessLogFile are reopened together.
+func reopenAll(reopeners []func() error) func() error {
+	if len(reopeners) == 0 {
+		return nil
+	}
+	return func() error {
+		var errs []error
+		for _, reopen := range reopeners {
+			if err := reopen(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
+	}
 }
 
 // serve builds the proxy handler and blocks serving requests until the
 // process receives SIGINT, SIGTERM or SIGHUP. All of its messages go through the log
 // package (respecting logFile), so headless deployments (e.g. a Windows Task
 // Scheduler entry with no console) still leave a record of whether the
-// server actually started. reopenLog, nil when logFile is unset, reopens the
-// log file on SIGUSR1/SIGUSR2.
-func serve(config *Config, reopenLog func() error) int {
+// server actually started. reopenLog, nil when no log file is set, reopens
+// the log files on SIGUSR1/SIGUSR2. accessLog, nil when accessLogFile is
+// unset, gets the access log.
+func serve(config *Config, reopenLog func() error, accessLog io.Writer) int {
 	handler, cacheMgr := newProxy(config)
+	if accessLog != nil {
+		handler.accessLog = newAccessLogger(accessLog, config.LogLevel)
+	}
 	setupReloadSignals(config.LogLevel, reopenLog, handler.Reload, cacheMgr.DiscardMemory)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))

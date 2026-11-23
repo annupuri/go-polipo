@@ -39,6 +39,12 @@ type Config struct {
 	// the log - which names every URL visited - from other users.
 	LogFilePermissions os.FileMode
 
+	// AccessLogFile, when non-empty, is a file that gets one JSON line per
+	// request (see accesslog.go). Created with LogFilePermissions and
+	// reopened with logFile. Empty, the default, writes no access log:
+	// Polipo had none.
+	AccessLogFile string
+
 	// ClientTimeout, ServerTimeout and ServerIdleTimeout are Polipo's
 	// timeouts of the same names; 0 disables one. ClientTimeout bounds how
 	// long a client may take to send a request's headers, and how long its
@@ -223,6 +229,7 @@ func NewDefaultConfig() *Config {
 		DisableLocalInterface:   false,
 		MaxConcurrentRequests:   100,
 		LogFile:                 "",
+		AccessLogFile:           "",
 		LogFilePermissions:      0o640,             // Polipo's default (log.c)
 		ClientTimeout:           120 * time.Second, // Polipo's defaults
 		ServerTimeout:           90 * time.Second,
@@ -287,6 +294,7 @@ const (
 	keyLogLevel                  configKey = "logLevel"
 	keyLogFile                   configKey = "logFile"
 	keyLogFilePermissions        configKey = "logFilePermissions"
+	keyAccessLogFile             configKey = "accessLogFile"
 	keyDisableLocalInterface     configKey = "disableLocalInterface"
 	keyMaxConcurrentRequests     configKey = "maxConcurrentRequests"
 	keyClientTimeout             configKey = "clientTimeout"
@@ -345,6 +353,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyLogLevel, fmt.Sprintf("0x%x", c.LogLevel)},
 		{keyLogFile, c.LogFile},
 		{keyLogFilePermissions, fmt.Sprintf("%#o", c.LogFilePermissions)},
+		{keyAccessLogFile, c.AccessLogFile},
 		{keyDisableLocalInterface, strconv.FormatBool(c.DisableLocalInterface)},
 		{keyMaxConcurrentRequests, strconv.Itoa(c.MaxConcurrentRequests)},
 		{keyClientTimeout, formatDuration(c.ClientTimeout)},
@@ -717,6 +726,8 @@ func (c *Config) Set(key configKey, val string) error {
 			return fmt.Errorf("invalid logFilePermissions '%s': want an octal mode such as 0640", val)
 		}
 		c.LogFilePermissions = os.FileMode(mode)
+	case keyAccessLogFile:
+		c.AccessLogFile = val
 	case keyDisableLocalInterface:
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
 	case keyNoDiskCache:

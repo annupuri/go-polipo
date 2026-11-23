@@ -74,7 +74,8 @@ Main configuration variables
 | `tunnelIdleTimeout` | `0` (off) | Close a CONNECT tunnel when no data has flowed either way for this long. Off by default, as in Polipo, because connections such as IMAP IDLE or an idle SSH session stay quiet for long periods (not in Polipo) |
 | `disableVia` | `false` | `true` stops adding `Via` to forwarded requests and responses. By default it is added, as RFC 9110 requires (Polipo's default was not to add it) |
 | `logFile` | (none) | File to write the log to. Without one, the log goes to standard error |
-| `logFilePermissions` | `0640` | Permissions for a newly created log file (octal, less the umask). An existing file keeps its permissions |
+| `logFilePermissions` | `0640` | Permissions for a newly created log file or access log (octal, less the umask). An existing file keeps its permissions |
+| `accessLogFile` | (none) | File to write an access log to: one JSON line per request, with the time it came in, client, method, URL, status, bytes, duration and what the cache did (`hit`, `stale`, `revalidated`, `miss`). Off by default, since it names every URL fetched (not in Polipo) |
 
 Documentation
 -------------

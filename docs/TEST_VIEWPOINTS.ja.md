@@ -122,6 +122,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | P5 | シグナル | SIGUSR1/SIGUSR2、SIGTERM と SIGINT と SIGHUP(待ち受けをやめ、終了コード 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |
 | P6 | ログ | レベル、`logFile`、パーミッション、開き直し | TestLogfGatesByCategory, TestLogFileWriterReopen*, TestLogFilePermissions, TestRunLogFileWritten | |
 | P7 | パスワードの表示 | `-v`、`/polipo/config`、ログ | TestPasswordEntriesAreRedacted, TestParentProxyPasswordHidden, TestInvalidParentProxyWarningHidesPassword | |
+| P8 | アクセスログ(`accessLogFile`) | 既定で無効、`cache` の各値(`hit`、`relaxTransparency`・`proxyOffline`・オリジンの失敗による `stale`、`revalidated`、クライアント自身の条件付きリクエストへのオリジンの 304 と、キャッシュが無いときの 502/504 を含む `miss`)、拒否したリクエストとローカルページには `cache` が無いこと、各欄と開始時刻、URL 中のパスワード、CONNECT(先に届いたデータを含むトンネルのバイト数、Hijack の前と後での拒否)、途中で切れた本文、逐次転送が保たれること、書き込みの失敗、ファイルの作成・権限・開き直し | TestAccessLog*, TestRunAccessLogFileError, TestRunAccessLogFileCreated, TestReopenAll, TestSetAllKeys | |
 
 ## 9. 機能以外(ISO/IEC 25010)
 

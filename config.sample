@@ -247,3 +247,20 @@
 # every URL fetched, so other users should not read it.  An existing file
 # keeps its mode; chmod it yourself to tighten it.  Ignored on Windows.
 # logFilePermissions = 0640
+
+# Access log: one JSON line per request, written when it is done.  Off by
+# default; like logFile it names every URL fetched, and it is created with
+# logFilePermissions and reopened with it on SIGUSR1/SIGUSR2.  For example:
+#   {"time":"2026-11-23T10:15:32.123+09:00","client":"127.0.0.1:52344",
+#    "method":"GET","url":"http://example.com/a.png","status":200,
+#    "bytes":5123,"duration_ms":45,"cache":"hit"}
+# time is when the request came in; add duration_ms for when it ended.
+# cache is what the cache did: hit (a fresh entry, origin not contacted),
+# stale (an expired entry, under relaxTransparency or proxyOffline),
+# revalidated (the origin answered go-polipo's conditional request with
+# 304) or miss (anything else; the status tells an origin's answer from an
+# error).  It is absent for requests that never reached the cache: refused
+# ones, the /polipo/ pages and CONNECT.  A CONNECT line has host,
+# bytes_sent (client to server) and bytes_received instead of url and bytes,
+# and is written when the tunnel closes.
+# accessLogFile = /var/log/go-polipo/access.log

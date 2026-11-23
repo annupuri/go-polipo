@@ -64,6 +64,10 @@ type ProxyHandler struct {
 	crossOrigin *http.CrossOriginProtection
 
 	stats *proxyStats
+
+	// accessLog, when set (accessLogFile), gets one line per request; see
+	// serveLogged.
+	accessLog *accessLogger
 }
 
 var _ http.Handler = (*ProxyHandler)(nil)
@@ -178,6 +182,7 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 	// the name resolved to.
 	if errors.Is(err, errForbiddenDestination) {
 		ph.stats.denied.Add(1)
+		setCacheAction(r, "") // a refusal, like the others before the cache
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s: %v", r.Method, r.URL, err)
 		http.Error(w, "Forbidden: destination address not allowed", http.StatusForbidden)
 		return
@@ -190,6 +195,7 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 			defer func() { _ = staleResp.Body.Close() }()
 			if !stale || canServeStale(staleResp) {
 				w.Header().Set(headerWarning, `111 go-polipo "Revalidation failed"`)
+				setCacheAction(r, servedFromCache(stale))
 				copyHeader(w.Header(), staleResp.Header)
 				w.WriteHeader(staleResp.StatusCode)
 				n, _ := io.Copy(w, staleResp.Body)
@@ -307,6 +313,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 			return err
 		}
 		ph.stats.revalidated.Add(1)
+		setCacheAction(resp.Request, cacheRevalidated)
 	} else {
 		needVia = true
 	}
@@ -657,8 +664,18 @@ func (t *parentProxyAuthTransport) RoundTrip(req *http.Request) (*http.Response,
 	return t.RoundTripper.RoundTrip(req)
 }
 
-// ServeHTTP handles HTTP proxy requests.
+// ServeHTTP handles HTTP proxy requests, and logs each one to the access
+// log when there is one.
 func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if ph.accessLog != nil {
+		ph.serveLogged(w, req)
+		return
+	}
+	ph.serveHTTP(w, req)
+}
+
+// serveHTTP is ServeHTTP without the access log.
+func (ph *ProxyHandler) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	// 1. Allowed Clients verification
 	if !ph.isClientAllowed(req.RemoteAddr) {
 		ph.stats.denied.Add(1)
@@ -1047,6 +1064,9 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	defer func() { _ = clientConn.Close() }()
+	// From here on the status goes out on the raw connection, past the
+	// ResponseWriter, so the access log is told it directly.
+	rec := accessRecordFrom(req.Context())
 
 	// Dial the target, or have the HTTP parent proxy do it (as Polipo did);
 	// either may go through the SOCKS parent. parentEarly is what the parent
@@ -1062,12 +1082,14 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: %v (target=%s)", err, req.RequestURI)
 		clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\n\r\n"))
+		rec.setStatus(http.StatusForbidden)
 		return
 	}
 	if err != nil {
 		ph.stats.tunnelFailures.Add(1)
 		logf(ph.config.LogLevel, LogError, "CONNECT failed: dial %s: %v", req.RequestURI, err)
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		rec.setStatus(http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = destConn.Close() }()
@@ -1078,30 +1100,39 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// they must go to the destination first, as Polipo's tunnel did with
 	// what was left in its buffer. The tunnel then copies between the raw
 	// connections, which keeps the kernel's splice path open.
+	var earlySent int64
 	if n := brw.Reader.Buffered(); n > 0 {
 		early, _ := brw.Reader.Peek(n)
+		earlySent = int64(n)
 		if _, err := destConn.Write(early); err != nil {
 			ph.stats.tunnelFailures.Add(1)
 			logf(ph.config.LogLevel, LogError, "CONNECT failed: write to %s: %v", req.RequestURI, err)
 			clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+			rec.setStatus(http.StatusBadGateway)
 			return
 		}
 	}
 
 	clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	rec.setStatus(http.StatusOK)
 	if len(parentEarly) > 0 {
 		if _, err := clientConn.Write(parentEarly); err != nil {
+			rec.setTunnelBytes(earlySent, 0)
 			return
 		}
 	}
 	ph.stats.tunnels.Add(1)
+	var received, sent int64
 	if t := ph.config.TunnelIdleTimeout; t > 0 {
-		if _, _, expired := tunnelWithIdleTimeout(clientConn, destConn, t); expired {
+		var expired bool
+		received, sent, expired = tunnelWithIdleTimeout(clientConn, destConn, t)
+		if expired {
 			logf(ph.config.LogLevel, LogInfo, "CONNECT %s closed after %v without traffic", req.RequestURI, t)
 		}
-		return
+	} else {
+		received, sent = tunnel(clientConn, destConn)
 	}
-	tunnel(clientConn, destConn)
+	rec.setTunnelBytes(earlySent+sent, int64(len(parentEarly))+received)
 }
 
 // halfCloser is implemented by net.Conn types (notably *net.TCPConn) that can
@@ -1234,6 +1265,9 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	ph.stats.requests.Add(1)
+	// What the cache did, for the access log: a miss unless one of the
+	// paths that serve a stored entry says otherwise.
+	setCacheAction(req, cacheMiss)
 
 	// proxyOffline: never contact the origin. Whatever is cached (fresh or
 	// stale) is served as-is; a true miss is a 502, not a network attempt.
@@ -1245,6 +1279,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// A fresh cache hit is served straight from disk.
 	if cachedResp := ph.cacheManager.Lookup(req); cachedResp != nil {
 		defer func() { _ = cachedResp.Body.Close() }()
+		setCacheAction(req, cacheHit)
 		ph.serveCached(w, req, cachedResp)
 		return
 	}
@@ -1260,6 +1295,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 				if stale {
 					w.Header().Set(headerWarning, `110 go-polipo "Object is stale"`)
 				}
+				setCacheAction(req, servedFromCache(stale))
 				ph.serveCached(w, req, staleResp)
 				return
 			}
@@ -1331,6 +1367,7 @@ func (ph *ProxyHandler) serveOffline(w http.ResponseWriter, req *http.Request) {
 	if stale {
 		w.Header().Set(headerWarning, `112 go-polipo "Disconnected operation"`)
 	}
+	setCacheAction(req, servedFromCache(stale))
 	ph.serveCached(w, req, resp)
 }
 

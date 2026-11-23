@@ -136,6 +136,7 @@ size**: TestCacheInvalidAndNonGetCases, TestStoreSkips*.
 | P5 | Signals | SIGUSR1/SIGUSR2, SIGTERM, SIGINT and SIGHUP (stop serving, exit 0) | TestSetupReloadSignals, TestRunStopsOnSignal | |
 | P6 | Logging | levels, `logFile`, permissions, reopen | TestLogfGatesByCategory, TestLogFileWriterReopen*, TestLogFilePermissions, TestRunLogFileWritten | |
 | P7 | Passwords shown | `-v`, `/polipo/config`, log | TestPasswordEntriesAreRedacted, TestParentProxyPasswordHidden, TestInvalidParentProxyWarningHidesPassword | |
+| P8 | Access log (`accessLogFile`) | off by default; each `cache` value (`hit`, `stale` under `relaxTransparency` / `proxyOffline` / origin failure, `revalidated`, `miss` including the origin's 304 to the client's own validators and the 502/504 with nothing cached), no `cache` for refused requests and local pages; fields and start time; password in URL; CONNECT (tunnel bytes with early data, refused before / after the hijack); body cut short; streaming kept; write failure; file creation, permissions and reopen | TestAccessLog*, TestRunAccessLogFileError, TestRunAccessLogFileCreated, TestReopenAll, TestSetAllKeys | |
 
 ## 9. Non-functional (ISO/IEC 25010)
 

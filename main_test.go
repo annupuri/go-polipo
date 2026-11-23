@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -159,6 +161,64 @@ func TestRunLogFileWritten(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Error("expected serve() to write its error line to the log file")
+	}
+}
+
+func TestRunAccessLogFileError(t *testing.T) {
+	bad := filepath.Join(t.TempDir(), "no-such-dir", "access.log")
+	var out, errBuf bytes.Buffer
+	code := run([]string{"-c", emptyConfig(t), "accessLogFile=" + bad}, &out, &errBuf)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(errBuf.String(), "Cannot open accessLogFile") {
+		t.Errorf("stderr missing accessLogFile error: %q", errBuf.String())
+	}
+}
+
+func TestRunAccessLogFileCreated(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file modes are not Unix permissions on Windows")
+	}
+	defer log.SetOutput(io.Discard)
+
+	accessPath := filepath.Join(t.TempDir(), "access.log")
+	var out, errBuf bytes.Buffer
+	// As in TestRunLogFileWritten, serve() fails to bind and returns.
+	code := run([]string{
+		"-c", emptyConfig(t),
+		"accessLogFile=" + accessPath, "logFilePermissions=0600",
+		"proxyAddress=203.0.113.255", "proxyPort=19999",
+	}, &out, &errBuf)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 (serve should fail to bind)", code)
+	}
+	fi, err := os.Stat(accessPath)
+	if err != nil {
+		t.Fatalf("access log file was not created: %v", err)
+	}
+	if fi.Mode().Perm()&^0o600 != 0 {
+		t.Errorf("access log mode = %v, want logFilePermissions (0600) or less", fi.Mode().Perm())
+	}
+}
+
+// TestReopenAll: SIGUSR1/SIGUSR2 reopen logFile and accessLogFile
+// together; one failing does not stop the other, and the error says which.
+func TestReopenAll(t *testing.T) {
+	if reopenAll(nil) != nil {
+		t.Error("reopenAll(nil) should be nil, so that no reopen is attempted")
+	}
+	var called []string
+	reopen := reopenAll([]func() error{
+		func() error { called = append(called, "logFile"); return errors.New("cannot open polipo.log") },
+		func() error { called = append(called, "accessLogFile"); return nil },
+	})
+	err := reopen()
+	if len(called) != 2 {
+		t.Errorf("reopened %v, want both", called)
+	}
+	if err == nil || !strings.Contains(err.Error(), "polipo.log") {
+		t.Errorf("err = %v, want the failing file's error", err)
 	}
 }
 

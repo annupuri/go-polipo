@@ -307,6 +307,7 @@ func TestSetAllKeys(t *testing.T) {
 	ok(keyLogLevel, "0x0f")
 	ok(keyLogFile, "/var/log/go-polipo.log")
 	ok(keyLogFilePermissions, "0600")
+	ok(keyAccessLogFile, "/var/log/go-polipo-access.log")
 	ok(keyDisableLocalInterface, "true")
 	ok(keyMaxConcurrentRequests, "50")
 	ok(keyDisableVia, "true")
@@ -338,6 +339,9 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.LogFile != "/var/log/go-polipo.log" {
 		t.Errorf("logFile not applied: %q", c.LogFile)
+	}
+	if c.AccessLogFile != "/var/log/go-polipo-access.log" {
+		t.Errorf("accessLogFile not applied: %q", c.AccessLogFile)
 	}
 	if !c.DisableLocalInterface {
 		t.Error(`disableLocalInterface "true" should be truthy`)
