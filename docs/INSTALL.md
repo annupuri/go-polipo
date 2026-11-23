@@ -100,6 +100,46 @@ also see the effective configuration with `./bin/polipo -v`, or open the local
 configuration page at `http://127.0.0.1:8123/polipo/config` while the proxy
 is running.
 
+### 4.1 Access log (optional)
+
+go-polipo can write an access log: one line per request, saying what it did
+with it. It is off by default, because it records every URL you visit. To turn
+it on, add `accessLogFile` to the configuration and restart go-polipo:
+
+    accessLogFile = /home/<you>/.cache/go-polipo/access.log
+
+As with `logFile`, the parent directory must exist. The file is created with
+`logFilePermissions` (`0640` by default), so other users cannot read it.
+
+Each line is a JSON object, written when the request is done:
+
+    {"time":"2026-11-23T10:15:32.123+09:00","client":"127.0.0.1:52344","method":"GET","url":"http://example.com/a.png","status":200,"bytes":5123,"duration_ms":45,"cache":"hit"}
+    {"time":"2026-11-23T10:15:32.000+09:00","client":"127.0.0.1:52350","method":"CONNECT","host":"example.com:443","status":200,"bytes_sent":1834,"bytes_received":48213,"duration_ms":63021}
+
+- `time` is when the request came in, and `duration_ms` how long it took.
+  Lines are written in the order requests finish, so a long HTTPS
+  connection can appear after requests that started later.
+- `cache` says what the cache did:
+  - `hit`: answered from the cache.
+  - `stale`: answered from an expired entry (`relaxTransparency`,
+    `proxyOffline`).
+  - `revalidated`: the site confirmed the cached copy was still good.
+  - `miss`: anything else.
+- HTTPS goes through as a CONNECT tunnel, which go-polipo does not look
+  into. Its line has the host and the bytes sent each way instead of a URL,
+  and no `cache`.
+
+The lines can be read with any JSON tool. For example, with
+[jq](https://jqlang.org/) (`sudo apt install jq`), count the lines by
+cache result, or list the slowest plain-HTTP requests:
+
+    $ jq -r 'select(.cache) | .cache' access.log | sort | uniq -c
+    $ jq -s -c 'map(select(.url)) | sort_by(-.duration_ms) | .[:10][] | {url, duration_ms, cache}' access.log
+
+On Linux, `SIGUSR1` or `SIGUSR2` makes go-polipo reopen both `logFile` and
+`accessLogFile`, so a log rotation tool can rename the files and then send
+the signal. On Windows the files are reopened only by a restart.
+
 ## 5. Running go-polipo on Windows: which way to choose
 
 On Linux, macOS and other POSIX systems, sections 1-4 are all you need. On

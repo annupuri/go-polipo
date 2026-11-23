@@ -67,6 +67,34 @@ PowerShell では引用符を外さないでください。引用符が無いと
 
 サポートされている変数とその既定値は `config.sample` を参照してください。実際に反映されている設定は `./bin/polipo -v` で、またはプロキシ実行中に `http://127.0.0.1:8123/polipo/config` のローカル設定ページでも確認できます。
 
+### 4.1 アクセスログ(任意)
+
+go-polipo は、リクエストごとに何をしたかを1行ずつ記録するアクセスログを書けます。見たサイトの URL がすべて残るので、既定では書きません。使うには、設定ファイルに `accessLogFile` を加えて go-polipo を再起動します:
+
+    accessLogFile = /home/<you>/.cache/go-polipo/access.log
+
+`logFile` と同じく、置き場所のフォルダはあらかじめ作っておいてください。ファイルは `logFilePermissions`(既定 `0640`)の権限で作られるので、ほかのユーザーには読めません。
+
+各行は JSON で、リクエストの処理が終わったときに書かれます:
+
+    {"time":"2026-11-23T10:15:32.123+09:00","client":"127.0.0.1:52344","method":"GET","url":"http://example.com/a.png","status":200,"bytes":5123,"duration_ms":45,"cache":"hit"}
+    {"time":"2026-11-23T10:15:32.000+09:00","client":"127.0.0.1:52350","method":"CONNECT","host":"example.com:443","status":200,"bytes_sent":1834,"bytes_received":48213,"duration_ms":63021}
+
+- `time` はリクエストが届いた時刻、`duration_ms` はかかった時間です。行はリクエストが終わった順に書かれるので、長く続いた HTTPS の接続は、後から始まったリクエストより後ろに出ることがあります。
+- `cache` はキャッシュが何をしたかを表します:
+  - `hit`: キャッシュから返した。
+  - `stale`: 期限切れのキャッシュから返した(`relaxTransparency`、`proxyOffline`)。
+  - `revalidated`: キャッシュがまだ使えることをサイトに確かめてから返した。
+  - `miss`: それ以外。
+- HTTPS は CONNECT のトンネルを通り、go-polipo は中身を見ません。その行には URL の代わりにホストと、それぞれの向きに送ったバイト数があり、`cache` はありません。
+
+各行は JSON を扱える道具で読めます。たとえば [jq](https://jqlang.org/)(`sudo apt install jq`)で、キャッシュの結果ごとの件数を数えたり、時間のかかった HTTP のリクエストを並べたりできます:
+
+    $ jq -r 'select(.cache) | .cache' access.log | sort | uniq -c
+    $ jq -s -c 'map(select(.url)) | sort_by(-.duration_ms) | .[:10][] | {url, duration_ms, cache}' access.log
+
+Linux では、`SIGUSR1` か `SIGUSR2` を送ると go-polipo は `logFile` と `accessLogFile` の両方を開き直します。ログのローテーションツールでファイル名を変えてからシグナルを送ってください。Windows では、開き直すには再起動が必要です。
+
 ## 5. Windows で使う場合の選び方
 
 Linux、macOS などの POSIX システムでは、セクション1〜4 だけで使えます。Windows で go-polipo を動かす方法は2つあります:
