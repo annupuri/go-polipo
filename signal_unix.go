@@ -9,9 +9,10 @@ import (
 )
 
 // setupReloadSignals registers SIGUSR1 and SIGUSR2, matching Polipo's handling
-// of them (event.c; polipo.texi, "Stopping"): both reopen the log file
-// (reopenLog, nil when there is no logFile) so that log rotation works, then
-// reload the forbidden lists (reload). SIGUSR2 also calls discardMemory in
+// of them (event.c; polipo.texi, "Stopping"): both reopen the log files
+// (reopenLog, nil when there is neither logFile nor accessLogFile) so that
+// log rotation works, then reload the forbidden lists (reload). SIGUSR2
+// also calls discardMemory in
 // between, matching Polipo's discardObjects, which drops the in-memory cache.
 // Polipo's SIGUSR1 writeoutObjects has no equivalent here: Store writes to
 // disk at once. A failed reopen is logged and logging carries on in the old
@@ -28,9 +29,9 @@ func setupReloadSignals(logLevel int, reopenLog func() error, reload func() erro
 		for sig := range c {
 			if reopenLog != nil {
 				if err := reopenLog(); err != nil {
-					logf(logLevel, LogError, "Couldn't reopen the log file (%s), still logging to the old one: %v", sig, err)
+					logf(logLevel, LogError, "Couldn't reopen a log file (%s), still logging to the old one: %v", sig, err)
 				} else {
-					logf(logLevel, LogInfo, "Reopened the log file (%s)", sig)
+					logf(logLevel, LogInfo, "Reopened the log files (%s)", sig)
 				}
 			}
 			if sig == syscall.SIGUSR2 {

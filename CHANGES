@@ -1,5 +1,12 @@
 Unreleased: go-polipo 2.0.2:
 
+  * New accessLogFile variable: an access log with one JSON line per
+    request, giving the time it came in, the client, method, URL,
+    status, bytes, duration and what the cache did (hit, stale,
+    revalidated or miss).  A CONNECT line gives the host and the bytes
+    each way through the tunnel.  Off by default; the file is created
+    with logFilePermissions and reopened with logFile on SIGUSR1 and
+    SIGUSR2.  Polipo had no access log.
   * A parentProxy URL whose scheme is not in lower case, such as
     HTTPS://parent:8443, is read like its lower-case form.  2.0.0 and
     2.0.1 put a second "http://" in front of it without a warning, so
