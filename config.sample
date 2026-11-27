@@ -68,6 +68,15 @@
 # means no limit.
 # maxDiskCacheEntrySize = -1
 
+# Upper limit on the disk cache's total size, in bytes (for example
+# 10737418240 for 10 GiB).  When a store takes the cache past it, the entries
+# unused the longest are removed in the background until it is down to 90% of
+# the limit; "polipo -x" and POST /polipo/flush do the same after their usual
+# removals.  No single entry larger than the limit is stored.  The total is
+# shown on /polipo/status.  -1 (the default) means no limit, as in Polipo,
+# which had no such setting.
+# diskCacheMaxSize = -1
+
 # "polipo -x" also removes entries larger than diskCacheTruncateSize bytes
 # that have gone unused for diskCacheTruncateTime, ahead of the general
 # diskCacheUnlinkTime cutoff above.  Polipo instead truncates such a file's

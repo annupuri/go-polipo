@@ -77,6 +77,13 @@ type Config struct {
 	// matching Polipo) means no limit.
 	MaxDiskCacheEntrySize int64
 
+	// DiskCacheMaxSize caps the disk cache's total size, in bytes: past it,
+	// the entries unused the longest are removed until the cache is down to
+	// 90% of it (see cache_size.go), and no single entry larger than it is
+	// stored. -1, the default, means no limit, as in Polipo, which had no
+	// such setting.
+	DiskCacheMaxSize int64
+
 	// DiskCacheTruncateTime and DiskCacheTruncateSize identify entries `-x`
 	// removes early, before the general DiskCacheUnlinkTime cutoff: ones
 	// larger than DiskCacheTruncateSize that have gone unused for
@@ -236,6 +243,7 @@ func NewDefaultConfig() *Config {
 		ServerIdleTimeout:       45 * time.Second,
 		DiskCacheUnlinkTime:     32 * 24 * time.Hour,
 		MaxDiskCacheEntrySize:   -1,
+		DiskCacheMaxSize:        -1,
 		DiskCacheTruncateTime:   108 * time.Hour, // 4.5 days, matching Polipo
 		DiskCacheTruncateSize:   1024 * 1024,
 		NoDiskCache:             false,
@@ -271,6 +279,7 @@ const (
 	keyNoDiskCache               configKey = "noDiskCache"
 	keyDiskCacheUnlinkTime       configKey = "diskCacheUnlinkTime"
 	keyMaxDiskCacheEntrySize     configKey = "maxDiskCacheEntrySize"
+	keyDiskCacheMaxSize          configKey = "diskCacheMaxSize"
 	keyDiskCacheTruncateTime     configKey = "diskCacheTruncateTime"
 	keyDiskCacheTruncateSize     configKey = "diskCacheTruncateSize"
 	keyMemoryCacheEntries        configKey = "memoryCacheEntries"
@@ -330,6 +339,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyNoDiskCache, strconv.FormatBool(c.NoDiskCache)},
 		{keyDiskCacheUnlinkTime, formatDuration(c.DiskCacheUnlinkTime)},
 		{keyMaxDiskCacheEntrySize, strconv.FormatInt(c.MaxDiskCacheEntrySize, 10)},
+		{keyDiskCacheMaxSize, strconv.FormatInt(c.DiskCacheMaxSize, 10)},
 		{keyDiskCacheTruncateTime, formatDuration(c.DiskCacheTruncateTime)},
 		{keyDiskCacheTruncateSize, strconv.FormatInt(c.DiskCacheTruncateSize, 10)},
 		{keyMemoryCacheEntries, strconv.Itoa(c.MemoryCacheEntries)},
@@ -796,6 +806,12 @@ func (c *Config) Set(key configKey, val string) error {
 			return fmt.Errorf("invalid maxDiskCacheEntrySize '%s': %w", val, err)
 		}
 		c.MaxDiskCacheEntrySize = size
+	case keyDiskCacheMaxSize:
+		size, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+		if err != nil || size < -1 {
+			return fmt.Errorf("invalid diskCacheMaxSize '%s': want a number of bytes, or -1 for no limit", val)
+		}
+		c.DiskCacheMaxSize = size
 	case keyDiskCacheTruncateTime:
 		d, err := parseDuration(val)
 		if err != nil {

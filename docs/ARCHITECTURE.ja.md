@@ -65,9 +65,11 @@ graph TD
 |---|---|---|---|
 | `CacheManager.startDiskWrite` (cache_disk.go) | レスポンスの本文を返しながら、ディスクキャッシュのファイルに書き込む | 本文を書き終えたとき、または書き込みが止まったとき | `diskWrite.done` チャネルで `error` を送る |
 | `serve` (main.go) | `SIGINT` / `SIGTERM` / `SIGHUP` を待ち、サーバーを閉じる | いずれかのシグナルを受けたとき | 不要 (終了をログに出す) |
-| `setupReloadSignals` (signal_unix.go。Windows にはない) | `SIGUSR1` / `SIGUSR2` を受けて、ログファイルを開き直し、forbidden / uncachable / forbiddenTunnels の各リストを読み直す (`SIGUSR2` ではメモリキャッシュも捨てる) | 終わらない (プロセスが動いている間ずっと続く) | 失敗をそのつどログに出し、待ち受けを続ける |
+| `CacheManager.StartDiskAccounting` (cache_size.go) | 起動時にディスクキャッシュの総量を数え、`diskCacheMaxSize` を超えていれば削る | 数え終わったとき (削ったときはそのあと) | 不要 (読めないファイルは数えない) |
+| `CacheManager.maybeTrim` (cache_size.go)。同時に1つまで | 使われていない順にエントリを消し、ディスクキャッシュを `diskCacheMaxSize` の 90% まで減らす | その大きさまで減ったとき、または消せるものがなくなったとき | 消した分をログに出す。消せないファイルは次の削りに回す |
+| `setupReloadSignals` (signal_unix.go。Windows にはない) | `SIGUSR1` / `SIGUSR2` を受けて、ログファイル (`logFile` と `accessLogFile`) を開き直し、forbidden / uncachable / forbiddenTunnels の各リストを読み直す (`SIGUSR2` ではメモリキャッシュも捨てる) | 終わらない (プロセスが動いている間ずっと続く) | 失敗をそのつどログに出し、待ち受けを続ける |
 | `tunnel` (proxy.go) の 2 つ | CONNECT トンネルを片方向ずつコピーする | その方向が EOF またはエラーになったとき | 不要 (`tunnel` が `sync.WaitGroup` で両方の終了を待つ) |
-| `tunnelWithIdleTimeout` (proxy.go) | トンネルを `tunnelIdleTimeout` で監視し、時間切れになったら両方の接続を閉じる | トンネルが終わったとき、またはタイムアウトしたとき | 関数の戻り値になる `expired` フラグを立てる |
+| `tunnelWithIdleTimeout` (proxy.go) | トンネルを `tunnelIdleTimeout` で監視し、時間切れになったら両方の接続を閉じる | トンネルが終わったとき、またはタイムアウトしたとき | 関数が返すフラグを立てる |
 
 どの Goroutine も `recover` しません。起こりうる失敗は `error` で返します。panic はバグを意味し、どの Goroutine でも `recover` されない panic はプロセス全体を止めます。panic の内容とスタックトレースは標準エラー出力に出ます (`logFile` には出ません)。これは意図した動きです。バグのあとも動き続けるとキャッシュが壊れた状態になりかねない一方、同梱の `systemd/go-polipo.service` はプロセスを再起動します (`Restart=on-failure`)。リクエストを処理するハンドラー自身での panic は別で、`net/http` が接続ごとに `recover` し、`http: panic serving ...` を標準ロガーに出します。標準ロガーの出力先は、`logFile` を設定していればそのファイルです。クライアントとの接続も `net/http` が閉じますが、CONNECT ハンドラーが接続を乗っ取った (Hijack した) あとは閉じません。その場合は、panic の巻き戻しの途中で実行されるハンドラー自身の `defer` の `Close` が、両方の接続を閉じます。これが当てはまるのはハンドラーの Goroutine だけで、`tunnel` が起動する 2 つのコピー用 Goroutine は含みません。
 

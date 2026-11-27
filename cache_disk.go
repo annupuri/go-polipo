@@ -297,14 +297,20 @@ type ExpireStats struct {
 	// substitute for Polipo's in-place truncation (see DiskCacheTruncateTime
 	// on Config) - worth being able to tell apart from ordinary housekeeping.
 	RemovedForSize int
+
+	// RemovedForLimit counts entries removed, least recently used first,
+	// to bring the cache down under diskCacheMaxSize (see trimDisk), after
+	// the other removals. It is also a subset of Removed.
+	RemovedForLimit int
 }
 
 // Expire walks the disk cache and removes entries that are no longer usable:
 // corrupt files, responses that are stale by HTTP freshness rules, files
 // whose last access is older than Config.DiskCacheUnlinkTime, and large
 // files that have gone unused past DiskCacheTruncateTime (see
-// judgeExpire). Empty host directories left behind are pruned. It
-// implements the `-x` command.
+// judgeExpire). Empty host directories left behind are pruned. If the cache
+// is then still over diskCacheMaxSize, the entries unused the longest are
+// removed too (trimDisk). It implements the `-x` command.
 func (cm *CacheManager) Expire() (ExpireStats, error) {
 	var stats ExpireStats
 
@@ -318,10 +324,34 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 		return stats, fmt.Errorf("diskCacheRoot %q is not a directory", root)
 	}
 
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
+	var kept int64 // the size of the entries kept
+	walkErr := func() error {
+		cm.mu.Lock()
+		defer cm.mu.Unlock()
+		err := cm.expireWalk(root, &stats, &kept)
+		if err == nil {
+			cm.pruneEmptyDirs(root)
+		}
+		return err
+	}()
+	if walkErr != nil {
+		return stats, walkErr
+	}
+	cm.diskSize.Store(kept)
+	cm.diskSizeKnown.Store(true)
 
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	removed, freed := cm.trimDisk()
+	stats.Removed += removed
+	stats.Freed += freed
+	stats.RemovedForLimit = removed
+	return stats, nil
+}
+
+// expireWalk is Expire's walk of the cache, under its lock: it removes what
+// judgeExpire says to, counting into stats, and adds up into kept the size
+// of the entries it keeps.
+func (cm *CacheManager) expireWalk(root string, stats *ExpireStats, kept *int64) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -338,6 +368,7 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 		stats.Scanned++
 		reason := cm.judgeExpire(path, info)
 		if reason == expireKeep {
+			*kept += info.Size()
 			return nil
 		}
 		if err := os.Remove(path); err != nil {
@@ -354,12 +385,6 @@ func (cm *CacheManager) Expire() (ExpireStats, error) {
 		}
 		return nil
 	})
-	if walkErr != nil {
-		return stats, walkErr
-	}
-
-	cm.pruneEmptyDirs(root)
-	return stats, nil
 }
 
 // expireReason is why Expire removes a cache file, or expireKeep when it

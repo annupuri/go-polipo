@@ -82,6 +82,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | S5 | ディスクのエラー | キャッシュディレクトリに書けない、エントリが読めない、ディスクがいっぱい | TestScenarioDiskErrors | ディスクがいっぱい(テストで起こす移植性のある方法がない) |
 | S6 | 無効化 | 安全でないメソッドがその URL を無効にする | TestUnsafeRequestInvalidatesCache | |
 | S7 | 同じ URL への同時の要求(collapsed forwarding) | まとめてよい要求(GET。HEAD・POST・Authorization・Range・no-cache・no-store・Pragma は除く)、小さく新鮮な応答(後続は待ってキャッシュから答えられる。条件付きの後続も。オリジンへは1回)、ヘッダの時点で放す(private、no-store、Set-Cookie、Vary、no-cache、寿命なし、長さ不明、memoryCacheMaxEntrySize 超え、200 以外)、後続の切断、先頭の失敗、再検証の共有、Range の要求は待たない、先頭のクライアントの切断(取得は中止され、後続はそれぞれ取得する) | TestCanCollapse, TestCollapsedForwarding* | |
+| S8 | ディスクキャッシュの総量(`diskCacheMaxSize`) | 設定(既定 -1、バイト数、無効な値)、1件あたりの実際の上限。起動時に数えた総量が、保存・置き換え・無効化・掃除のあとも合っていること。削りは使われていない順に 90% まで消し、その間に使われたエントリは残す。上限を超える保存で削りが始まる。上限より大きい1件は保存しない(長さ宣言あり・chunked)。`-x` も削る(`RemovedForLimit`)。状態表示(集計中、総量と上限、off) | TestEffectiveMaxDiskEntrySize, TestDiskCacheMaxSizeSetting, TestDiskSizeAccounting, TestTrimDisk*, TestStoreTriggersTrim, TestStoreRefusesEntryOverLimit, TestExpireTrimsToLimit, TestStatusPageDiskSize, TestFormatSize | Windows では読み込み中のファイルを消せず、次の削りに回す(テストしていない) |
 
 ## 6. デシジョンテーブル
 

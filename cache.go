@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -25,6 +26,12 @@ type CacheManager struct {
 	config   *Config
 	mu       sync.RWMutex // guards disk cache file I/O only; memCache is self-synchronized
 	memCache *lru.Cache[string, *memEntry]
+
+	// diskSize is the disk cache's total size, once diskSizeKnown; trimming
+	// is set while trimDisk runs in the background. See cache_size.go.
+	diskSize      atomic.Int64
+	diskSizeKnown atomic.Bool
+	trimming      atomic.Bool
 }
 
 // NewCacheManager creates a CacheManager instance.
@@ -51,9 +58,14 @@ func (cm *CacheManager) Invalidate(rawURL string) {
 	}
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		logf(cm.config.LogLevel, LogWarn, "Cache invalidate warning: %s: couldn't remove %s: %v", rawURL, path, err)
+	size := fileSize(path)
+	if err := os.Remove(path); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			logf(cm.config.LogLevel, LogWarn, "Cache invalidate warning: %s: couldn't remove %s: %v", rawURL, path, err)
+		}
+		return
 	}
+	cm.diskSize.Add(-size)
 }
 
 // Lookup retrieves a cached response for the request if it exists and is fresh.
@@ -201,7 +213,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	// independent ceilings, so a response can be too big for one and still fit
 	// the other. A body that turns out larger than declared (or had no
 	// Content-Length) is caught while it streams, in cacheBody.Read.
-	maxDiskSize := cm.config.MaxDiskCacheEntrySize
+	maxDiskSize := cm.effectiveMaxDiskEntrySize()
 	diskWants := diskEnabled && (maxDiskSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxDiskSize)
 	maxMemSize := cm.config.MemoryCacheMaxEntrySize
 	memWants := memEnabled && (maxMemSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxMemSize)
@@ -267,7 +279,7 @@ func (b *cacheBody) Read(p []byte) (int, error) {
 	if n > 0 {
 		b.size += int64(n)
 		if b.disk != nil {
-			if max := b.cm.config.MaxDiskCacheEntrySize; max >= 0 && b.size > max {
+			if max := b.cm.effectiveMaxDiskEntrySize(); max >= 0 && b.size > max {
 				b.dropDisk(errCacheTooLarge)
 			} else if _, werr := b.disk.pw.Write(p[:n]); werr != nil {
 				b.dropDisk(werr)
@@ -310,11 +322,15 @@ func (b *cacheBody) commit() {
 			os.Remove(w.tmp)
 		} else {
 			b.cm.mu.Lock()
+			added := fileSize(w.tmp) - fileSize(w.path) // an entry replaced no longer counts
 			err := os.Rename(w.tmp, w.path)
 			b.cm.mu.Unlock()
 			if err != nil {
 				logf(b.cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't move %s into place: %v", b.key, w.tmp, err)
 				os.Remove(w.tmp)
+			} else {
+				b.cm.diskSize.Add(added)
+				b.cm.maybeTrim()
 			}
 		}
 	}

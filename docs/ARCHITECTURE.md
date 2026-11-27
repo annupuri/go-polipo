@@ -69,9 +69,11 @@ these goroutines with its own `go` statements:
 |---|---|---|---|
 | `CacheManager.startDiskWrite` (cache_disk.go) | Writes a response body to its disk-cache file while the body is served | The body has been written, or the write stopped | Sends the `error` on the `diskWrite.done` channel |
 | `serve` (main.go) | Waits for `SIGINT`/`SIGTERM`/`SIGHUP` and closes the server | One of those signals arrives | Not needed (logs the shutdown) |
-| `setupReloadSignals` (signal_unix.go; none on Windows) | On `SIGUSR1`/`SIGUSR2`, reopens the log file and reloads the forbidden/uncachable/forbiddenTunnels lists (`SIGUSR2` also discards the memory cache) | Never; runs for the life of the process | Logs each failure and keeps waiting |
+| `CacheManager.StartDiskAccounting` (cache_size.go) | Counts the disk cache's total size at start, then trims it if it is over `diskCacheMaxSize` | The count (and trim) is done | Not needed; a file that cannot be read is left out of the count |
+| `CacheManager.maybeTrim` (cache_size.go), at most one at a time | Removes the entries unused the longest until the disk cache is down to 90% of `diskCacheMaxSize` | The cache is down to that size, or there is nothing left it can remove | Logs what it removed; a file it cannot remove is left for the next trim |
+| `setupReloadSignals` (signal_unix.go; none on Windows) | On `SIGUSR1`/`SIGUSR2`, reopens the log files and reloads the forbidden/uncachable/forbiddenTunnels lists (`SIGUSR2` also discards the memory cache) | Never; runs for the life of the process | Logs each failure and keeps waiting |
 | `tunnel` (proxy.go), two of them | Copies one direction of a CONNECT tunnel each | That direction reaches EOF or an error | Not needed; `tunnel` waits for both with a `sync.WaitGroup` |
-| `tunnelWithIdleTimeout` (proxy.go) | Watches a tunnel for `tunnelIdleTimeout` and closes both connections when it expires | The tunnel ends, or the timeout fires | Sets the `expired` flag the function returns |
+| `tunnelWithIdleTimeout` (proxy.go) | Watches a tunnel for `tunnelIdleTimeout` and closes both connections when it expires | The tunnel ends, or the timeout fires | Sets a flag the function returns |
 
 None of them calls `recover`. Expected failures are returned as `error`s; a
 panic means a bug, and an unrecovered panic in any goroutine stops the whole

@@ -1,5 +1,12 @@
 Unreleased: go-polipo 2.0.2:
 
+  * New diskCacheMaxSize variable: an upper limit on the disk cache's
+    total size, in bytes.  When a store takes the cache past it, the
+    entries unused the longest are removed in the background until it
+    is down to 90% of the limit; "polipo -x" and POST /polipo/flush
+    do the same after their usual removals.  /polipo/status shows the
+    total and the limit.  The default, -1, keeps Polipo's behaviour of
+    no limit.
   * Simultaneous requests for the same URL share one request to the
     origin when the response is small (up to memoryCacheMaxEntrySize)
     and will be fresh in the cache: requests arriving while it is being

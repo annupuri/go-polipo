@@ -55,6 +55,23 @@ func percent(part, whole uint64) string {
 	return fmt.Sprintf("%.1f%%", float64(part)*100/float64(whole))
 }
 
+// diskCacheSizeStatus is the "Disk cache size" row of /polipo/status: the
+// cache's total size and diskCacheMaxSize.
+func (ph *ProxyHandler) diskCacheSizeStatus() string {
+	if ph.cacheManager.isDiskCacheDisabled() {
+		return "off"
+	}
+	size, known := ph.cacheManager.DiskSize()
+	if !known {
+		return "being counted"
+	}
+	limit := "no limit"
+	if max := ph.config.DiskCacheMaxSize; max >= 0 {
+		limit = "limit " + formatSize(max)
+	}
+	return formatSize(size) + "; " + limit
+}
+
 // writeStatus renders the /polipo/status page.
 func (ph *ProxyHandler) writeStatus(w io.Writer) {
 	s := ph.stats
@@ -86,6 +103,7 @@ func (ph *ProxyHandler) writeStatus(w io.Writer) {
 		{"CONNECT failures", fmt.Sprint(s.tunnelFailures.Load())},
 		{"Denied by policy", fmt.Sprint(s.denied.Load())},
 		{"In-memory cache entries", fmt.Sprint(ph.cacheManager.MemoryEntries())},
+		{"Disk cache size", ph.diskCacheSizeStatus()},
 	}
 
 	fmt.Fprint(w, `<html><head><title>go-polipo Status</title></head>
