@@ -91,6 +91,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `logFilePermissions` | `0640` | ログファイルとアクセスログを作るときの権限 (8進数。umask が差し引かれる)。既にあるファイルの権限は変えない |
 | `accessLogFile` | (なし) | アクセスログの出力先ファイル。1リクエストにつき JSON を1行書く。中身は、リクエストが届いた時刻、クライアント、メソッド、URL、ステータス、バイト数、所要時間、キャッシュが何をしたか (`hit`、`stale`、`revalidated`、`miss`)。取得したすべての URL が残るので、既定では書かない (Polipo には無い設定) |
 | `localDocumentRoot` | (なし) | `http://127.0.0.1:8123/<パス>` で配信するファイルを置くディレクトリ。システムの「セットアップスクリプトを使う」に指定する PAC ファイル (`proxy.pac`) など。`.pac` のファイルは `authCredentials` なしで返す。`/polipo/` で始まるパスはここから探さない。Polipo の既定値は `/usr/share/polipo/www/` だったが、go-polipo では空で、何も配信しない |
+| `disableIndexing` | `true` | `false` にすると、ディスクキャッシュの一覧 `/polipo/index?<URL の前方部分>`(その直下のエントリ)と `/polipo/recursive-index?<URL の前方部分>`(配下のすべて)が使える。各エントリの大きさ、日付、最後に使った日時、新鮮かどうかを表示する。キャッシュにある URL がすべて見えるので既定では無効。1ページ 1000 件まで |
 
 ドキュメント
 ------------

@@ -847,6 +847,10 @@ func targetURL(req *http.Request) string {
 func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 	if path == "/polipo" || path == "/polipo/" {
+		index := ""
+		if !ph.config.DisableIndexing {
+			index = "\n<li><a href=\"/polipo/index?\">Disk cache index</a></li>"
+		}
 		w.Header().Set(headerContentType, "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<html><head><title>go-polipo</title></head>
 <body>
@@ -854,7 +858,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 <p>Welcome to go-polipo version %s.</p>
 <ul>
 <li><a href="/polipo/status">Status</a></li>
-<li><a href="/polipo/config">Configuration variables</a></li>
+<li><a href="/polipo/config">Configuration variables</a></li>%s
 </ul>
 <form method="post" action="/polipo/reload">
 <button type="submit">Reload forbidden/uncachable lists</button>
@@ -862,7 +866,12 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 <form method="post" action="/polipo/flush">
 <button type="submit">Flush disk cache</button>
 </form>
-</body></html>`, Version)
+</body></html>`, Version, index)
+		return
+	}
+
+	if path == "/polipo/index" || path == "/polipo/recursive-index" {
+		ph.serveIndex(w, req, path == "/polipo/recursive-index")
 		return
 	}
 
