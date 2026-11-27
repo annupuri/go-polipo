@@ -262,6 +262,15 @@
 # /usr/share/polipo/www/; go-polipo's is empty: nothing is served.
 # localDocumentRoot = "/etc/polipo/www"
 
+# The disk cache index: /polipo/index?<URL prefix> lists the entries
+# directly under a prefix (and the deeper paths as directories), and
+# /polipo/recursive-index?<URL prefix> all of them, with their size,
+# dates, last use and freshness; /polipo/index? starts from the hosts.
+# Off by default, as in Polipo, because it shows every URL in the cache.
+# Each entry's header is read, so a recursive index of a large cache
+# takes a few seconds; a page shows at most 1000 rows.
+# disableIndexing = true
+
 # Bitmask of message categories to log (hex), matching Polipo's own bits:
 # 0x1 error, 0x2 warn, 0x4 info, 0x8 forbidden/denied (including rejected
 # CONNECTs). Polipo's other bits (0x10-0x80) are accepted but log nothing.

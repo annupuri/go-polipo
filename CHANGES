@@ -1,5 +1,13 @@
 Unreleased: go-polipo 2.0.2:
 
+  * New disableIndexing variable and disk cache index pages, as in
+    Polipo: with disableIndexing = false, /polipo/index?<URL prefix>
+    lists the cache entries directly under a prefix, and the deeper
+    paths as directories, and /polipo/recursive-index?<URL prefix>
+    lists all of them, each with its size, Last-Modified, Date, last
+    use and whether it is fresh.  The default, true, keeps them off,
+    since they show every URL in the cache.  Unlike Polipo, a page
+    shows at most 1000 entries.  2.0.0 and 2.0.1 had no index.
   * New localDocumentRoot variable, as in Polipo: files in that
     directory are served to requests addressed to go-polipo itself
     outside /polipo/, so that a proxy auto-config file can be given to

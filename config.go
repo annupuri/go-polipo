@@ -46,6 +46,11 @@ type Config struct {
 	// default is empty: nothing is served.
 	LocalDocumentRoot string
 
+	// DisableIndexing, true by default as in Polipo, turns off the disk
+	// cache index pages, /polipo/index and /polipo/recursive-index (see
+	// cache_index.go), which list every URL in the cache.
+	DisableIndexing bool
+
 	// LogFile, when non-empty, redirects log output to this file (created if
 	// missing, appended otherwise). Empty keeps logging on standard error.
 	LogFile string
@@ -245,6 +250,7 @@ func NewDefaultConfig() *Config {
 		ForbiddenURL:            "",
 		ForbiddenRedirectCode:   http.StatusFound, // Polipo's default
 		LocalDocumentRoot:       "",
+		DisableIndexing:         true, // Polipo's default
 		SocksParentProxy:        "",
 		SocksProxyType:          "socks5",
 		ParentProxy:             "",
@@ -327,6 +333,7 @@ const (
 	keyAccessLogFile             configKey = "accessLogFile"
 	keyDisableLocalInterface     configKey = "disableLocalInterface"
 	keyLocalDocumentRoot         configKey = "localDocumentRoot"
+	keyDisableIndexing           configKey = "disableIndexing"
 	keyMaxConcurrentRequests     configKey = "maxConcurrentRequests"
 	keyClientTimeout             configKey = "clientTimeout"
 	keyServerTimeout             configKey = "serverTimeout"
@@ -390,6 +397,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyAccessLogFile, c.AccessLogFile},
 		{keyDisableLocalInterface, strconv.FormatBool(c.DisableLocalInterface)},
 		{keyLocalDocumentRoot, c.LocalDocumentRoot},
+		{keyDisableIndexing, strconv.FormatBool(c.DisableIndexing)},
 		{keyMaxConcurrentRequests, strconv.Itoa(c.MaxConcurrentRequests)},
 		{keyClientTimeout, formatDuration(c.ClientTimeout)},
 		{keyServerTimeout, formatDuration(c.ServerTimeout)},
@@ -804,6 +812,8 @@ func (c *Config) Set(key configKey, val string) error {
 		c.LocalDocumentRoot = val
 	case keyDisableLocalInterface:
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
+	case keyDisableIndexing:
+		c.DisableIndexing = strings.ToLower(val) == "true" || val == "1"
 	case keyNoDiskCache:
 		c.NoDiskCache = strings.ToLower(val) == "true" || val == "1"
 	case keyDontCacheCookies:
