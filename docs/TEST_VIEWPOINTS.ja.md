@@ -81,6 +81,7 @@ go-polipo のテストで確かめるべき観点と、それぞれを今どの�
 | S4 | ディスク上のファイル | 壊れている、一時ファイル(書き込み中/放置)、`diskCacheUnlinkTime` を過ぎて未使用、保存は古いが最近使った(ディスクから/メモリから。1時間以内は書き換えない)、大きくて未使用(`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries, TestCacheHitRefreshesAccess | |
 | S5 | ディスクのエラー | キャッシュディレクトリに書けない、エントリが読めない、ディスクがいっぱい | TestScenarioDiskErrors | ディスクがいっぱい(テストで起こす移植性のある方法がない) |
 | S6 | 無効化 | 安全でないメソッドがその URL を無効にする | TestUnsafeRequestInvalidatesCache | |
+| S7 | 同じ URL への同時の要求(collapsed forwarding) | まとめてよい要求(GET。HEAD・POST・Authorization・Range・no-cache・no-store・Pragma は除く)、小さく新鮮な応答(後続は待ってキャッシュから答えられる。条件付きの後続も。オリジンへは1回)、ヘッダの時点で放す(private、no-store、Set-Cookie、Vary、no-cache、寿命なし、長さ不明、memoryCacheMaxEntrySize 超え、200 以外)、後続の切断、先頭の失敗、再検証の共有、Range の要求は待たない、先頭のクライアントの切断(取得は中止され、後続はそれぞれ取得する) | TestCanCollapse, TestCollapsedForwarding* | |
 
 ## 6. デシジョンテーブル
 

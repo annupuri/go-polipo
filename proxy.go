@@ -68,6 +68,10 @@ type ProxyHandler struct {
 	// accessLog, when set (accessLogFile), gets one line per request; see
 	// serveLogged.
 	accessLog *accessLogger
+
+	// flights are the requests to the origin that requests for the same
+	// URL may wait on instead of sending their own; see flight.
+	flights flights
 }
 
 var _ http.Handler = (*ProxyHandler)(nil)
@@ -348,6 +352,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	if !ph.uncachable.Load().Match(req.URL.String(), req.URL.Host) {
 		ph.cacheManager.Store(req, resp)
 	}
+	ph.decideFlight(resp)
 	if revived {
 		answerClientValidators(resp)
 	}
@@ -1361,6 +1366,28 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// ReverseProxy via ModifyResponse and ErrorHandler. When relaxTransparency
 	// is "maybe" or "true", the ErrorHandler falls back to a stale cache entry
 	// instead of a raw error if the origin cannot be reached.
+	// Collapsed forwarding: if a request for the same URL is already on
+	// its way to the origin, wait for it and answer from the cache; see
+	// flight.
+	if canCollapse(req) {
+		key := req.URL.String()
+		f, leader := ph.flights.join(key)
+		if leader {
+			req = req.WithContext(context.WithValue(req.Context(), flightKey{}, f))
+			defer ph.flights.finish(key, f)
+		} else if awaitFlight(req, f) {
+			if cachedResp := ph.cacheManager.Lookup(req); cachedResp != nil {
+				defer func() { _ = cachedResp.Body.Close() }()
+				setCacheAction(req, cacheHit)
+				ph.serveCached(w, req, cachedResp)
+				return
+			}
+		}
+		if req.Context().Err() != nil {
+			return // the client went away while waiting
+		}
+	}
+
 	ph.stats.upstream.Add(1)
 	ph.reverseProxy.ServeHTTP(w, req)
 }

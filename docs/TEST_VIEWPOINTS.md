@@ -92,6 +92,7 @@ names; `TestScenario*` are the step-by-step scenarios in
 | S4 | Files on disk | corrupt, temporary (being written / abandoned), unused past `diskCacheUnlinkTime`, stored long ago but used recently (disk hit, memory hit; not rewritten within the hour), large and unused (`diskCacheTruncate*`) | TestExpire, TestExpireTemporaryFiles, TestExpireRemovesLargeStaleEntries, TestCacheHitRefreshesAccess | |
 | S5 | Disk errors | cache directory unwritable, entry unreadable, disk full | TestScenarioDiskErrors | disk full (no portable way to cause it in a test) |
 | S6 | Invalidation | unsafe method invalidates the URL | TestUnsafeRequestInvalidatesCache | |
+| S7 | Simultaneous requests for a URL (collapsed forwarding) | which requests may share (GET; not HEAD, POST, Authorization, Range, no-cache, no-store, Pragma); small fresh response (followers wait, answered from the cache, conditional follower too, one origin request); followers let go at the headers (private, no-store, Set-Cookie, Vary, no-cache, no lifetime, unknown length, over memoryCacheMaxEntrySize, not 200); follower leaves; leader fails; revalidation shared; Range request not waiting; leader's client leaving (fetch cancelled, followers fetch themselves) | TestCanCollapse, TestCollapsedForwarding* | |
 
 ## 6. Decision tables
 
