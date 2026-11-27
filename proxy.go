@@ -168,6 +168,9 @@ func (ph *ProxyHandler) rewrite(pr *httputil.ProxyRequest) {
 	if hasConditionalHeaders(out) {
 		ctx = context.WithValue(ctx, clientConditionalKey{}, true)
 	}
+	// The client's own validators, before addConditionalHeaders may add
+	// go-polipo's: handleUpstreamError judges a stale fallback by them.
+	ctx = context.WithValue(ctx, clientValidatorsKey{}, validatorsOf(pr.In.Header))
 	ph.addConditionalHeaders(out)
 	ph.addVia(out.Header, out.ProtoMajor, out.ProtoMinor)
 	ctx = context.WithValue(ctx, requestTimeKey{}, time.Now())
@@ -197,9 +200,16 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 				w.Header().Set(headerWarning, `111 go-polipo "Revalidation failed"`)
 				setCacheAction(r, servedFromCache(stale))
 				copyHeader(w.Header(), staleResp.Header)
+				ph.stats.cacheHits.Add(1)
+				// r is the request sent upstream, which may carry
+				// go-polipo's validators; the client's are on its context.
+				cv, _ := r.Context().Value(clientValidatorsKey{}).(clientValidators)
+				if cv.notModified(r.Method, staleResp.Header) {
+					writeNotModified(w)
+					return
+				}
 				w.WriteHeader(staleResp.StatusCode)
 				n, _ := io.Copy(w, staleResp.Body)
-				ph.stats.cacheHits.Add(1)
 				ph.stats.cacheHitBytes.Add(uint64(n))
 				return
 			}
@@ -428,6 +438,11 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 // client itself sent If-None-Match or If-Modified-Since (set in rewrite
 // before addConditionalHeaders runs, read by cacheResponse).
 type clientConditionalKey struct{}
+
+// clientValidatorsKey holds, on the outgoing request's context, the
+// clientValidators the client sent (set in rewrite). The outgoing request's
+// own If-None-Match and If-Modified-Since may be go-polipo's instead.
+type clientValidatorsKey struct{}
 
 // requestTimeKey records, on the outgoing request's context, when the
 // request was sent upstream (set in rewrite): RFC 9111's request_time, from
@@ -1380,8 +1395,10 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
-// serveCached writes a cached (complete) entity to w, honoring a client
-// Range/If-Range request against it. go-polipo only ever stores a whole
+// serveCached writes a cached (complete) entity to w, honoring a client's
+// conditional request (304 Not Modified when its validators match, see
+// clientValidators) and Range/If-Range request against it. A matching
+// If-None-Match wins over Range, as RFC 9110 section 13.2.2 orders them. go-polipo only ever stores a whole
 // response body - there is no partial instantiation (PARITY_AUDIT.md §10) -
 // so satisfying a Range request from the cache always means slicing an
 // already fully-present entity, never filling a gap from the origin.
@@ -1395,6 +1412,10 @@ func (ph *ProxyHandler) serveCached(rw http.ResponseWriter, req *http.Request, r
 		ph.stats.cacheHitBytes.Add(w.n)
 	}()
 	copyHeader(w.Header(), resp.Header)
+	if validatorsOf(req.Header).notModified(req.Method, resp.Header) {
+		writeNotModified(w)
+		return
+	}
 	w.Header().Set(headerAcceptRanges, "bytes")
 
 	if ph.writeRange(w, req, resp) {
