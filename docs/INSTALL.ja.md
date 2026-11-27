@@ -95,6 +95,25 @@ go-polipo は、リクエストごとに何をしたかを1行ずつ記録する
 
 Linux では、`SIGUSR1` か `SIGUSR2` を送ると go-polipo は `logFile` と `accessLogFile` の両方を開き直します。ログのローテーションツールでファイル名を変えてからシグナルを送ってください。Windows では、開き直すには再起動が必要です。
 
+### 4.2 PAC ファイル(任意)
+
+プロキシに `127.0.0.1:8123` と書く代わりに、PAC ファイル(プロキシを返す小さな JavaScript の関数)をシステムに渡すこともできます。Windows の「セットアップ スクリプトを使う」は `http://` か `https://` の URL しか受け付けないので、go-polipo 自身が `localDocumentRoot` から配信できるようにしました。置き場所のフォルダを作って `proxy.pac` を置きます:
+
+    $ mkdir -p /home/<you>/.config/go-polipo/www
+    $ cat > /home/<you>/.config/go-polipo/www/proxy.pac <<'EOF'
+    function FindProxyForURL(url, host) {
+      return "PROXY 127.0.0.1:8123; DIRECT";
+    }
+    EOF
+
+設定ファイルに次を加えて go-polipo を再起動します:
+
+    localDocumentRoot = /home/<you>/.config/go-polipo/www
+
+`http://127.0.0.1:8123/proxy.pac` でファイルが表示されることを確かめてから、Windows の「設定」>「ネットワークとインターネット」>「プロキシ」で「セットアップ スクリプトを使う」をオンにし、`http://127.0.0.1:8123/proxy.pac` を入力します。プロキシの後ろの `DIRECT` は、go-polipo が応答しないときに直接つなぐための指定です。
+
+クライアントはプロキシを知る前にこのファイルを取りに来るので、`.pac` のファイルは `authCredentials` なしで返します。`allowedClients` はかかります。フォルダのほかのファイルも、それぞれのパスで配信されます。
+
 ## 5. Windows で使う場合の選び方
 
 Linux、macOS などの POSIX システムでは、セクション1〜4 だけで使えます。Windows で go-polipo を動かす方法は2つあります:

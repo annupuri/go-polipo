@@ -79,6 +79,7 @@ Main configuration variables
 | `logFile` | (none) | File to write the log to. Without one, the log goes to standard error |
 | `logFilePermissions` | `0640` | Permissions for a newly created log file or access log (octal, less the umask). An existing file keeps its permissions |
 | `accessLogFile` | (none) | File to write an access log to: one JSON line per request, with the time it came in, client, method, URL, status, bytes, duration and what the cache did (`hit`, `stale`, `revalidated`, `miss`). Off by default, since it names every URL fetched (not in Polipo) |
+| `localDocumentRoot` | (none) | Directory whose files go-polipo serves at `http://127.0.0.1:8123/<path>`, such as a PAC file (`proxy.pac`) for the system's "Use setup script" setting. A `.pac` file is served without `authCredentials`. Paths under `/polipo/` are not looked up there. Polipo's default was `/usr/share/polipo/www/`; go-polipo's is empty, which serves nothing |
 
 Documentation
 -------------
