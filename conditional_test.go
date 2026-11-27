@@ -241,3 +241,191 @@ func TestConditionalOffline(t *testing.T) {
 		t.Errorf("Warning = %q, want 112 (disconnected operation)", rr.Header().Get("Warning"))
 	}
 }
+
+// revalidatingOrigin answers 304 to If-None-Match: "v1" and otherwise a
+// 200 with a new body, recording the validators it receives.
+type revalidatingOrigin struct {
+	srv       *httptest.Server
+	hits      atomic.Int32
+	gotINM    atomic.Value
+	gotIMS    atomic.Value
+	varyReply bool
+}
+
+func newRevalidatingOrigin(t *testing.T, vary bool) *revalidatingOrigin {
+	t.Helper()
+	o := &revalidatingOrigin{varyReply: vary}
+	o.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		o.hits.Add(1)
+		o.gotINM.Store(r.Header.Get("If-None-Match"))
+		o.gotIMS.Store(r.Header.Get("If-Modified-Since"))
+		w.Header().Set("Cache-Control", "max-age=600")
+		if o.varyReply {
+			w.Header().Set("Vary", "Accept-Encoding")
+		}
+		if r.Header.Get("If-None-Match") == `"v1"` || r.Header.Get("If-Modified-Since") != "" && r.Header.Get("If-None-Match") == "" {
+			w.Header().Set("ETag", `"v1"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		w.Header().Set("ETag", `"v2"`)
+		w.Write([]byte("new body"))
+	}))
+	t.Cleanup(o.srv.Close)
+	return o
+}
+
+func (o *revalidatingOrigin) lastINM() string { s, _ := o.gotINM.Load().(string); return s }
+func (o *revalidatingOrigin) lastIMS() string { s, _ := o.gotIMS.Load().(string); return s }
+
+// TestClientConditionalOnStaleEntry: a conditional request for a stale
+// entry that has a validator revalidates the entry with go-polipo's own
+// validator, refreshes it, and answers the client's validators from the
+// refreshed entry - what Polipo did.
+func TestClientConditionalOnStaleEntry(t *testing.T) {
+	lastModified := timeHeader(-48 * time.Hour)
+	for _, tc := range []struct {
+		name     string
+		etag, lm string // the stored entry's validators
+		hdr      [2]string
+		wantINM  string // sent upstream
+		wantIMS  string //
+		wantCode int
+		wantBody string
+	}{
+		{
+			name: "client holds the stored version", etag: `"v1"`,
+			hdr: [2]string{"If-None-Match", `"v1"`}, wantINM: `"v1"`, wantCode: 304,
+		},
+		{
+			name: "client holds another version", etag: `"v1"`,
+			hdr: [2]string{"If-None-Match", `"v0"`}, wantINM: `"v1"`, wantCode: 200, wantBody: "cached body",
+		},
+		{
+			name: "If-Modified-Since against a Last-Modified entry", lm: lastModified,
+			hdr: [2]string{"If-Modified-Since", timeHeader(0)}, wantIMS: lastModified, wantCode: 304,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := newRevalidatingOrigin(t, false)
+			cfg := newTestConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			cm := NewCacheManager(cfg)
+			ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+			buf := withAccessLog(ph)
+			target := origin.srv.URL + "/page"
+			seedStaleEntryWithValidators(t, cm, target, "cached body", tc.etag, tc.lm)
+
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set(tc.hdr[0], tc.hdr[1])
+			rr := httptest.NewRecorder()
+			ph.ServeHTTP(rr, req)
+
+			if origin.lastINM() != tc.wantINM || origin.lastIMS() != tc.wantIMS {
+				t.Errorf("sent If-None-Match %q, If-Modified-Since %q; want %q, %q",
+					origin.lastINM(), origin.lastIMS(), tc.wantINM, tc.wantIMS)
+			}
+			if rr.Code != tc.wantCode || rr.Body.String() != tc.wantBody {
+				t.Errorf("got %d %q, want %d %q", rr.Code, rr.Body.String(), tc.wantCode, tc.wantBody)
+			}
+			if tc.wantCode == 304 && rr.Header().Get("Content-Length") != "" {
+				t.Errorf("304 carries Content-Length %q", rr.Header().Get("Content-Length"))
+			}
+			seen := 0
+			if line := lastAccessLine(t, buf, &seen); line["cache"] != "revalidated" || line["status"] != float64(tc.wantCode) {
+				t.Errorf("access log cache=%v status=%v, want revalidated and %d", line["cache"], line["status"], tc.wantCode)
+			}
+
+			// The entry was refreshed and stored again in full, even when
+			// the client got no body: the next request is a fresh hit.
+			req = httptest.NewRequest(http.MethodGet, target, nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			rr = httptest.NewRecorder()
+			ph.ServeHTTP(rr, req)
+			if rr.Code != 200 || rr.Body.String() != "cached body" || origin.hits.Load() != 1 {
+				t.Errorf("after revalidation: %d %q with %d origin requests, want a fresh hit on the stored body",
+					rr.Code, rr.Body.String(), origin.hits.Load())
+			}
+		})
+	}
+}
+
+// TestClientConditionalPassedOn: where go-polipo has no validator of its
+// own to revalidate with - no stored entry, an entry without ETag or
+// Last-Modified, a Vary'd entry, or a request that bypasses the cache -
+// the client's validators go upstream as they are and the origin's 304 is
+// passed back.
+func TestClientConditionalPassedOn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		seed  func(cm *CacheManager, target string)
+		vary  bool
+		reqCC string
+	}{
+		{name: "nothing stored"},
+		{name: "entry without a validator", seed: func(cm *CacheManager, target string) {
+			_ = storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil),
+				mkResp("cached body", "Cache-Control", "max-age=1", "Date", timeHeader(-2*time.Hour)))
+		}},
+		{name: "Vary'd entry", vary: true, seed: func(cm *CacheManager, target string) {
+			_ = storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil),
+				mkResp("cached body", "Cache-Control", "max-age=600", "Date", timeHeader(0), "ETag", `"v1"`, "Vary", "Accept-Encoding"))
+		}},
+		{name: "request with no-cache", reqCC: "no-cache", seed: func(cm *CacheManager, target string) {
+			_ = storeNow(cm, httptest.NewRequest(http.MethodGet, target, nil),
+				mkResp("cached body", "Cache-Control", "max-age=1", "Date", timeHeader(-2*time.Hour), "ETag", `"v0"`))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := newRevalidatingOrigin(t, tc.vary)
+			cfg := newTestConfig()
+			cfg.DiskCacheRoot = t.TempDir()
+			cm := NewCacheManager(cfg)
+			ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+			target := origin.srv.URL + "/page"
+			if tc.seed != nil {
+				tc.seed(cm, target)
+			}
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set("If-None-Match", `"v1"`)
+			if tc.reqCC != "" {
+				req.Header.Set("Cache-Control", tc.reqCC)
+			}
+			rr := httptest.NewRecorder()
+			ph.ServeHTTP(rr, req)
+			if origin.lastINM() != `"v1"` {
+				t.Errorf("sent If-None-Match %q, want the client's", origin.lastINM())
+			}
+			if rr.Code != http.StatusNotModified || rr.Body.Len() != 0 {
+				t.Errorf("got %d %q, want the origin's 304 passed on", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestClientConditionalStaleEntryChanged: when the origin answers
+// go-polipo's validator with a new 200, that response is stored and
+// passed to the client.
+func TestClientConditionalStaleEntryChanged(t *testing.T) {
+	origin := newRevalidatingOrigin(t, false)
+	cfg := newTestConfig()
+	cfg.DiskCacheRoot = t.TempDir()
+	cm := NewCacheManager(cfg)
+	ph := NewProxyHandler(cfg, cm, NewForbiddenList(), NewForbiddenList(), NewForbiddenList())
+	target := origin.srv.URL + "/page"
+	seedStaleEntryWithValidators(t, cm, target, "old body", `"v0"`, "")
+
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("If-None-Match", `"v0"`)
+	rr := httptest.NewRecorder()
+	ph.ServeHTTP(rr, req)
+	if origin.lastINM() != `"v0"` || rr.Code != 200 || rr.Body.String() != "new body" {
+		t.Fatalf("sent %q, got %d %q; want the stored ETag sent and the new 200 passed on", origin.lastINM(), rr.Code, rr.Body.String())
+	}
+	if cached := cm.Lookup(httptest.NewRequest(http.MethodGet, target, nil)); cached == nil || cached.Header.Get("ETag") != `"v2"` {
+		t.Error("the new response was not stored")
+	}
+}

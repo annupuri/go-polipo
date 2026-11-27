@@ -2035,7 +2035,12 @@ func TestNoConditionalHeadersWithoutValidators(t *testing.T) {
 	}
 }
 
-func TestClientConditionalHeaderNotOverridden(t *testing.T) {
+// TestClientConditionalRevalidatesStoredEntry: a client's validator for a
+// stale entry is replaced by the entry's own, so the origin's 304 vouches
+// for the stored response. A client whose copy is a different one then
+// gets the stored body with a 200 (RFC 9111 section 4.3.2), not the 304,
+// which said nothing about its "client-etag" copy.
+func TestClientConditionalRevalidatesStoredEntry(t *testing.T) {
 	var gotINM string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotINM = r.Header.Get("If-None-Match")
@@ -2058,16 +2063,11 @@ func TestClientConditionalHeaderNotOverridden(t *testing.T) {
 	rr := httptest.NewRecorder()
 	ph.ServeHTTP(rr, req)
 
-	if gotINM != `"client-etag"` {
-		t.Errorf("If-None-Match sent = %q, want the client's own %q", gotINM, `"client-etag"`)
+	if gotINM != `"cached-etag"` {
+		t.Errorf("If-None-Match sent = %q, want the stored entry's %q", gotINM, `"cached-etag"`)
 	}
-	// The 304 vouches for the client's "client-etag" copy, not the cached
-	// "cached-etag" one, so it must reach the client rather than be revived.
-	if rr.Code != http.StatusNotModified {
-		t.Errorf("status = %d, want 304 passed through to the client", rr.Code)
-	}
-	if rr.Body.Len() != 0 {
-		t.Errorf("body = %q, want empty (cached body must not be served)", rr.Body.String())
+	if rr.Code != http.StatusOK || rr.Body.String() != "cached body" {
+		t.Errorf("got %d %q, want 200 with the stored body", rr.Code, rr.Body.String())
 	}
 }
 

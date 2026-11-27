@@ -117,12 +117,17 @@ func opaqueTag(etag string) (string, bool) {
 // Expires, Date, Vary, ...) and no other representation metadata, except
 // that Last-Modified may stay when there is no ETag.
 func writeNotModified(w http.ResponseWriter) {
-	h := w.Header()
+	stripBodyFields(w.Header())
+	w.WriteHeader(http.StatusNotModified)
+}
+
+// stripBodyFields removes from h the fields a 304 does not carry; see
+// writeNotModified.
+func stripBodyFields(h http.Header) {
 	for _, name := range []string{headerContentType, headerContentLength, headerContentEncoding, headerContentRange, headerTransferEncoding} {
 		h.Del(name)
 	}
 	if h.Get(headerETag) != "" {
 		h.Del(headerLastModified)
 	}
-	w.WriteHeader(http.StatusNotModified)
 }
