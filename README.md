@@ -57,6 +57,7 @@ Main configuration variables
 | `dontCacheCookies` | `true` | Do not cache responses carrying `Set-Cookie` |
 | `diskCacheUnlinkTime` | `32d` | `-x` removes cache entries not accessed for this long |
 | `maxDiskCacheEntrySize` | `-1` (no limit) | A response body larger than this many bytes is not cached (it is still forwarded) |
+| `diskCacheMaxSize` | `-1` (no limit) | Upper limit on the disk cache's total size, in bytes. Past it, the entries unused the longest are removed until the cache is down to 90% of it; `-x` does the same. Shown on `/polipo/status` (not in Polipo) |
 | `diskCacheTruncateTime` / `diskCacheTruncateSize` | `4d12h` / `1048576` | `-x` removes entries larger than `diskCacheTruncateSize` that have gone unused for `diskCacheTruncateTime`, ahead of `diskCacheUnlinkTime` (Polipo truncated them instead; go-polipo has no partial-instance support to truncate safely, so it deletes them) |
 | `forbiddenFile` | (none) | File listing forbidden URLs |
 | `uncachableFile` | (none) | File listing URLs not to cache |

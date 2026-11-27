@@ -68,6 +68,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `dontCacheCookies` | `true` | `Set-Cookie` を含む応答をキャッシュしない |
 | `diskCacheUnlinkTime` | `32d` | 最終アクセスからこの期間を過ぎたキャッシュを `-x` で削除 |
 | `maxDiskCacheEntrySize` | `-1`(無制限) | この値(バイト)を超える応答本文はキャッシュしない(転送は行う) |
+| `diskCacheMaxSize` | `-1`(無制限) | ディスクキャッシュの総量の上限(バイト)。超えたら、使われていない順にエントリを消し、上限の 90% まで減らす。`-x` でも同じ。`/polipo/status` に表示する (Polipo には無い設定) |
 | `diskCacheTruncateTime` / `diskCacheTruncateSize` | `4d12h` / `1048576` | `-x` 実行時、`diskCacheTruncateSize` より大きく `diskCacheTruncateTime` 以上未使用のエントリを早期削除(Polipoは切り詰めて残すが、部分インスタンス機構が無いgo-polipoでは安全に切り詰められないため削除に変更) |
 | `forbiddenFile` | (なし) | アクセス禁止リストのファイル |
 | `uncachableFile` | (なし) | キャッシュ対象外リストのファイル |

@@ -317,6 +317,7 @@ func TestSetAllKeys(t *testing.T) {
 	ok(keyTunnelIdleTimeout, "10m")
 	ok(keyDiskCacheUnlinkTime, "16d")
 	ok(keyMaxDiskCacheEntrySize, "5000000")
+	ok(keyDiskCacheMaxSize, "10737418240")
 	ok(keyDiskCacheTruncateTime, "2d")
 	ok(keyDiskCacheTruncateSize, "2097152")
 	ok(keyMemoryCacheEntries, "512")
@@ -336,6 +337,9 @@ func TestSetAllKeys(t *testing.T) {
 	}
 	if c.SocksProxyType != "socks5" {
 		t.Errorf("socksProxyType not lowercased: %q", c.SocksProxyType)
+	}
+	if c.DiskCacheMaxSize != 10737418240 {
+		t.Errorf("diskCacheMaxSize not applied: %d", c.DiskCacheMaxSize)
 	}
 	if c.LogFile != "/var/log/go-polipo.log" {
 		t.Errorf("logFile not applied: %q", c.LogFile)

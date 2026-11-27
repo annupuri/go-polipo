@@ -846,19 +846,19 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, fmt.Sprintf("Cache flush failed: %v", err), http.StatusInternalServerError)
 			return
 		}
-		logf(ph.config.LogLevel, LogInfo, "Cache flush: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale), freed %d bytes",
-			stats.Scanned, stats.Removed, stats.RemovedForSize, stats.Freed)
+		logf(ph.config.LogLevel, LogInfo, "Cache flush: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale, %d to stay under diskCacheMaxSize), freed %d bytes",
+			stats.Scanned, stats.Removed, stats.RemovedForSize, stats.RemovedForLimit, stats.Freed)
 		w.Header().Set(headerContentType, "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<html><head><title>go-polipo Cache Flush</title></head>
 <body>
 <h1>Cache Flush Complete</h1>
 <ul>
 <li>Scanned: %d</li>
-<li>Removed: %d (%d for exceeding diskCacheTruncateSize while stale)</li>
+<li>Removed: %d (%d for exceeding diskCacheTruncateSize while stale, %d to stay under diskCacheMaxSize)</li>
 <li>Freed: %d bytes</li>
 </ul>
 <p><a href="/polipo/">Back</a></p>
-</body></html>`, stats.Scanned, stats.Removed, stats.RemovedForSize, stats.Freed)
+</body></html>`, stats.Scanned, stats.Removed, stats.RemovedForSize, stats.RemovedForLimit, stats.Freed)
 		return
 	}
 

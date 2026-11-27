@@ -102,8 +102,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "Disk cache expiry failed: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stdout, "Disk cache expiry complete: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale), freed %d bytes\n",
-			stats.Scanned, stats.Removed, stats.RemovedForSize, stats.Freed)
+		fmt.Fprintf(stdout, "Disk cache expiry complete: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale, %d to stay under diskCacheMaxSize), freed %d bytes\n",
+			stats.Scanned, stats.Removed, stats.RemovedForSize, stats.RemovedForLimit, stats.Freed)
 		return 0
 	}
 
@@ -212,6 +212,7 @@ func newProxy(config *Config) (*ProxyHandler, *CacheManager) {
 	}
 
 	cacheMgr := NewCacheManager(config)
+	cacheMgr.StartDiskAccounting()
 	return NewProxyHandler(config, cacheMgr, forbidden, uncachable, forbiddenTunnels), cacheMgr
 }
 
