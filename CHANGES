@@ -1,5 +1,13 @@
 Unreleased: go-polipo 2.0.2:
 
+  * Simultaneous requests for the same URL share one request to the
+    origin when the response is small (up to memoryCacheMaxEntrySize)
+    and will be fresh in the cache: requests arriving while it is being
+    fetched wait for it and are answered from the cache.  2.0.0 and
+    2.0.1 sent one request per client.  Polipo shared every response
+    as it streamed, large ones included; go-polipo lets the other
+    requests go and fetch on their own when the response is large, of
+    unknown length, or will not be served from the cache.
   * A client's own conditional request (If-None-Match or
     If-Modified-Since) is answered from the cache with 304 Not Modified
     when its validators match the stored response, as in Polipo.  2.0.0
