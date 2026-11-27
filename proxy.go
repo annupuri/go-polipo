@@ -742,7 +742,7 @@ func (ph *ProxyHandler) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	originForm := isOriginForm(req)
 
 	// 1.4 Proxy authentication (authCredentials)
-	if !ph.isAuthorized(req) {
+	if !ph.isAuthorized(req) && !ph.isPublicDocument(req) {
 		ph.stats.denied.Add(1)
 		logf(ph.config.LogLevel, LogForbidden, "Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
 		if originForm {
@@ -996,12 +996,14 @@ func (ph *ProxyHandler) serveOriginForm(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	// Any other origin-form request (a browser pointed at go-polipo asking
-	// for /favicon.ico, say, or /polipo/ with the local interface disabled)
-	// has nothing here to serve. Polipo answered these from
-	// localDocumentRoot, with 404 when the file was absent; go-polipo has no
-	// document root, so it is always 404. Forwarding them instead fails
-	// anyway: there is no target host.
+	// Any other origin-form request is for a file under localDocumentRoot,
+	// as in Polipo. Without one (the default), or for /polipo/ with the
+	// local interface disabled, there is nothing here to serve: 404, as
+	// Polipo answered when the file was absent. Forwarding them instead
+	// fails anyway: there is no target host.
+	if ph.serveLocalDocument(w, req) {
+		return
+	}
 	http.NotFound(w, req)
 }
 

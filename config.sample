@@ -250,6 +250,18 @@
 # tunnelIdleTimeout = 0
 # disableLocalInterface = false # disables /polipo/ and /polipo/config
 
+# A directory whose files are served to requests addressed to go-polipo
+# itself, as http://127.0.0.1:8123/<path> - for instance a proxy
+# auto-config (PAC) file, proxy.pac, for Windows' "Use setup script",
+# which takes only an http:// or https:// URL.  A directory gets its
+# index.html; there are no listings, and neither ".." nor a symbolic link
+# leads outside it.  A .pac file is served without authCredentials, since
+# a client fetches it before it knows the proxy; allowedClients still
+# applies.  Paths under /polipo/ are never looked up here, and
+# disableLocalInterface does not turn this off.  Polipo's default was
+# /usr/share/polipo/www/; go-polipo's is empty: nothing is served.
+# localDocumentRoot = "/etc/polipo/www"
+
 # Bitmask of message categories to log (hex), matching Polipo's own bits:
 # 0x1 error, 0x2 warn, 0x4 info, 0x8 forbidden/denied (including rejected
 # CONNECTs). Polipo's other bits (0x10-0x80) are accepted but log nothing.

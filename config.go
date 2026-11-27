@@ -39,6 +39,13 @@ type Config struct {
 	ForbiddenURL          string
 	ForbiddenRedirectCode int
 
+	// LocalDocumentRoot, when non-empty, is a directory whose files are
+	// served to requests addressed to go-polipo itself outside /polipo/,
+	// as in Polipo - a PAC file, say (see localdoc.go). Polipo's default
+	// was /usr/share/polipo/www/; go-polipo installs nothing there, so its
+	// default is empty: nothing is served.
+	LocalDocumentRoot string
+
 	// LogFile, when non-empty, redirects log output to this file (created if
 	// missing, appended otherwise). Empty keeps logging on standard error.
 	LogFile string
@@ -237,6 +244,7 @@ func NewDefaultConfig() *Config {
 		ForbiddenTunnelsFile:    "",
 		ForbiddenURL:            "",
 		ForbiddenRedirectCode:   http.StatusFound, // Polipo's default
+		LocalDocumentRoot:       "",
 		SocksParentProxy:        "",
 		SocksProxyType:          "socks5",
 		ParentProxy:             "",
@@ -318,6 +326,7 @@ const (
 	keyLogFilePermissions        configKey = "logFilePermissions"
 	keyAccessLogFile             configKey = "accessLogFile"
 	keyDisableLocalInterface     configKey = "disableLocalInterface"
+	keyLocalDocumentRoot         configKey = "localDocumentRoot"
 	keyMaxConcurrentRequests     configKey = "maxConcurrentRequests"
 	keyClientTimeout             configKey = "clientTimeout"
 	keyServerTimeout             configKey = "serverTimeout"
@@ -380,6 +389,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyLogFilePermissions, fmt.Sprintf("%#o", c.LogFilePermissions)},
 		{keyAccessLogFile, c.AccessLogFile},
 		{keyDisableLocalInterface, strconv.FormatBool(c.DisableLocalInterface)},
+		{keyLocalDocumentRoot, c.LocalDocumentRoot},
 		{keyMaxConcurrentRequests, strconv.Itoa(c.MaxConcurrentRequests)},
 		{keyClientTimeout, formatDuration(c.ClientTimeout)},
 		{keyServerTimeout, formatDuration(c.ServerTimeout)},
@@ -790,6 +800,8 @@ func (c *Config) Set(key configKey, val string) error {
 		c.LogFilePermissions = os.FileMode(mode)
 	case keyAccessLogFile:
 		c.AccessLogFile = val
+	case keyLocalDocumentRoot:
+		c.LocalDocumentRoot = val
 	case keyDisableLocalInterface:
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
 	case keyNoDiskCache:

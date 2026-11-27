@@ -1,5 +1,16 @@
 Unreleased: go-polipo 2.0.2:
 
+  * New localDocumentRoot variable, as in Polipo: files in that
+    directory are served to requests addressed to go-polipo itself
+    outside /polipo/, so that a proxy auto-config file can be given to
+    Windows' "Use setup script" as http://127.0.0.1:8123/proxy.pac.
+    The Content-Type comes from Polipo's table of extensions (.pac is
+    application/x-ns-proxy-autoconfig); a directory gets its index.html.
+    Unlike Polipo, the default is empty (nothing is served), a symbolic
+    link cannot lead outside the directory, a directory without
+    index.html is not listed, .js is text/javascript, and a .pac file is
+    served without authCredentials.  2.0.0 and 2.0.1 answered such
+    requests with 404.
   * New forbiddenUrl and forbiddenRedirectCode variables, as in Polipo:
     a request blocked by forbiddenFile is redirected to forbiddenUrl
     with forbiddenRedirectCode (302 by default) instead of getting a

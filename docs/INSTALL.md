@@ -140,6 +140,34 @@ On Linux, `SIGUSR1` or `SIGUSR2` makes go-polipo reopen both `logFile` and
 `accessLogFile`, so a log rotation tool can rename the files and then send
 the signal. On Windows the files are reopened only by a restart.
 
+### 4.2 Proxy auto-config (PAC) file (optional)
+
+Instead of entering `127.0.0.1:8123` as the proxy, you can give the system a
+PAC file: a small JavaScript function that names the proxy. Windows' "Use
+setup script" takes only an `http://` or `https://` URL, so go-polipo can
+serve the file itself from `localDocumentRoot`. Create a directory for it
+and put a `proxy.pac` there:
+
+    $ mkdir -p /home/<you>/.config/go-polipo/www
+    $ cat > /home/<you>/.config/go-polipo/www/proxy.pac <<'EOF'
+    function FindProxyForURL(url, host) {
+      return "PROXY 127.0.0.1:8123; DIRECT";
+    }
+    EOF
+
+Then add to the configuration and restart go-polipo:
+
+    localDocumentRoot = /home/<you>/.config/go-polipo/www
+
+Check that `http://127.0.0.1:8123/proxy.pac` shows the file, then in Windows
+open Settings > Network & internet > Proxy, turn on "Use setup script" and
+enter `http://127.0.0.1:8123/proxy.pac`. `DIRECT` after the proxy lets a
+client connect directly when go-polipo does not answer.
+
+The file is served without `authCredentials`, because a client fetches it
+before it knows the proxy; `allowedClients` still applies. Other files in
+the directory are served too, at their own paths.
+
 ## 5. Running go-polipo on Windows: which way to choose
 
 On Linux, macOS and other POSIX systems, sections 1-4 are all you need. On
