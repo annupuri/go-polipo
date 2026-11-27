@@ -165,13 +165,14 @@ func (ph *ProxyHandler) rewrite(pr *httputil.ProxyRequest) {
 	}
 	ph.censorReferer(out)
 	ctx := out.Context()
-	if hasConditionalHeaders(out) {
+	// The client's own validators, before addConditionalHeaders may put
+	// go-polipo's in their place: cacheResponse and handleUpstreamError
+	// answer the client by them.
+	client := validatorsOf(pr.In.Header)
+	ctx = context.WithValue(ctx, clientValidatorsKey{}, client)
+	if !ph.addConditionalHeaders(out, client) && client.present() {
 		ctx = context.WithValue(ctx, clientConditionalKey{}, true)
 	}
-	// The client's own validators, before addConditionalHeaders may add
-	// go-polipo's: handleUpstreamError judges a stale fallback by them.
-	ctx = context.WithValue(ctx, clientValidatorsKey{}, validatorsOf(pr.In.Header))
-	ph.addConditionalHeaders(out)
 	ph.addVia(out.Header, out.ProtoMajor, out.ProtoMinor)
 	ctx = context.WithValue(ctx, requestTimeKey{}, time.Now())
 	pr.Out = out.WithContext(ctx)
@@ -315,13 +316,15 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	// the stored one; otherwise the stored Via, already naming this
 	// instance, stays as it is.
 	needVia := len(resp.Header.Values(headerVia)) > 0
-	// A 304 for a request the client made conditional itself answers the
-	// client's validators, not ours (addConditionalHeaders leaves those
-	// requests alone), so it goes back to the client as-is; Store ignores it.
+	// A 304 for a request sent with the client's own validators answers
+	// them, not the stored response (see addConditionalHeaders), so it goes
+	// back to the client as-is; Store ignores it.
+	revived := false
 	if resp.StatusCode == http.StatusNotModified && resp.Request.Context().Value(clientConditionalKey{}) == nil {
 		if err := ph.reviveFromCache(resp); err != nil {
 			return err
 		}
+		revived = true
 		ph.stats.revalidated.Add(1)
 		setCacheAction(resp.Request, cacheRevalidated)
 	} else {
@@ -342,11 +345,35 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	if !isSafeMethod(req.Method) && resp.StatusCode < 400 {
 		ph.cacheManager.Invalidate(req.URL.String())
 	}
-	if ph.uncachable.Load().Match(req.URL.String(), req.URL.Host) {
-		return nil
+	if !ph.uncachable.Load().Match(req.URL.String(), req.URL.Host) {
+		ph.cacheManager.Store(req, resp)
 	}
-	ph.cacheManager.Store(req, resp)
+	if revived {
+		answerClientValidators(resp)
+	}
 	return nil
+}
+
+// answerClientValidators turns resp, a stored response just revalidated by
+// a 304 and stored again, into a 304 for the client when the validators the
+// client sent match it (RFC 9111 section 4.3.2). Otherwise the client gets
+// resp as it is: the stored body with a 200, which is also what RFC 9111
+// asks for when the origin's 304 vouches for an entity-tag the client did
+// not list. The body is read to the end first, so that Store, which copies
+// it into the cache as it is read, gets all of it.
+func answerClientValidators(resp *http.Response) {
+	req := resp.Request
+	client, _ := req.Context().Value(clientValidatorsKey{}).(clientValidators)
+	if !client.notModified(req.Method, resp.Header) {
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	stripBodyFields(resp.Header)
+	resp.StatusCode = http.StatusNotModified
+	resp.Status = "304 Not Modified"
+	resp.Body = http.NoBody
+	resp.ContentLength = 0
 }
 
 // addVia appends this instance to the Via of a message it forwards, received
@@ -435,8 +462,9 @@ func (ph *ProxyHandler) reviveFromCache(resp *http.Response) error {
 }
 
 // clientConditionalKey marks, on the outgoing request's context, that the
-// client itself sent If-None-Match or If-Modified-Since (set in rewrite
-// before addConditionalHeaders runs, read by cacheResponse).
+// request goes upstream with the client's own If-None-Match or
+// If-Modified-Since, so that a 304 answers the client's copy, not the
+// stored one (set in rewrite, read by cacheResponse).
 type clientConditionalKey struct{}
 
 // clientValidatorsKey holds, on the outgoing request's context, the
@@ -449,19 +477,17 @@ type clientValidatorsKey struct{}
 // which Store works out the response's age (see responseBirth).
 type requestTimeKey struct{}
 
-// hasConditionalHeaders reports whether req carries a validator, i.e.
-// whether the origin may answer it with a 304.
-func hasConditionalHeaders(req *http.Request) bool {
-	return req.Header.Get(headerIfNoneMatch) != "" || req.Header.Get(headerIfModifiedSince) != ""
-}
-
 // addConditionalHeaders is part of rewrite: when there is a stale cache
 // entry for outReq with a validator (ETag and/or Last-Modified), it turns
 // the forwarded request into a conditional one, so the origin can answer
 // with a bodyless 304 instead of retransmitting content go-polipo already
-// has. A client-supplied validator is left alone - this only synthesises
-// one when the client didn't already send its own, since we have no way to
-// know whether the client's validator matches what's on disk here.
+// has, and reports whether it did. Validators the client sent (client)
+// are replaced by the entry's: the 304 then revalidates the stored
+// response, and cacheResponse answers the client's validators from it -
+// what Polipo did (server.c sends only the object's own validators), and
+// what RFC 9111 section 4.3.2 describes. Sent upstream as they are, they
+// would only ever vouch for the client's copy, and the entry would stay
+// stale however often the origin confirmed it.
 //
 // A Vary'd entry (see responseVaries) is always stale, and is handled more
 // narrowly, matching client.c's conditional-request logic: only its ETag is
@@ -469,14 +495,13 @@ func hasConditionalHeaders(req *http.Request) bool {
 // negotiated variant it describes - and only when dontTrustVaryETag hasn't
 // disabled that trust (config.DontTrustVaryETag is TristateTrue). Without a
 // usable ETag there, no conditional headers are added at all, so the
-// request goes through as a full, unconditional fetch instead.
-func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
-	if hasConditionalHeaders(outReq) {
-		return
-	}
+// request goes through as a full, unconditional fetch instead. A client's
+// validators are left alone for a Vary'd entry, as for one with no
+// validator: go-polipo cannot tell which variant the client holds.
+func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request, client clientValidators) bool {
 	cached, stale := ph.cacheManager.LookupStale(outReq)
 	if cached == nil {
-		return
+		return false
 	}
 	defer func() { _ = cached.Body.Close() }()
 	if !stale {
@@ -484,24 +509,31 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request) {
 		// reaches rewrite; this would only happen for a request Lookup
 		// itself declines (e.g. a client Cache-Control: no-cache), which
 		// should reach the origin unconditionally rather than revalidate.
-		return
+		return false
 	}
 
 	etag := cached.Header.Get(headerETag)
+	lm := cached.Header.Get(headerLastModified)
 	if responseVaries(cached) {
-		if etag == "" || ph.config.DontTrustVaryETag >= TristateTrue {
-			return
+		if client.present() || etag == "" || ph.config.DontTrustVaryETag >= TristateTrue {
+			return false
 		}
 		outReq.Header.Set(headerIfNoneMatch, etag)
-		return
+		return true
+	}
+	if etag == "" && lm == "" {
+		return false
 	}
 
+	outReq.Header.Del(headerIfNoneMatch)
+	outReq.Header.Del(headerIfModifiedSince)
 	if etag != "" {
 		outReq.Header.Set(headerIfNoneMatch, etag)
 	}
-	if lm := cached.Header.Get(headerLastModified); lm != "" {
+	if lm != "" {
 		outReq.Header.Set(headerIfModifiedSince, lm)
 	}
+	return true
 }
 
 // censorReferer applies the censorReferer policy to outReq's Referer header,

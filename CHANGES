@@ -1,5 +1,15 @@
 Unreleased: go-polipo 2.0.2:
 
+  * A client's own conditional request (If-None-Match or
+    If-Modified-Since) is answered from the cache with 304 Not Modified
+    when its validators match the stored response, as in Polipo.  2.0.0
+    and 2.0.1 sent a fresh entry's whole body back with a 200, and sent
+    the client's validators to the origin for a stale entry, which then
+    stayed stale however often the origin confirmed it; a stale entry is
+    now revalidated with its own ETag or Last-Modified first.
+    If-None-Match uses the weak comparison and may list several
+    entity-tags.  If-Match and If-Unmodified-Since are not evaluated by
+    the cache (RFC 9111 section 4.3.2), where Polipo answered 412.
   * New accessLogFile variable: an access log with one JSON line per
     request, giving the time it came in, the client, method, URL,
     status, bytes, duration and what the cache did (hit, stale,
