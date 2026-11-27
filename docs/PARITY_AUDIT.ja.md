@@ -64,8 +64,8 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 | :--- | :--- | :--: | :--- |
 | `forbiddenFile` | `~/.polipo-forbidden` | ✅ | ドメインサフィックス + POSIX 風正規表現 → `403`（`forbidden.go`）。Polipo と同じく、パスにはディレクトリも指定でき、その場合は配下のファイルをすべて（名前順に）読む。Polipo と違い、ディレクトリ内のディレクトリへのシンボリックリンクはたどらない。`uncachableFile` と `forbiddenTunnelsFile` も同様。**2026-11-08 修正:** 以前はディレクトリを指定すると警告を出すだけで読み込みに失敗し、何もブロックされなかった。 |
 | `uncachableFile` | `~/.polipo-uncachable` | ✅ | 同じマッチャ。該当 URL は転送するがキャッシュしない。 |
-| `forbiddenUrl` | (null) | ❌ | ブロックしたリクエストを案内ページへリダイレクトできず、常に素の `403`。 |
-| `forbiddenRedirectCode` | `302` | ❌ | 同上。 |
+| `forbiddenUrl` | (null) | ✅ | **完了（2026-11-28、Issue #71）。** `forbiddenFile` でブロックした要求を、Polipo と同じく（`forbidden.c` の `urlForbidden`）`forbiddenRedirectCode` で `forbiddenUrl` へリダイレクトする。設定がなければ `403`。本文はその URL へのリンクを書いた短い HTML（`http.Redirect`）。ログ・統計・アクセスログには `403` のときと同じく記録する。Polipo と同じく対象は `forbiddenFile` だけで、CONNECT（go-polipo は CONNECT にも `forbiddenFile` を当てる。`forbiddenTunnelsFile` を参照）はブラウザがリダイレクトをたどらないので `403` のまま。`allowedPorts`、`forbidLocalDestinations`、`forbiddenTunnelsFile` などほかの拒否も `403` のまま。**意図的な違い:** 値はホストを含む `http://` か `https://` の絶対 URL でなければならず、それ以外は設定エラーにする（Polipo は何でも受け付けた）。また `forbiddenUrl` 自体が `forbiddenFile` に一致する（ドメイン、サブドメイン、正規表現のいずれでも。文字列の完全一致に限らない）ときは、ループするリダイレクトの代わりに `403` を返し、リストを読み込むたび（起動時と再読み込み時）に警告を出す。リストは再読み込みされうるので、判定は要求ごとに行う。`forbiddenUrl` 先のサーバーがブロック対象へリダイレクトし返すような、go-polipo の外でできるループは見えないが、ブラウザがリダイレクトの上限で打ち切る。Polipo の別機能 `redirector` は含まない。それまではどちらの変数も無く、ブロックした要求には常に素の `403` を返していた。 |
+| `forbiddenRedirectCode` | `302` | ✅ | **完了（2026-11-28、Issue #71）。** `forbiddenUrl` を参照。**意図的な違い:** 受け付けるのは `301`、`302`、`303`、`307`、`308` だけで、ほかの値は設定エラーにする（Polipo は 301 か 302 と説明しつつ、与えられた数値をそのまま送ったので、リダイレクトでないコードではブラウザが空のページで止まった）。恒久的なコードは、リストから外した後もブラウザが覚えていることがある。 |
 | `forbiddenTunnelsFile` | `~/.polipo-forbiddenTunnels` | ✅ | **完了（2026-09-14）:** Polipo の `tunnelIsMatched`（`tunnel.c`）と同じ判定方式で移植した — ホスト名の完全一致（サブドメインには広がらない）と、生の `host:port` に対する正規表現マッチの2本立てで、`forbiddenFile` のサフィックスマッチとは独立（`forbidden.go` の `ForbiddenList.MatchTunnel`）。この行の従来の記載への訂正: go-polipo は元々 CONNECT を「ポートのみ」で判定してはいなかった — `forbidden.go` の一般的なリスト（サフィックスマッチ）は最初の Go 移植時（`proxy.go` の `targetURL`）から CONNECT にも適用されており、これは実は Polipo より広い挙動である。本家 Polipo の `client.c` は CONNECT を `do_tunnel` へ直接ディスパッチし `urlForbidden` を一切呼ばない。この既存の広い挙動は意図的に維持し、Polipo に忠実な新設の `forbiddenTunnelsFile` の上に多重防御として重ねている。 |
 | `redirector` / `redirectorRedirectCode` | (未設定) | ❌ | Squid 風の外部リダイレクタ連携なし。 |
 | これらファイルの実行時リロード | `SIGUSR1`/`SIGUSR2` | ✅ | **完了（2026-09-14）:** `ProxyHandler.Reload` が両ファイルを再読み込みし、`sync/atomic.Pointer` で原子的に差し替える — 処理中のリクエストが「半分だけ更新されたリスト」を見ることはない。Unix では `SIGUSR1`/`SIGUSR2`（`signal_unix.go`）、任意のプラットフォーム（Windows を含む）では `POST /polipo/reload` から到達可能。Windows には `syscall.SIGUSR1`/`SIGUSR2` 自体が存在しないため（`signal_windows.go` は何もしない）。§15 参照。 |
@@ -477,7 +477,7 @@ Go 標準ライブラリが吸収したランタイム内部は「委譲した�
 ### D. 些末 / 価値が低い
 
 - `proxyName` / `displayName`（§7）。（`disableVia` は 2026-11-03 に実装済み。）
-- `forbiddenUrl` / `forbiddenRedirectCode`（§4）。
+- ~~`forbiddenUrl` / `forbiddenRedirectCode`（§4）。~~ **2026-11-28 完了**（Issue #71）。
 - `redirector`（§4）。
 - `localDocumentRoot` / `disableProxy`、キャッシュインデックスページ（§13）。
 - `diskCache*Permissions` の設定可能化（§11）。（`logFilePermissions` は 2026-11-06 に実装済み。）

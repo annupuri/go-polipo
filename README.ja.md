@@ -71,6 +71,8 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `diskCacheMaxSize` | `-1`(無制限) | ディスクキャッシュの総量の上限(バイト)。超えたら、使われていない順にエントリを消し、上限の 90% まで減らす。`-x` でも同じ。`/polipo/status` に表示する (Polipo には無い設定) |
 | `diskCacheTruncateTime` / `diskCacheTruncateSize` | `4d12h` / `1048576` | `-x` 実行時、`diskCacheTruncateSize` より大きく `diskCacheTruncateTime` 以上未使用のエントリを早期削除(Polipoは切り詰めて残すが、部分インスタンス機構が無いgo-polipoでは安全に切り詰められないため削除に変更) |
 | `forbiddenFile` | (なし) | アクセス禁止リストのファイル |
+| `forbiddenUrl` | (なし) | `forbiddenFile` でブロックした要求を、403 の代わりにリダイレクトする先。`http://` か `https://` で始まる絶対 URL。CONNECT とほかの拒否は 403 のまま。この URL 自体が `forbiddenFile` に載っているときも、すべて 403 になる |
+| `forbiddenRedirectCode` | `302` | そのリダイレクトのステータスコード。`301`、`302`、`303`、`307`、`308` のいずれか |
 | `uncachableFile` | (なし) | キャッシュ対象外リストのファイル |
 | `forbiddenTunnelsFile` | (なし) | CONNECT (HTTPS トンネル) 用のホスト単位ブロックリスト。`forbiddenFile` とは別扱いで、こちらはサブドメインに広がらない完全一致のみ |
 | `socksParentProxy` | (なし) | 親 SOCKS プロキシ (`host:port`) |

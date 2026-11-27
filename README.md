@@ -60,6 +60,8 @@ Main configuration variables
 | `diskCacheMaxSize` | `-1` (no limit) | Upper limit on the disk cache's total size, in bytes. Past it, the entries unused the longest are removed until the cache is down to 90% of it; `-x` does the same. Shown on `/polipo/status` (not in Polipo) |
 | `diskCacheTruncateTime` / `diskCacheTruncateSize` | `4d12h` / `1048576` | `-x` removes entries larger than `diskCacheTruncateSize` that have gone unused for `diskCacheTruncateTime`, ahead of `diskCacheUnlinkTime` (Polipo truncated them instead; go-polipo has no partial-instance support to truncate safely, so it deletes them) |
 | `forbiddenFile` | (none) | File listing forbidden URLs |
+| `forbiddenUrl` | (none) | Where a request blocked by `forbiddenFile` is redirected, instead of getting a 403. An absolute `http://` or `https://` URL. CONNECT and the other refusals still get a 403, and so does every request when this URL is itself on `forbiddenFile` |
+| `forbiddenRedirectCode` | `302` | Status code of that redirect: `301`, `302`, `303`, `307` or `308` |
 | `uncachableFile` | (none) | File listing URLs not to cache |
 | `forbiddenTunnelsFile` | (none) | Per-host block list for CONNECT (HTTPS tunnels). Separate from `forbiddenFile`, and an exact match only: it does not extend to subdomains |
 | `socksParentProxy` | (none) | Parent SOCKS proxy (`host:port`) |

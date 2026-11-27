@@ -281,6 +281,7 @@ func (ph *ProxyHandler) Reload() error {
 	if err := forbiddenTunnels.Load(ph.config.ForbiddenTunnelsFile, ph.config.LogLevel); err != nil {
 		return fmt.Errorf("reload forbiddenTunnels file %q: %w", ph.config.ForbiddenTunnelsFile, err)
 	}
+	warnIfForbiddenURLBlocked(ph.config, forbidden)
 	ph.forbidden.Store(forbidden)
 	ph.uncachable.Store(uncachable)
 	ph.forbiddenTunnels.Store(forbiddenTunnels)
@@ -762,10 +763,9 @@ func (ph *ProxyHandler) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 2. Forbidden URL verification
-	if url := targetURL(req); ph.forbidden.Load().Match(url, req.Host) {
+	if target, forbidden := targetURL(req), ph.forbidden.Load(); forbidden.Match(target, req.Host) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "Denied: %s is blacklisted", url)
-		http.Error(w, "Forbidden: URL is blacklisted", http.StatusForbidden)
+		ph.denyForbidden(w, req, target, forbidden)
 		return
 	}
 
@@ -797,6 +797,38 @@ func (ph *ProxyHandler) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ph.handleForward(w, req)
+}
+
+// denyForbidden answers a request that forbidden, the forbiddenFile list,
+// blocks: a redirect to forbiddenUrl when one is set, as in Polipo
+// (forbidden.c), and a 403 otherwise. A CONNECT always gets the 403, since
+// a browser does not follow a redirect in answer to one. So does every
+// request when forbiddenUrl is itself blocked, which would otherwise send
+// the browser round in a loop; checking it here rather than at startup
+// covers lists reloaded later.
+func (ph *ProxyHandler) denyForbidden(w http.ResponseWriter, req *http.Request, target string, forbidden *ForbiddenList) {
+	if to := ph.config.ForbiddenURL; to != "" && req.Method != http.MethodConnect && !forbiddenURLBlocked(to, forbidden) {
+		logf(ph.config.LogLevel, LogForbidden, "Denied: %s is blacklisted; redirected to %s", target, to)
+		http.Redirect(w, req, to, ph.config.ForbiddenRedirectCode)
+		return
+	}
+	logf(ph.config.LogLevel, LogForbidden, "Denied: %s is blacklisted", target)
+	http.Error(w, "Forbidden: URL is blacklisted", http.StatusForbidden)
+}
+
+// forbiddenURLBlocked reports whether forbidden blocks forbiddenUrl itself.
+func forbiddenURLBlocked(forbiddenURL string, forbidden *ForbiddenList) bool {
+	u, err := url.Parse(forbiddenURL)
+	return err == nil && forbidden.Match(forbiddenURL, u.Host)
+}
+
+// warnIfForbiddenURLBlocked logs a warning when forbiddenUrl is on
+// forbiddenFile, so that the redirect is never used; newProxy and Reload
+// call it whenever the list is loaded.
+func warnIfForbiddenURLBlocked(config *Config, forbidden *ForbiddenList) {
+	if config.ForbiddenURL != "" && forbiddenURLBlocked(config.ForbiddenURL, forbidden) {
+		logf(config.LogLevel, LogWarn, "Warning: forbiddenUrl %s is itself on forbiddenFile; blocked requests get a 403 instead of the redirect", config.ForbiddenURL)
+	}
 }
 
 // targetURL builds an absolute URL string for forbidden-list checks, coping
