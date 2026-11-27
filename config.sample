@@ -142,6 +142,17 @@
 # Each of these files, and forbiddenTunnelsFile below, may also be a
 # directory: every file under it is then read.
 
+# Instead of a 403, redirect a request blocked by forbiddenFile to a page
+# of your own, as Polipo did.  An absolute http:// or https:// URL; the
+# code is 301, 302 (the default), 303, 307 or 308.  CONNECT requests and
+# the other refusals still get a 403, and so does every request while
+# forbiddenUrl is itself on forbiddenFile (go-polipo warns when it loads
+# such a list), so the browser is not sent round in a loop.  A permanent
+# code (301, 308) may be remembered by the browser even after the URL is
+# taken off the list.
+# forbiddenUrl = "http://example.com/blocked.html"
+# forbiddenRedirectCode = 302
+
 # Per-host blocklist for CONNECT (HTTPS tunnels). Independent of
 # forbiddenFile, which is also checked for CONNECT targets but matches
 # subdomains; entries here require an exact host match instead (see

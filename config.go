@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -29,6 +31,13 @@ type Config struct {
 	LogLevel              int
 	DisableLocalInterface bool
 	MaxConcurrentRequests int
+
+	// ForbiddenURL, when non-empty, is where a request blocked by
+	// forbiddenFile is sent instead of getting a 403: a redirect with
+	// ForbiddenRedirectCode and this URL as its Location, as in Polipo.
+	// CONNECT requests and the other refusals still get a 403.
+	ForbiddenURL          string
+	ForbiddenRedirectCode int
 
 	// LogFile, when non-empty, redirects log output to this file (created if
 	// missing, appended otherwise). Empty keeps logging on standard error.
@@ -226,6 +235,8 @@ func NewDefaultConfig() *Config {
 		ForbiddenFile:           "",
 		UncachableFile:          "",
 		ForbiddenTunnelsFile:    "",
+		ForbiddenURL:            "",
+		ForbiddenRedirectCode:   http.StatusFound, // Polipo's default
 		SocksParentProxy:        "",
 		SocksProxyType:          "socks5",
 		ParentProxy:             "",
@@ -288,6 +299,8 @@ const (
 	keyForbiddenFile             configKey = "forbiddenFile"
 	keyUncachableFile            configKey = "uncachableFile"
 	keyForbiddenTunnelsFile      configKey = "forbiddenTunnelsFile"
+	keyForbiddenURL              configKey = "forbiddenUrl"
+	keyForbiddenRedirectCode     configKey = "forbiddenRedirectCode"
 	keySocksParentProxy          configKey = "socksParentProxy"
 	keySocksProxyType            configKey = "socksProxyType"
 	keyParentProxy               configKey = "parentProxy"
@@ -348,6 +361,8 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyForbiddenFile, c.ForbiddenFile},
 		{keyUncachableFile, c.UncachableFile},
 		{keyForbiddenTunnelsFile, c.ForbiddenTunnelsFile},
+		{keyForbiddenURL, c.ForbiddenURL},
+		{keyForbiddenRedirectCode, strconv.Itoa(c.ForbiddenRedirectCode)},
 		{keySocksParentProxy, redactProxyURL(c.SocksParentProxy)},
 		{keySocksProxyType, c.SocksProxyType},
 		{keyParentProxy, redactProxyURL(c.ParentProxy)},
@@ -418,6 +433,32 @@ func (c *Config) IsOpenProxy() bool {
 		}
 	}
 	return false
+}
+
+// forbiddenRedirectCodes are the codes forbiddenRedirectCode accepts.
+// Polipo documented 301 and 302 and sent whatever number it was given;
+// any code that is not a redirect leaves the browser on an empty page.
+var forbiddenRedirectCodes = []int{
+	http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+	http.StatusTemporaryRedirect, http.StatusPermanentRedirect,
+}
+
+// checkForbiddenURL accepts an empty forbiddenUrl (no redirect) or an
+// absolute http:// or https:// URL with a host. Polipo took any string, so
+// a typo sent every blocked request to a Location the browser could not
+// follow.
+func checkForbiddenURL(val string) error {
+	if val == "" {
+		return nil
+	}
+	u, err := url.Parse(val)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("want an absolute http:// or https:// URL")
+	}
+	return nil
 }
 
 // redactProxyURL hides the password in a parent proxy setting written with
@@ -677,6 +718,17 @@ func (c *Config) Set(key configKey, val string) error {
 		c.UncachableFile = val
 	case keyForbiddenTunnelsFile:
 		c.ForbiddenTunnelsFile = val
+	case keyForbiddenURL:
+		if err := checkForbiddenURL(val); err != nil {
+			return fmt.Errorf("invalid forbiddenUrl '%s': %w", val, err)
+		}
+		c.ForbiddenURL = val
+	case keyForbiddenRedirectCode:
+		code, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil || !slices.Contains(forbiddenRedirectCodes, code) {
+			return fmt.Errorf("invalid forbiddenRedirectCode '%s': want 301, 302, 303, 307 or 308", val)
+		}
+		c.ForbiddenRedirectCode = code
 	case keySocksParentProxy:
 		c.SocksParentProxy = val
 	case keySocksProxyType:

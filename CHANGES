@@ -1,5 +1,15 @@
 Unreleased: go-polipo 2.0.2:
 
+  * New forbiddenUrl and forbiddenRedirectCode variables, as in Polipo:
+    a request blocked by forbiddenFile is redirected to forbiddenUrl
+    with forbiddenRedirectCode (302 by default) instead of getting a
+    403.  CONNECT requests and the other refusals still get a 403.
+    Unlike Polipo, the URL must be an absolute http:// or https:// one
+    and the code one of 301, 302, 303, 307 and 308, or go-polipo does
+    not start; and when forbiddenUrl is itself on forbiddenFile, blocked
+    requests get a 403 rather than a redirect that would loop, with a
+    warning when the list is loaded.  2.0.0 and 2.0.1 ignored both
+    variables as unknown.
   * New diskCacheMaxSize variable: an upper limit on the disk cache's
     total size, in bytes.  When a store takes the cache past it, the
     entries unused the longest are removed in the background until it

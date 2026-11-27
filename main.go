@@ -202,6 +202,7 @@ func newProxy(config *Config) (*ProxyHandler, *CacheManager) {
 	if err := forbidden.Load(config.ForbiddenFile, config.LogLevel); err != nil {
 		logf(config.LogLevel, LogWarn, "Warning: failed to load forbidden file %s: %v", config.ForbiddenFile, err)
 	}
+	warnIfForbiddenURLBlocked(config, forbidden)
 	uncachable := NewForbiddenList()
 	if err := uncachable.Load(config.UncachableFile, config.LogLevel); err != nil {
 		logf(config.LogLevel, LogWarn, "Warning: failed to load uncachable file %s: %v", config.UncachableFile, err)
