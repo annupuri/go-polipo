@@ -61,13 +61,13 @@ type accessLogEntry struct {
 // do not interleave when w (a logFileWriter) serialises its writes.
 type accessLogger struct {
 	w        io.Writer
-	logLevel int
+	logLevel func() int // logLevel in effect, which /polipo/config may change
 	// failing is set while writes fail, so that a full disk logs one error
 	// rather than one per request; the next successful write clears it.
 	failing atomic.Bool
 }
 
-func newAccessLogger(w io.Writer, logLevel int) *accessLogger {
+func newAccessLogger(w io.Writer, logLevel func() int) *accessLogger {
 	return &accessLogger{w: w, logLevel: logLevel}
 }
 
@@ -77,17 +77,17 @@ func (l *accessLogger) write(e *accessLogEntry) {
 	// URLs keep their & < > as they are; JSON does not need them escaped.
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(e); err != nil { // Encode ends the line with '\n'
-		logf(l.logLevel, LogError, "Couldn't encode an access log entry: %v", err)
+		logf(l.logLevel(), LogError, "Couldn't encode an access log entry: %v", err)
 		return
 	}
 	if _, err := l.w.Write(buf.Bytes()); err != nil {
 		if !l.failing.Swap(true) {
-			logf(l.logLevel, LogError, "Couldn't write to the access log, entries are lost until it works again: %v", err)
+			logf(l.logLevel(), LogError, "Couldn't write to the access log, entries are lost until it works again: %v", err)
 		}
 		return
 	}
 	if l.failing.Swap(false) {
-		logf(l.logLevel, LogInfo, "Writing to the access log again")
+		logf(l.logLevel(), LogInfo, "Writing to the access log again")
 	}
 }
 

@@ -25,7 +25,7 @@ Features
 - **Cache Expiry**: `polipo -x` walks the on-disk cache and removes corrupt, stale
   (per HTTP freshness), and long-untouched entries (`diskCacheUnlinkTime`, default 32d),
   pruning emptied directories.
-- **Local Web Interface**: Configuration inspection at `/polipo/config`, traffic statistics since the last start (requests, cache hits and 304 revalidations, CONNECT tunnels, errors) at `/polipo/status`, plus runtime operations at `/polipo/reload` (reload `forbiddenFile`/`uncachableFile`/`forbiddenTunnelsFile`) and `/polipo/flush` (run the same disk-cache expiry as `-x`) without restarting.
+- **Local Web Interface**: Configuration inspection at `/polipo/config` (and, with `disableConfiguration = false`, changing a few variables there), traffic statistics since the last start (requests, cache hits and 304 revalidations, CONNECT tunnels, errors) at `/polipo/status`, plus runtime operations at `/polipo/reload` (reload `forbiddenFile`/`uncachableFile`/`forbiddenTunnelsFile`) and `/polipo/flush` (run the same disk-cache expiry as `-x`) without restarting.
   It answers only requests whose Host names this machine (an IP address, `localhost`, the
   hostname or `proxyAddress`), and refuses POSTs from other sites, so web pages cannot read
   or operate it through DNS rebinding or a forged form.
@@ -81,6 +81,7 @@ Main configuration variables
 | `accessLogFile` | (none) | File to write an access log to: one JSON line per request, with the time it came in, client, method, URL, status, bytes, duration and what the cache did (`hit`, `stale`, `revalidated`, `miss`). Off by default, since it names every URL fetched (not in Polipo) |
 | `localDocumentRoot` | (none) | Directory whose files go-polipo serves at `http://127.0.0.1:8123/<path>`, such as a PAC file (`proxy.pac`) for the system's "Use setup script" setting. A `.pac` file is served without `authCredentials`. Paths under `/polipo/` are not looked up there. Polipo's default was `/usr/share/polipo/www/`; go-polipo's is empty, which serves nothing |
 | `disableIndexing` | `true` | `false` turns on the disk cache index, `/polipo/index?<URL prefix>` (the entries directly under the prefix) and `/polipo/recursive-index?<URL prefix>` (all of them), with each entry's size, dates, last use and freshness. Off by default because it lists every URL in the cache. At most 1000 rows per page |
+| `disableConfiguration` | `true` | `false` lets some variables be changed at run time from `/polipo/config`: `proxyOffline`, `relaxTransparency`, `logLevel`, `dontCacheCookies`, `censorReferer`, `disableVia`, `forbiddenUrl`, `forbiddenRedirectCode` and `maxDiskCacheEntrySize`. Changes take effect at once and are not written to the configuration file. Off by default (Polipo's default was on) |
 
 Documentation
 -------------

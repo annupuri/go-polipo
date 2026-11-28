@@ -7,5 +7,5 @@ package main
 // this platform, and the log file cannot be reopened while running (see
 // signal_unix.go for the Unix equivalent). The arguments are accepted only
 // to keep the signature identical across platforms.
-func setupReloadSignals(logLevel int, reopenLog func() error, reload func() error, discardMemory func()) {
+func setupReloadSignals(logLevel func() int, reopenLog func() error, reload func() error, discardMemory func()) {
 }

@@ -41,7 +41,7 @@ func (b *syncBuffer) String() string {
 // withAccessLog turns on ph's access log, writing to the returned buffer.
 func withAccessLog(ph *ProxyHandler) *syncBuffer {
 	buf := &syncBuffer{}
-	ph.accessLog = newAccessLogger(buf, ph.config().LogLevel)
+	ph.accessLog = newAccessLogger(buf, func() int { return ph.config().LogLevel })
 	return buf
 }
 
@@ -485,7 +485,7 @@ func TestAccessLogWriteFailureLoggedOnce(t *testing.T) {
 	defer log.SetOutput(io.Discard) // TestMain's resting state; see main_test.go.
 
 	w := &failingWriter{fail: true}
-	l := newAccessLogger(w, LogError|LogInfo)
+	l := newAccessLogger(w, func() int { return LogError | LogInfo })
 	e := &accessLogEntry{Method: "GET"}
 	l.write(e)
 	l.write(e)

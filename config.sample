@@ -271,6 +271,16 @@
 # takes a few seconds; a page shows at most 1000 rows.
 # disableIndexing = true
 
+# false lets a few variables be changed at run time from /polipo/config:
+# proxyOffline, relaxTransparency, logLevel, dontCacheCookies,
+# censorReferer, disableVia, forbiddenUrl, forbiddenRedirectCode and
+# maxDiskCacheEntrySize.  A change takes effect at once and is logged; it
+# is not written back to this file, so a restart brings back the values
+# here.  File paths, parent proxies, credentials, addresses and timeouts
+# cannot be changed there.  Off by default; Polipo's default was on,
+# which let any web page that could reach the proxy change its settings.
+# disableConfiguration = true
+
 # Bitmask of message categories to log (hex), matching Polipo's own bits:
 # 0x1 error, 0x2 warn, 0x4 info, 0x8 forbidden/denied (including rejected
 # CONNECTs). Polipo's other bits (0x10-0x80) are accepted but log nothing.
