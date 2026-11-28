@@ -138,7 +138,8 @@ cache result, or list the slowest plain-HTTP requests:
 
 On Linux, `SIGUSR1` or `SIGUSR2` makes go-polipo reopen both `logFile` and
 `accessLogFile`, so a log rotation tool can rename the files and then send
-the signal. On Windows the files are reopened only by a restart.
+the signal; section 6.6 has a ready-made logrotate configuration. On Windows
+the files are reopened only by a restart.
 
 ### 4.2 Proxy auto-config (PAC) file (optional)
 
@@ -357,6 +358,31 @@ Scheduler task or Startup-folder shortcut from section 8, disable or remove
 it so the two don't fight over port 8123:
 
     Disable-ScheduledTask -TaskName "go-polipo"   # run as Administrator
+
+### 6.6 Rotating the log files
+
+`logFile` and `accessLogFile` are never trimmed by go-polipo itself; the
+access log grows by about 1 MB a day under light single-user use.
+`logrotate/go-polipo` is a sample [logrotate](https://github.com/logrotate/logrotate)
+configuration that rotates both weekly and keeps the last 10, compressed
+(a week of access log compresses to well under 1 MB). Replace `<you>` in it
+(and the paths, if yours differ), then install it and check it with a dry
+run:
+
+    $ sudo cp logrotate/go-polipo /etc/logrotate.d/go-polipo
+    $ sudo logrotate -d /etc/logrotate.d/go-polipo
+
+On Ubuntu, `logrotate.timer` runs logrotate once a day, and catches up at
+the next start if WSL was not running at the time. logrotate counts the week
+from the first time it sees the files, so the first rotation comes a week
+after installing. To rotate once now and see the result:
+
+    $ sudo logrotate -f /etc/logrotate.d/go-polipo
+    $ ls ~/.cache/go-polipo/
+
+After rotating, logrotate sends go-polipo `SIGUSR1`, which makes it reopen
+both files (section 4.1); it also re-reads the forbidden lists, which does
+no harm. The sample uses the unit name from section 6.1.
 
 ## 7. Building on Windows
 

@@ -93,7 +93,7 @@ go-polipo は、リクエストごとに何をしたかを1行ずつ記録する
     $ jq -r 'select(.cache) | .cache' access.log | sort | uniq -c
     $ jq -s -c 'map(select(.url)) | sort_by(-.duration_ms) | .[:10][] | {url, duration_ms, cache}' access.log
 
-Linux では、`SIGUSR1` か `SIGUSR2` を送ると go-polipo は `logFile` と `accessLogFile` の両方を開き直します。ログのローテーションツールでファイル名を変えてからシグナルを送ってください。Windows では、開き直すには再起動が必要です。
+Linux では、`SIGUSR1` か `SIGUSR2` を送ると go-polipo は `logFile` と `accessLogFile` の両方を開き直します。ログのローテーションツールでファイル名を変えてからシグナルを送ってください。logrotate の設定例は 6.6 にあります。Windows では、開き直すには再起動が必要です。
 
 ### 4.2 PAC ファイル(任意)
 
@@ -236,6 +236,20 @@ Windowsと異なり、WSL/Linuxは実行中のファイルをロックしない�
 以前にWindows上で直接go-polipoを動かしていて、セクション8のタスクスケジューラ登録やスタートアップフォルダのショートカットを作成していた場合は、ポート8123を取り合わないよう無効化または削除してください:
 
     Disable-ScheduledTask -TaskName "go-polipo"   # 管理者権限で実行
+
+### 6.6 ログファイルのローテーション
+
+go-polipo は `logFile` と `accessLogFile` を自分では小さくしません。アクセスログは、1人で軽く使うだけでも1日に約1MB増えます。`logrotate/go-polipo` は [logrotate](https://github.com/logrotate/logrotate) の設定例で、両方を毎週ローテーションし、圧縮して最新の10世代を残します(1週間分のアクセスログは、圧縮すると1MBを大きく下回ります)。中の `<you>`(とパスが違えばパスも)を書き換えてから置き、ドライランで確かめます:
+
+    $ sudo cp logrotate/go-polipo /etc/logrotate.d/go-polipo
+    $ sudo logrotate -d /etc/logrotate.d/go-polipo
+
+Ubuntu では `logrotate.timer` が1日1回 logrotate を動かします。その時刻に WSL が動いていなくても、次に起動したときに実行されます。logrotate は初めてファイルを見たときから1週間を数えるので、最初のローテーションは置いてから1週間後です。今すぐ1回ローテーションして結果を見るには:
+
+    $ sudo logrotate -f /etc/logrotate.d/go-polipo
+    $ ls ~/.cache/go-polipo/
+
+ローテーションの後、logrotate は go-polipo に `SIGUSR1` を送り、go-polipo は両方のファイルを開き直します(4.1)。禁止リストも読み直しますが、害はありません。設定例のユニット名は 6.1 のものです。
 
 ## 7. Windows でのビルド
 

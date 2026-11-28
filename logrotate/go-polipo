@@ -1,0 +1,33 @@
+# Sample logrotate configuration for go-polipo's logFile and accessLogFile
+# on Linux, including inside WSL2 (see docs/INSTALL.md, section 6.6).
+#
+# Replace <you> (and the paths, if your logFile and accessLogFile differ),
+# then:
+#
+#   $ sudo cp logrotate/go-polipo /etc/logrotate.d/go-polipo
+#   $ sudo logrotate -d /etc/logrotate.d/go-polipo    # dry run
+#
+# The files are rotated weekly and the last 10 kept, compressed. After
+# rotating, go-polipo is sent SIGUSR1, which makes it reopen both files
+# (and re-read the forbidden lists, which does no harm). The unit name
+# matches systemd/go-polipo.service; "|| true" keeps logrotate from
+# reporting an error while go-polipo is not running.
+
+/home/<you>/.cache/go-polipo/polipo.log /home/<you>/.cache/go-polipo/access.log {
+    # The directory belongs to <you>, not root: rotate as that user.
+    su <you> <you>
+    weekly
+    rotate 10
+    compress
+    # Leave the newest rotated file uncompressed, in case go-polipo writes
+    # a line to it before the signal arrives.
+    delaycompress
+    missingok
+    notifempty
+    # 0640 matches the default logFilePermissions.
+    create 0640 <you> <you>
+    sharedscripts
+    postrotate
+        systemctl kill --kill-whom=main -s USR1 go-polipo || true
+    endscript
+}

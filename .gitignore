@@ -2,7 +2,7 @@
 # `go build` (no -o) still produces one named after the module directory
 # (go-polipo) at the repo root.
 /bin/
-go-polipo
+/go-polipo
 coverage.out
 
 # Inno Setup output (built locally, see windows/polipo.iss).

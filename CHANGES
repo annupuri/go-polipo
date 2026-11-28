@@ -1,5 +1,8 @@
 Unreleased: go-polipo 2.0.2:
 
+  * A sample logrotate configuration, logrotate/go-polipo, rotates
+    logFile and accessLogFile weekly, keeps 10 compressed generations
+    and signals go-polipo to reopen them (docs/INSTALL.md, 6.6).
   * A host written with a trailing dot, as in http://example.com./,
     matches forbiddenFile, uncachableFile and forbiddenTunnelsFile like
     the same host without it.  It names the same host and resolves the
