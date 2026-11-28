@@ -1,5 +1,10 @@
 Unreleased: go-polipo 2.0.2:
 
+  * A host written with a trailing dot, as in http://example.com./,
+    matches forbiddenFile, uncachableFile and forbiddenTunnelsFile like
+    the same host without it.  It names the same host and resolves the
+    same, but 2.0.0 and 2.0.1 (like Polipo) compared it as a different
+    name, so a trailing dot got a request past every entry for the host.
   * New disableConfiguration variable: with disableConfiguration =
     false, /polipo/config lets proxyOffline, relaxTransparency,
     logLevel, dontCacheCookies, censorReferer, disableVia, forbiddenUrl,
