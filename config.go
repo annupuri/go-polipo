@@ -51,6 +51,11 @@ type Config struct {
 	// cache_index.go), which list every URL in the cache.
 	DisableIndexing bool
 
+	// DisableConfiguration, true by default, keeps /polipo/config read-only.
+	// false lets the variables in runtimeSettableKeys be changed there (see
+	// config_edit.go). Polipo's default was false; see PARITY_AUDIT.
+	DisableConfiguration bool
+
 	// LogFile, when non-empty, redirects log output to this file (created if
 	// missing, appended otherwise). Empty keeps logging on standard error.
 	LogFile string
@@ -251,6 +256,7 @@ func NewDefaultConfig() *Config {
 		ForbiddenRedirectCode:   http.StatusFound, // Polipo's default
 		LocalDocumentRoot:       "",
 		DisableIndexing:         true, // Polipo's default
+		DisableConfiguration:    true, // Polipo's was false; see the field
 		SocksParentProxy:        "",
 		SocksProxyType:          "socks5",
 		ParentProxy:             "",
@@ -334,6 +340,7 @@ const (
 	keyDisableLocalInterface     configKey = "disableLocalInterface"
 	keyLocalDocumentRoot         configKey = "localDocumentRoot"
 	keyDisableIndexing           configKey = "disableIndexing"
+	keyDisableConfiguration      configKey = "disableConfiguration"
 	keyMaxConcurrentRequests     configKey = "maxConcurrentRequests"
 	keyClientTimeout             configKey = "clientTimeout"
 	keyServerTimeout             configKey = "serverTimeout"
@@ -398,6 +405,7 @@ func (c *Config) Entries() []ConfigEntry {
 		{keyDisableLocalInterface, strconv.FormatBool(c.DisableLocalInterface)},
 		{keyLocalDocumentRoot, c.LocalDocumentRoot},
 		{keyDisableIndexing, strconv.FormatBool(c.DisableIndexing)},
+		{keyDisableConfiguration, strconv.FormatBool(c.DisableConfiguration)},
 		{keyMaxConcurrentRequests, strconv.Itoa(c.MaxConcurrentRequests)},
 		{keyClientTimeout, formatDuration(c.ClientTimeout)},
 		{keyServerTimeout, formatDuration(c.ServerTimeout)},
@@ -814,6 +822,8 @@ func (c *Config) Set(key configKey, val string) error {
 		c.DisableLocalInterface = strings.ToLower(val) == "true" || val == "1"
 	case keyDisableIndexing:
 		c.DisableIndexing = strings.ToLower(val) == "true" || val == "1"
+	case keyDisableConfiguration:
+		c.DisableConfiguration = strings.ToLower(val) == "true" || val == "1"
 	case keyNoDiskCache:
 		c.NoDiskCache = strings.ToLower(val) == "true" || val == "1"
 	case keyDontCacheCookies:

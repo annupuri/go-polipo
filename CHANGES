@@ -1,5 +1,13 @@
 Unreleased: go-polipo 2.0.2:
 
+  * New disableConfiguration variable: with disableConfiguration =
+    false, /polipo/config lets proxyOffline, relaxTransparency,
+    logLevel, dontCacheCookies, censorReferer, disableVia, forbiddenUrl,
+    forbiddenRedirectCode and maxDiskCacheEntrySize be changed at run
+    time, as Polipo let its settable variables be.  Changes take effect
+    at once, are logged, and are not written to the configuration file.
+    Unlike Polipo, editing is off by default, and file paths, parent
+    proxies, credentials and timeouts cannot be changed from the page.
   * New disableIndexing variable and disk cache index pages, as in
     Polipo: with disableIndexing = false, /polipo/index?<URL prefix>
     lists the cache entries directly under a prefix, and the deeper

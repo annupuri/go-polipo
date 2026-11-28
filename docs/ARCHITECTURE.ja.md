@@ -21,7 +21,7 @@ Go言語版は、並行処理 (Goroutines) や標準ライブラリの利点を�
 | `dirent_compat.c`<br>`fts_compat.c`<br>`ftsimport.c`<br>`mingw.c` | *(Go標準 `os` / `path/filepath`)* | **OS互換性レイヤー / ディレクトリ巡回**<br>Windows/POSIX互換、ディレクトリ巡回用のコードは、Goが言語レベルでクロスプラットフォームに抽象化しているため不要。 |
 | `forbidden.c` | `forbidden.go`<br>`destination.go` | **アクセス制限フィルタ**<br>禁止URLリストの読み込み。ドメインの後方一致および正規表現マッチングによるアクセス可否判定。ブロックした要求には 403 を返し、`forbiddenUrl` があればそこへリダイレクトする（`proxy.go` の `denyForbidden`）。`destination.go` は Polipo に対応するものが無く、このマシンやそのリンクのアドレス、設定によってはプライベートアドレスへの接続を拒否する（`forbidLocalDestinations`、`forbidPrivateDestinations`）。判定は `net.Dialer` の `Control` 関数で行うので、名前解決した後に実際に接続するアドレスを見る。 |
 | `io.c` | *(Go標準 `net` / `bufio`)* | **ソケットI/O制御**<br>ソケットバッファリングやタイムアウトなどの非同期I/O制御は、Goの標準ライブラリ（`net.Conn`, `bufio` 等）と Goroutine が自動的に行うため、独自の I/O レイヤーは不要。 |
-| `local.c` | `proxy.go`<br>`localdoc.go`<br>`cache_index.go` | **ローカルWebインターフェース**<br>`local.c` の設定変数表示や動的設定などのローカルWebインターフェース（`/polipo/`, `/polipo/config`）は、`proxy.go` 内の `handleLocal` メソッドにて簡略化して再実装・統合。状態表示（`/polipo/status`）は `stats.go` が描画し、プロキシがリクエストを処理しながら更新するトラフィックの統計もここで保持する。Polipo と違い、go-polipo 自身に宛てたリクエストは Host がこのマシンを指していなければならず（`isLocalHostAllowed`）、ほかのサイトからの POST は拒否する（`http.CrossOriginProtection`）。go-polipo 自身に宛てたそのほかの要求には、`localdoc.go` が `localDocumentRoot` のファイルで答える。Polipo の `diskcache.c` にあった `localFilename` と MIME の表を移したもの。ディスクキャッシュの一覧（`/polipo/index`、`/polipo/recursive-index`、`disableIndexing`）は、Polipo の `indexDiskObjects` にならって `cache_index.go` にある。 |
+| `local.c` | `proxy.go`<br>`localdoc.go`<br>`cache_index.go`<br>`config_edit.go` | **ローカルWebインターフェース**<br>`local.c` の設定変数表示や動的設定などのローカルWebインターフェース（`/polipo/`, `/polipo/config`）は、`proxy.go` 内の `handleLocal` メソッドにて簡略化して再実装・統合。状態表示（`/polipo/status`）は `stats.go` が描画し、プロキシがリクエストを処理しながら更新するトラフィックの統計もここで保持する。Polipo と違い、go-polipo 自身に宛てたリクエストは Host がこのマシンを指していなければならず（`isLocalHostAllowed`）、ほかのサイトからの POST は拒否する（`http.CrossOriginProtection`）。go-polipo 自身に宛てたそのほかの要求には、`localdoc.go` が `localDocumentRoot` のファイルで答える。Polipo の `diskcache.c` にあった `localFilename` と MIME の表を移したもの。ディスクキャッシュの一覧（`/polipo/index`、`/polipo/recursive-index`、`disableIndexing`）は、Polipo の `indexDiskObjects` にならって `cache_index.go` にある。`/polipo/config` からの変数の変更（`disableConfiguration`）は `config_edit.go` にある。 |
 | `log.c` | *(Go標準 `log`)* / `logging.go` | **ロギング**<br>Go標準の `log` パッケージを利用して簡略化。`logLevel` はPolipo自身と同じ、エラー・警告・情報・ポリシーによる拒否という独立したメッセージ種別を表すビットマスクであり、順序付きの重大度しきい値ではない — `logging.go` の `logf` が各呼び出し箇所をカテゴリビットで判定する（Go標準の `log` パッケージにはそれに対応する「レベル」という概念自体が無いため、自前で実装）。`logSyslog`/`logFacility` に相当するものは今も無く、syslog への出力先も無い。アクセスログ（`accessLogFile`、1リクエストにつき JSON を1行）は go-polipo で新しく加えたもので、`accesslog.go` にある。`ResponseWriter` を包んでステータスとバイト数を見て取り、キャッシュが何をしたかは、リクエストを処理するコードがリクエストのコンテキストに載せた記録に書き込む。 |
 | `main.c` | `main.go` | **エントリーポイント**<br>コマンドライン引数（`-c`, `-v`, `-x` 等）の解析と、HTTPプロキシサーバーの初期化・起動処理。デーモン化そのもの（`daemonise`、`pidFile`）は再実装しておらず、go-polipo をバックグラウンドサービスとして動かすことはOS側の仕組み（Unixではサービスマネージャ、WindowsではインストーラーのTaskSchedulerエントリ）に委ねている。 |
 | `md5.c`<br>`md5import.c` | *(Go標準 `crypto/md5`)* | **ハッシュ計算**<br>C言語用の MD5 インポートファイルは不要となり、標準ライブラリ `crypto/md5` を直接利用するため不要。 |
@@ -56,6 +56,8 @@ graph TD
     B5 --> B6[キャッシュ / フィルタ / 転送]
     B6 --> B7[クライアントへ応答]
 ```
+
+これらの Goroutine はどれも、`ProxyHandler` と `CacheManager` が共有する `atomic.Pointer[Config]` を通して設定を読みます（`config()`）。`/polipo/config` は一部の変数を実行中に変えられますが、書き換えたコピーと丸ごと入れ替えるので、書きかけの `Config` を読むことはありません。
 
 ### go-polipo が自分で起動する Goroutine
 

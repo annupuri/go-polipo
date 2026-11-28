@@ -30,7 +30,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
   壊れたエントリ、(HTTP 鮮度ルール上)古くなったエントリ、長期間アクセスの
   ないエントリ(`diskCacheUnlinkTime`、既定 32 日)を削除し、空になった
   ディレクトリを整理します。
-- **ローカル Web インターフェース**: `/polipo/config` で設定内容を、
+- **ローカル Web インターフェース**: `/polipo/config` で設定内容を（`disableConfiguration = false` なら一部の変数の変更も）、
   `/polipo/status` で起動以降の統計（リクエスト数、キャッシュヒット数、
   304 による再検証の数、CONNECT トンネル数、エラー数など）を確認でき、
   再起動不要のランタイム操作として `/polipo/reload`（`forbiddenFile` /
@@ -92,6 +92,7 @@ go-polipo は、古典的なキャッシュ Web プロキシ Polipo を Go (v1.2
 | `accessLogFile` | (なし) | アクセスログの出力先ファイル。1リクエストにつき JSON を1行書く。中身は、リクエストが届いた時刻、クライアント、メソッド、URL、ステータス、バイト数、所要時間、キャッシュが何をしたか (`hit`、`stale`、`revalidated`、`miss`)。取得したすべての URL が残るので、既定では書かない (Polipo には無い設定) |
 | `localDocumentRoot` | (なし) | `http://127.0.0.1:8123/<パス>` で配信するファイルを置くディレクトリ。システムの「セットアップスクリプトを使う」に指定する PAC ファイル (`proxy.pac`) など。`.pac` のファイルは `authCredentials` なしで返す。`/polipo/` で始まるパスはここから探さない。Polipo の既定値は `/usr/share/polipo/www/` だったが、go-polipo では空で、何も配信しない |
 | `disableIndexing` | `true` | `false` にすると、ディスクキャッシュの一覧 `/polipo/index?<URL の前方部分>`(その直下のエントリ)と `/polipo/recursive-index?<URL の前方部分>`(配下のすべて)が使える。各エントリの大きさ、日付、最後に使った日時、新鮮かどうかを表示する。キャッシュにある URL がすべて見えるので既定では無効。1ページ 1000 件まで |
+| `disableConfiguration` | `true` | `false` にすると、`/polipo/config` から一部の変数を実行中に変えられる: `proxyOffline`、`relaxTransparency`、`logLevel`、`dontCacheCookies`、`censorReferer`、`disableVia`、`forbiddenUrl`、`forbiddenRedirectCode`、`maxDiskCacheEntrySize`。変更はすぐ効き、設定ファイルには書き戻さない。既定では無効 (Polipo の既定は有効) |
 
 ドキュメント
 ------------

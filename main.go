@@ -166,10 +166,12 @@ func reopenAll(reopeners []func() error) func() error {
 // unset, gets the access log.
 func serve(config *Config, reopenLog func() error, accessLog io.Writer) int {
 	handler, cacheMgr := newProxy(config)
+	// /polipo/config may change logLevel at run time, so read it afresh.
+	logLevel := func() int { return handler.config().LogLevel }
 	if accessLog != nil {
-		handler.accessLog = newAccessLogger(accessLog, config.LogLevel)
+		handler.accessLog = newAccessLogger(accessLog, logLevel)
 	}
-	setupReloadSignals(config.LogLevel, reopenLog, handler.Reload, cacheMgr.DiscardMemory)
+	setupReloadSignals(logLevel, reopenLog, handler.Reload, cacheMgr.DiscardMemory)
 
 	addr := net.JoinHostPort(config.ProxyAddress, fmt.Sprintf("%d", config.ProxyPort))
 	server := newServer(config, addr, handler)
@@ -181,14 +183,14 @@ func serve(config *Config, reopenLog func() error, accessLog io.Writer) int {
 		// skipping this shutdown and the log line.
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		<-sigChan
-		logf(config.LogLevel, LogInfo, "Shutting down go-polipo...")
+		logf(logLevel(), LogInfo, "Shutting down go-polipo...")
 		_ = server.Close()
 	}()
 
 	logf(config.LogLevel, LogInfo, "go-polipo version %s starting on http://%s", Version, addr)
 	warnIfOpenProxy(config)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logf(config.LogLevel, LogError, "Server error: %v", err)
+		logf(logLevel(), LogError, "Server error: %v", err)
 		return 1
 	}
 	return 0

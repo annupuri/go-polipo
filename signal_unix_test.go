@@ -15,7 +15,7 @@ import (
 
 func TestSetupReloadSignals(t *testing.T) {
 	var reopens, reloads, discards atomic.Int32
-	setupReloadSignals(0x07, func() error {
+	setupReloadSignals(func() int { return 0x07 }, func() error {
 		reopens.Add(1)
 		return nil
 	}, func() error {

@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"net"
 	"net/http"
@@ -27,7 +26,10 @@ import (
 // ProxyHandler implements http.Handler to serve as the HTTP proxy.
 type ProxyHandler struct {
 	// cfg holds the configuration, shared with cacheManager; see config.
-	cfg          *atomic.Pointer[Config]
+	cfg *atomic.Pointer[Config]
+	// configMu serializes changes made from /polipo/config, so that two
+	// at once do not each start from the same old copy.
+	configMu     sync.Mutex
 	cacheManager *CacheManager
 	// forbidden, uncachable and forbiddenTunnels are swapped atomically by
 	// Reload, which runs concurrently with request-handling goroutines that
@@ -938,20 +940,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if path == "/polipo/config" {
-		w.Header().Set(headerContentType, "text/html; charset=utf-8")
-		fmt.Fprint(w, `<html><head><title>go-polipo Configuration</title></head>
-<body>
-<h1>go-polipo Configuration</h1>
-<table border="1" cellpadding="5" cellspacing="0">
-<tr><th>Variable</th><th>Value</th></tr>
-`)
-		for _, e := range ph.config().Entries() {
-			fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td></tr>\n",
-				html.EscapeString(string(e.Name)), html.EscapeString(e.Value))
-		}
-		fmt.Fprint(w, `</table>
-<p><a href="/polipo/">Back</a></p>
-</body></html>`)
+		ph.serveConfig(w, req)
 		return
 	}
 
