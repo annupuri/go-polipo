@@ -66,7 +66,7 @@ func (ph *ProxyHandler) diskCacheSizeStatus() string {
 		return "being counted"
 	}
 	limit := "no limit"
-	if max := ph.config.DiskCacheMaxSize; max >= 0 {
+	if max := ph.config().DiskCacheMaxSize; max >= 0 {
 		limit = "limit " + formatSize(max)
 	}
 	return formatSize(size) + "; " + limit
@@ -81,9 +81,9 @@ func (ph *ProxyHandler) writeStatus(w io.Writer) {
 
 	mode := "on line"
 	switch {
-	case ph.config.ProxyOffline:
+	case ph.config().ProxyOffline:
 		mode = "off line"
-	case ph.config.RelaxTransparency > TristateFalse:
+	case ph.config().RelaxTransparency > TristateFalse:
 		mode = "on line (transparency relaxed)"
 	}
 

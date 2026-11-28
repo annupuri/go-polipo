@@ -104,7 +104,7 @@ func TestDiskSizeAccounting(t *testing.T) {
 	cm.Invalidate("http://example.com/b")
 	check("invalidated")
 	seedCacheEntry(t, cm, "http://example.com/old", "old", false)
-	cm.config.DiskCacheUnlinkTime = time.Nanosecond // -x removes everything unused
+	cm.config().DiskCacheUnlinkTime = time.Nanosecond // -x removes everything unused
 	if _, err := cm.Expire(); err != nil {
 		t.Fatal(err)
 	}
@@ -130,11 +130,11 @@ func TestTrimDiskRemovesLeastRecentlyUsed(t *testing.T) {
 	}
 	total := diskTotal(cm)
 	one := total / 10
-	cm.config.DiskCacheMaxSize = total - one/2 // just over by half an entry
+	cm.config().DiskCacheMaxSize = total - one/2 // just over by half an entry
 
 	removed, freed := cm.trimDisk()
-	if after := diskTotal(cm); after > int64(float64(cm.config.DiskCacheMaxSize)*trimTarget) {
-		t.Errorf("after trim: %d bytes, want at most 90%% of %d", after, cm.config.DiskCacheMaxSize)
+	if after := diskTotal(cm); after > int64(float64(cm.config().DiskCacheMaxSize)*trimTarget) {
+		t.Errorf("after trim: %d bytes, want at most 90%% of %d", after, cm.config().DiskCacheMaxSize)
 	}
 	if removed != 2 || freed != total-diskTotal(cm) {
 		t.Errorf("removed %d, freed %d; want 2 entries and the bytes they took", removed, freed)
@@ -178,15 +178,15 @@ func TestStoreTriggersTrim(t *testing.T) {
 	for i := range 5 {
 		seedCacheEntry(t, cm, fmt.Sprintf("http://example.com/%d", i), strings.Repeat("x", 100), true)
 	}
-	cm.config.DiskCacheMaxSize = diskTotal(cm) + 10
+	cm.config().DiskCacheMaxSize = diskTotal(cm) + 10
 	cm.StartDiskAccounting()
 	waitKnown(t, cm)
 
 	seedCacheEntry(t, cm, "http://example.com/over", strings.Repeat("y", 100), true)
 	deadline := time.Now().Add(5 * time.Second)
-	for diskTotal(cm) > cm.config.DiskCacheMaxSize {
+	for diskTotal(cm) > cm.config().DiskCacheMaxSize {
 		if time.Now().After(deadline) {
-			t.Fatalf("cache still %d bytes, over the %d limit", diskTotal(cm), cm.config.DiskCacheMaxSize)
+			t.Fatalf("cache still %d bytes, over the %d limit", diskTotal(cm), cm.config().DiskCacheMaxSize)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -232,7 +232,7 @@ func TestExpireTrimsToLimit(t *testing.T) {
 		_ = os.Chtimes(path, used, used)
 	}
 	total := diskTotal(cm)
-	cm.config.DiskCacheMaxSize = total / 2
+	cm.config().DiskCacheMaxSize = total / 2
 
 	stats, err := cm.Expire()
 	if err != nil {
@@ -241,8 +241,8 @@ func TestExpireTrimsToLimit(t *testing.T) {
 	if stats.RemovedForLimit == 0 || stats.Removed != stats.RemovedForLimit || stats.Freed != total-diskTotal(cm) {
 		t.Errorf("stats = %+v; want only removals for the limit, and Freed matching", stats)
 	}
-	if diskTotal(cm) > cm.config.DiskCacheMaxSize {
-		t.Errorf("after -x: %d bytes, over the %d limit", diskTotal(cm), cm.config.DiskCacheMaxSize)
+	if diskTotal(cm) > cm.config().DiskCacheMaxSize {
+		t.Errorf("after -x: %d bytes, over the %d limit", diskTotal(cm), cm.config().DiskCacheMaxSize)
 	}
 	if path, _ := cm.CachePath("http://example.com/3"); fileSize(path) == 0 {
 		t.Error("the most recently used entry was removed")

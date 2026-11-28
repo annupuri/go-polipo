@@ -49,8 +49,8 @@ func (ph *ProxyHandler) checkDestination(_, address string, _ syscall.RawConn) e
 		return fmt.Errorf("%w: %s", errForbiddenDestination, address)
 	}
 	a := ap.Addr()
-	if ph.config.ForbidLocalDestinations && isLocalAddress(a) ||
-		ph.config.ForbidPrivateDestinations && isPrivateAddress(a) {
+	if ph.config().ForbidLocalDestinations && isLocalAddress(a) ||
+		ph.config().ForbidPrivateDestinations && isPrivateAddress(a) {
 		return fmt.Errorf("%w: %s", errForbiddenDestination, a.Unmap())
 	}
 	return nil

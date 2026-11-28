@@ -49,7 +49,7 @@ func noteAccess(path string, lastUse time.Time) bool {
 // isDiskCacheDisabled reports whether the on-disk cache is turned off, either
 // explicitly (noDiskCache) or by having no root to read from or write into.
 func (cm *CacheManager) isDiskCacheDisabled() bool {
-	return cm.config.NoDiskCache || cm.config.DiskCacheRoot == ""
+	return cm.config().NoDiskCache || cm.config().DiskCacheRoot == ""
 }
 
 // cacheDir returns the directory that holds the cache files for rawURL's
@@ -86,7 +86,7 @@ func (cm *CacheManager) cacheDir(rawURL string) (string, error) {
 		}
 	}
 
-	return filepath.Join(cm.config.DiskCacheRoot, sb.String()), nil
+	return filepath.Join(cm.config().DiskCacheRoot, sb.String()), nil
 }
 
 // CachePath returns the cache file path for rawURL.
@@ -133,7 +133,7 @@ func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Respons
 	br := bufio.NewReader(file)
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
+		logf(cm.config().LogLevel, LogWarn, "Cache lookup warning: %s: corrupt entry %s: %v", req.URL, path, err)
 		_ = file.Close()
 		return nil, time.Time{}
 	}
@@ -141,7 +141,7 @@ func (cm *CacheManager) lookupDisk(req *http.Request, key string) (*http.Respons
 	// Verify X-Polipo-Location to prevent hash collisions
 	loc := resp.Header.Get(headerPolipoLocation)
 	if loc != req.URL.String() {
-		logf(cm.config.LogLevel, LogWarn, "Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
+		logf(cm.config().LogLevel, LogWarn, "Cache lookup warning: %s: hash collision at %s (stored for %s)", req.URL, path, loc)
 		_ = resp.Body.Close()
 		_ = file.Close()
 		return nil, time.Time{}
@@ -241,7 +241,7 @@ type diskWrite struct {
 func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response, birth time.Time) *diskWrite {
 	path, err := cm.CachePath(req.URL.String())
 	if err != nil {
-		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
+		logf(cm.config().LogLevel, LogWarn, "Cache store warning: %s: couldn't compute cache path: %v", req.URL, err)
 		return nil
 	}
 
@@ -251,13 +251,13 @@ func (cm *CacheManager) startDiskWrite(req *http.Request, resp *http.Response, b
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		cm.mu.Unlock()
-		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't create cache directory %s: %v", req.URL, dir, err)
+		logf(cm.config().LogLevel, LogWarn, "Cache store warning: %s: couldn't create cache directory %s: %v", req.URL, dir, err)
 		return nil
 	}
 	file, err := os.CreateTemp(dir, cacheTempPrefix+"*")
 	cm.mu.Unlock()
 	if err != nil {
-		logf(cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't create a temporary file in %s: %v", req.URL, dir, err)
+		logf(cm.config().LogLevel, LogWarn, "Cache store warning: %s: couldn't create a temporary file in %s: %v", req.URL, dir, err)
 		return nil
 	}
 
@@ -314,7 +314,7 @@ type ExpireStats struct {
 func (cm *CacheManager) Expire() (ExpireStats, error) {
 	var stats ExpireStats
 
-	root := cm.config.DiskCacheRoot
+	root := cm.config().DiskCacheRoot
 	if root == "" {
 		return stats, fmt.Errorf("diskCacheRoot is not configured")
 	}
@@ -372,14 +372,14 @@ func (cm *CacheManager) expireWalk(root string, stats *ExpireStats, kept *int64)
 			return nil
 		}
 		if err := os.Remove(path); err != nil {
-			logf(cm.config.LogLevel, LogWarn, "Cache expire warning: couldn't remove %s (%s): %v", path, reason, err)
+			logf(cm.config().LogLevel, LogWarn, "Cache expire warning: couldn't remove %s (%s): %v", path, reason, err)
 			return nil
 		}
 		stats.Removed++
 		stats.Freed += info.Size()
 		if reason == expireSize {
 			stats.RemovedForSize++
-			logf(cm.config.LogLevel, LogInfo, "Cache expire: removed %s (%d bytes, unused since %s): "+
+			logf(cm.config().LogLevel, LogInfo, "Cache expire: removed %s (%d bytes, unused since %s): "+
 				"larger than diskCacheTruncateSize and older than diskCacheTruncateTime",
 				path, info.Size(), info.ModTime().UTC().Format(http.TimeFormat))
 		}
@@ -432,8 +432,8 @@ func (cm *CacheManager) judgeExpire(path string, info fs.FileInfo) expireReason 
 			lastAccess = t
 		}
 	}
-	if cm.config.DiskCacheUnlinkTime > 0 &&
-		time.Since(lastAccess) > cm.config.DiskCacheUnlinkTime {
+	if cm.config().DiskCacheUnlinkTime > 0 &&
+		time.Since(lastAccess) > cm.config().DiskCacheUnlinkTime {
 		return expireUnlinkTime
 	}
 
@@ -445,8 +445,8 @@ func (cm *CacheManager) judgeExpire(path string, info fs.FileInfo) expireReason 
 	// later Lookup would hand a client a response that claims to be
 	// complete but silently cuts off short. Deleting the entry outright
 	// reclaims the same space without ever serving that broken response.
-	if cm.config.DiskCacheTruncateSize > 0 && info.Size() > cm.config.DiskCacheTruncateSize &&
-		time.Since(lastAccess) > cm.config.DiskCacheTruncateTime {
+	if cm.config().DiskCacheTruncateSize > 0 && info.Size() > cm.config().DiskCacheTruncateSize &&
+		time.Since(lastAccess) > cm.config().DiskCacheTruncateTime {
 		return expireSize
 	}
 

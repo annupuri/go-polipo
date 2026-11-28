@@ -37,7 +37,7 @@ func (ph *ProxyHandler) parentAddr() string {
 // buildServerAuthHeaders, or else credentials written into parentProxy,
 // which the Transport also uses for forwarded requests.
 func (ph *ProxyHandler) parentAuthHeader() string {
-	if c := ph.config.ParentAuthCredentials; c != "" {
+	if c := ph.config().ParentAuthCredentials; c != "" {
 		return "Basic " + base64.StdEncoding.EncodeToString([]byte(c))
 	}
 	if u := ph.parentURL.User; u != nil {
@@ -73,7 +73,7 @@ func (ph *ProxyHandler) dialViaParent(ctx context.Context, addr string) (net.Con
 // parent proxy. It returns the connection to use from then on (a TLS one for
 // an https parent), which the caller closes if err is not nil.
 func (ph *ProxyHandler) connectParent(ctx context.Context, conn net.Conn, addr string) (net.Conn, []byte, error) {
-	if t := ph.config.ServerTimeout; t > 0 {
+	if t := ph.config().ServerTimeout; t > 0 {
 		_ = conn.SetDeadline(time.Now().Add(t))
 	}
 	if ph.parentURL.Scheme == "https" {

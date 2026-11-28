@@ -234,7 +234,7 @@ func TestCollapsedForwardingReleasedAtHeaders(t *testing.T) {
 			origin := newGatedOrigin(t, true, tc.reply)
 			ph, _ := newFlightHandler(t)
 			if tc.setup != nil {
-				tc.setup(ph.config)
+				tc.setup(ph.config())
 			}
 			target := origin.srv.URL + "/a"
 

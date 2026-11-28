@@ -23,7 +23,9 @@ import (
 
 // CacheManager manages memory and disk caches for go-polipo.
 type CacheManager struct {
-	config   *Config
+	// cfg holds the configuration, shared with the ProxyHandler built on
+	// this CacheManager; see config.
+	cfg      *atomic.Pointer[Config]
 	mu       sync.RWMutex // guards disk cache file I/O only; memCache is self-synchronized
 	memCache *lru.Cache[string, *memEntry]
 
@@ -36,12 +38,20 @@ type CacheManager struct {
 
 // NewCacheManager creates a CacheManager instance.
 func NewCacheManager(config *Config) *CacheManager {
-	cm := &CacheManager{config: config}
+	cm := &CacheManager{cfg: new(atomic.Pointer[Config])}
+	cm.cfg.Store(config)
 	if config.MemoryCacheEntries > 0 {
 		// New only errors for a non-positive size, already excluded above.
 		cm.memCache, _ = lru.New[string, *memEntry](config.MemoryCacheEntries)
 	}
 	return cm
+}
+
+// config returns the configuration in effect. Read it afresh rather than
+// keeping it: /polipo/config can replace it at run time (a copy is swapped
+// in whole, so one Config is never changed under a reader).
+func (cm *CacheManager) config() *Config {
+	return cm.cfg.Load()
 }
 
 // Invalidate removes whatever is cached for rawURL, from memory and disk.
@@ -61,7 +71,7 @@ func (cm *CacheManager) Invalidate(rawURL string) {
 	size := fileSize(path)
 	if err := os.Remove(path); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			logf(cm.config.LogLevel, LogWarn, "Cache invalidate warning: %s: couldn't remove %s: %v", rawURL, path, err)
+			logf(cm.config().LogLevel, LogWarn, "Cache invalidate warning: %s: couldn't remove %s: %v", rawURL, path, err)
 		}
 		return
 	}
@@ -188,7 +198,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	// A Set-Cookie response is meant for a single client; a cached copy would be
 	// replayed to everyone who later requests the same URL. Polipo cached these,
 	// so this is opt-out via dontCacheCookies.
-	if cm.config.DontCacheCookies && len(resp.Header[headerSetCookie]) > 0 {
+	if cm.config().DontCacheCookies && len(resp.Header[headerSetCookie]) > 0 {
 		return
 	}
 
@@ -215,7 +225,7 @@ func (cm *CacheManager) Store(req *http.Request, resp *http.Response) {
 	// Content-Length) is caught while it streams, in cacheBody.Read.
 	maxDiskSize := cm.effectiveMaxDiskEntrySize()
 	diskWants := diskEnabled && (maxDiskSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxDiskSize)
-	maxMemSize := cm.config.MemoryCacheMaxEntrySize
+	maxMemSize := cm.config().MemoryCacheMaxEntrySize
 	memWants := memEnabled && (maxMemSize < 0 || resp.ContentLength < 0 || resp.ContentLength <= maxMemSize)
 	if !diskWants && !memWants {
 		return
@@ -286,7 +296,7 @@ func (b *cacheBody) Read(p []byte) (int, error) {
 			}
 		}
 		if b.mem != nil {
-			if max := b.cm.config.MemoryCacheMaxEntrySize; max >= 0 && b.size > max {
+			if max := b.cm.config().MemoryCacheMaxEntrySize; max >= 0 && b.size > max {
 				b.mem, b.memBuf = nil, nil
 			} else {
 				b.memBuf.Write(p[:n])
@@ -318,7 +328,7 @@ func (b *cacheBody) commit() {
 		b.disk = nil
 		_ = w.pw.Close()
 		if err := <-w.done; err != nil {
-			logf(b.cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't write cache file %s: %v", b.key, w.path, err)
+			logf(b.cm.config().LogLevel, LogWarn, "Cache store warning: %s: couldn't write cache file %s: %v", b.key, w.path, err)
 			os.Remove(w.tmp)
 		} else {
 			b.cm.mu.Lock()
@@ -326,7 +336,7 @@ func (b *cacheBody) commit() {
 			err := os.Rename(w.tmp, w.path)
 			b.cm.mu.Unlock()
 			if err != nil {
-				logf(b.cm.config.LogLevel, LogWarn, "Cache store warning: %s: couldn't move %s into place: %v", b.key, w.tmp, err)
+				logf(b.cm.config().LogLevel, LogWarn, "Cache store warning: %s: couldn't move %s into place: %v", b.key, w.tmp, err)
 				os.Remove(w.tmp)
 			} else {
 				b.cm.diskSize.Add(added)

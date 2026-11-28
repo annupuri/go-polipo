@@ -26,7 +26,8 @@ import (
 
 // ProxyHandler implements http.Handler to serve as the HTTP proxy.
 type ProxyHandler struct {
-	config       *Config
+	// cfg holds the configuration, shared with cacheManager; see config.
+	cfg          *atomic.Pointer[Config]
 	cacheManager *CacheManager
 	// forbidden, uncachable and forbiddenTunnels are swapped atomically by
 	// Reload, which runs concurrently with request-handling goroutines that
@@ -76,14 +77,24 @@ type ProxyHandler struct {
 
 var _ http.Handler = (*ProxyHandler)(nil)
 
+// config returns the configuration in effect; see CacheManager.config.
+func (ph *ProxyHandler) config() *Config {
+	return ph.cfg.Load()
+}
+
 // NewProxyHandler creates a new ProxyHandler.
 func NewProxyHandler(config *Config, cacheManager *CacheManager, forbidden, uncachable, forbiddenTunnels *ForbiddenList) *ProxyHandler {
 	ph := &ProxyHandler{
-		config:       config,
 		cacheManager: cacheManager,
 		viaName:      "go-polipo-" + strings.ToLower(rand.Text()[:8]),
 		crossOrigin:  http.NewCrossOriginProtection(),
 		stats:        newProxyStats(),
+	}
+	if cacheManager != nil && cacheManager.config() == config {
+		ph.cfg = cacheManager.cfg
+	} else {
+		ph.cfg = new(atomic.Pointer[Config])
+		ph.cfg.Store(config)
 	}
 	if name, err := os.Hostname(); err == nil {
 		ph.hostname = strings.ToLower(name)
@@ -164,7 +175,7 @@ func (ph *ProxyHandler) rewrite(pr *httputil.ProxyRequest) {
 		pr.In.URL.Path == "" && pr.In.URL.RawQuery == "" && !pr.In.URL.ForceQuery {
 		out.URL.Opaque = "*"
 	}
-	for _, h := range ph.config.CensoredHeaders {
+	for _, h := range ph.config().CensoredHeaders {
 		out.Header.Del(h)
 	}
 	ph.censorReferer(out)
@@ -191,14 +202,14 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 	if errors.Is(err, errForbiddenDestination) {
 		ph.stats.denied.Add(1)
 		setCacheAction(r, "") // a refusal, like the others before the cache
-		logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s: %v", r.Method, r.URL, err)
+		logf(ph.config().LogLevel, LogForbidden, "Denied: %s %s: %v", r.Method, r.URL, err)
 		http.Error(w, "Forbidden: destination address not allowed", http.StatusForbidden)
 		return
 	}
 	// relaxTransparency "maybe"/"true": a stale cache entry beats a raw
 	// error when the origin cannot be reached at all, unless the
 	// entry forbids being served stale (see canServeStale).
-	if ph.config.RelaxTransparency >= TristateMaybe {
+	if ph.config().RelaxTransparency >= TristateMaybe {
 		if staleResp, stale := ph.cacheManager.LookupStale(r); staleResp != nil {
 			defer func() { _ = staleResp.Body.Close() }()
 			if !stale || canServeStale(staleResp) {
@@ -221,7 +232,7 @@ func (ph *ProxyHandler) handleUpstreamError(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	ph.stats.upstreamErrors.Add(1)
-	logf(ph.config.LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
+	logf(ph.config().LogLevel, LogError, "Proxy error: %s %s: %v", r.Method, r.URL, err)
 	code, msg := upstreamErrorReply(err)
 	http.Error(w, msg, code)
 }
@@ -270,18 +281,18 @@ func upstreamErrorReply(err error) (int, string) {
 // keeps the previously loaded list rather than falling back to an empty one.
 func (ph *ProxyHandler) Reload() error {
 	forbidden := NewForbiddenList()
-	if err := forbidden.Load(ph.config.ForbiddenFile, ph.config.LogLevel); err != nil {
-		return fmt.Errorf("reload forbidden file %q: %w", ph.config.ForbiddenFile, err)
+	if err := forbidden.Load(ph.config().ForbiddenFile, ph.config().LogLevel); err != nil {
+		return fmt.Errorf("reload forbidden file %q: %w", ph.config().ForbiddenFile, err)
 	}
 	uncachable := NewForbiddenList()
-	if err := uncachable.Load(ph.config.UncachableFile, ph.config.LogLevel); err != nil {
-		return fmt.Errorf("reload uncachable file %q: %w", ph.config.UncachableFile, err)
+	if err := uncachable.Load(ph.config().UncachableFile, ph.config().LogLevel); err != nil {
+		return fmt.Errorf("reload uncachable file %q: %w", ph.config().UncachableFile, err)
 	}
 	forbiddenTunnels := NewForbiddenList()
-	if err := forbiddenTunnels.Load(ph.config.ForbiddenTunnelsFile, ph.config.LogLevel); err != nil {
-		return fmt.Errorf("reload forbiddenTunnels file %q: %w", ph.config.ForbiddenTunnelsFile, err)
+	if err := forbiddenTunnels.Load(ph.config().ForbiddenTunnelsFile, ph.config().LogLevel); err != nil {
+		return fmt.Errorf("reload forbiddenTunnels file %q: %w", ph.config().ForbiddenTunnelsFile, err)
 	}
-	warnIfForbiddenURLBlocked(ph.config, forbidden)
+	warnIfForbiddenURLBlocked(ph.config(), forbidden)
 	ph.forbidden.Store(forbidden)
 	ph.uncachable.Store(uncachable)
 	ph.forbiddenTunnels.Store(forbiddenTunnels)
@@ -338,7 +349,7 @@ func (ph *ProxyHandler) cacheResponse(resp *http.Response) error {
 	if needVia {
 		ph.addVia(resp.Header, resp.ProtoMajor, resp.ProtoMinor)
 	}
-	for _, h := range ph.config.CensoredHeaders {
+	for _, h := range ph.config().CensoredHeaders {
 		resp.Header.Del(h)
 	}
 	req := resp.Request
@@ -386,7 +397,7 @@ func answerClientValidators(resp *http.Response) {
 // over HTTP/major.minor, as RFC 9110 section 7.6.3 requires - unless
 // disableVia is set.
 func (ph *ProxyHandler) addVia(h http.Header, major, minor int) {
-	if !ph.config.DisableVia {
+	if !ph.config().DisableVia {
 		h.Add(headerVia, fmt.Sprintf("%d.%d %s", major, minor, ph.viaName))
 	}
 }
@@ -521,7 +532,7 @@ func (ph *ProxyHandler) addConditionalHeaders(outReq *http.Request, client clien
 	etag := cached.Header.Get(headerETag)
 	lm := cached.Header.Get(headerLastModified)
 	if responseVaries(cached) {
-		if client.present() || etag == "" || ph.config.DontTrustVaryETag >= TristateTrue {
+		if client.present() || etag == "" || ph.config().DontTrustVaryETag >= TristateTrue {
 			return false
 		}
 		outReq.Header.Set(headerIfNoneMatch, etag)
@@ -553,7 +564,7 @@ func (ph *ProxyHandler) censorReferer(outReq *http.Request) {
 	if referer == "" {
 		return
 	}
-	switch ph.config.CensorReferer {
+	switch ph.config().CensorReferer {
 	case TristateTrue:
 		outReq.Header.Del(headerReferer)
 	case TristateMaybe:
@@ -567,7 +578,7 @@ func (ph *ProxyHandler) censorReferer(outReq *http.Request) {
 // parseAllowedClients turns the textual allowedClients list into IPs and
 // networks once, so isClientAllowed does no parsing per request.
 func (ph *ProxyHandler) parseAllowedClients() {
-	for _, allowed := range ph.config.AllowedClients {
+	for _, allowed := range ph.config().AllowedClients {
 		if allowed == "all" || allowed == "*" {
 			ph.allowAll = true
 			return
@@ -576,14 +587,14 @@ func (ph *ProxyHandler) parseAllowedClients() {
 			if _, ipNet, err := net.ParseCIDR(allowed); err == nil {
 				ph.allowNets = append(ph.allowNets, ipNet)
 			} else {
-				logf(ph.config.LogLevel, LogWarn, "Warning: allowedClients: skipping invalid CIDR %q: %v", allowed, err)
+				logf(ph.config().LogLevel, LogWarn, "Warning: allowedClients: skipping invalid CIDR %q: %v", allowed, err)
 			}
 			continue
 		}
 		if ip := net.ParseIP(allowed); ip != nil {
 			ph.allowIPs = append(ph.allowIPs, ip)
 		} else {
-			logf(ph.config.LogLevel, LogWarn, "Warning: allowedClients: skipping invalid IP %q", allowed)
+			logf(ph.config().LogLevel, LogWarn, "Warning: allowedClients: skipping invalid IP %q", allowed)
 		}
 	}
 }
@@ -600,7 +611,7 @@ func (ph *ProxyHandler) dialContext(ctx context.Context, network, addr string) (
 // forbidLocalDestinations and forbidPrivateDestinations. Through SOCKS the
 // parent resolves the name, so there is no address here to check.
 func (ph *ProxyHandler) dial(ctx context.Context, network, addr string, toOrigin bool) (net.Conn, error) {
-	if t := ph.config.ServerTimeout; t > 0 {
+	if t := ph.config().ServerTimeout; t > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t)
 		defer cancel()
@@ -613,7 +624,7 @@ func (ph *ProxyHandler) dial(ctx context.Context, network, addr string, toOrigin
 	}
 
 	var d net.Dialer
-	if toOrigin && (ph.config.ForbidLocalDestinations || ph.config.ForbidPrivateDestinations) {
+	if toOrigin && (ph.config().ForbidLocalDestinations || ph.config().ForbidPrivateDestinations) {
 		d.Control = ph.checkDestination
 	}
 	return d.DialContext(ctx, network, addr)
@@ -624,10 +635,10 @@ func (ph *ProxyHandler) dial(ctx context.Context, network, addr string, toOrigin
 // long as it lives; see idleTimeoutConn.
 func (ph *ProxyHandler) dialUpstream(ctx context.Context, network, addr string) (net.Conn, error) {
 	conn, err := ph.dial(ctx, network, addr, !ph.viaParent)
-	if err != nil || ph.config.ServerTimeout <= 0 {
+	if err != nil || ph.config().ServerTimeout <= 0 {
 		return conn, err
 	}
-	return &idleTimeoutConn{Conn: conn, timeout: ph.config.ServerTimeout}, nil
+	return &idleTimeoutConn{Conn: conn, timeout: ph.config().ServerTimeout}, nil
 }
 
 // idleTimeoutConn fails a read or write once the connection has gone timeout
@@ -659,8 +670,8 @@ func (ph *ProxyHandler) createTransport() *http.Transport {
 	tr := &http.Transport{
 		DialContext:           ph.dialUpstream,
 		MaxIdleConns:          100,
-		IdleConnTimeout:       ph.config.ServerIdleTimeout,
-		ResponseHeaderTimeout: ph.config.ServerTimeout,
+		IdleConnTimeout:       ph.config().ServerIdleTimeout,
+		ResponseHeaderTimeout: ph.config().ServerTimeout,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		// A proxy passes the content on as the origin sent it (RFC 9110
@@ -669,13 +680,13 @@ func (ph *ProxyHandler) createTransport() *http.Transport {
 		DisableCompression: true,
 	}
 
-	if ph.config.ParentProxy != "" {
-		if parentURL, err := normalizeProxyURL(ph.config.ParentProxy); err == nil {
+	if ph.config().ParentProxy != "" {
+		if parentURL, err := normalizeProxyURL(ph.config().ParentProxy); err == nil {
 			tr.Proxy = http.ProxyURL(parentURL)
 			ph.viaParent = true
 			ph.parentURL = parentURL
 		} else {
-			logf(ph.config.LogLevel, LogWarn, "Warning: invalid parentProxy URL: %s", redactProxyURL(ph.config.ParentProxy))
+			logf(ph.config().LogLevel, LogWarn, "Warning: invalid parentProxy URL: %s", redactProxyURL(ph.config().ParentProxy))
 		}
 	}
 
@@ -732,7 +743,7 @@ func (ph *ProxyHandler) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	// 1. Allowed Clients verification
 	if !ph.isClientAllowed(req.RemoteAddr) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "Denied: client %s not allowed", req.RemoteAddr)
+		logf(ph.config().LogLevel, LogForbidden, "Denied: client %s not allowed", req.RemoteAddr)
 		http.Error(w, "Access Denied: Client IP not allowed", http.StatusForbidden)
 		return
 	}
@@ -744,12 +755,12 @@ func (ph *ProxyHandler) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	// 1.4 Proxy authentication (authCredentials)
 	if !ph.isAuthorized(req) && !ph.isPublicDocument(req) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
+		logf(ph.config().LogLevel, LogForbidden, "Denied: %s failed authentication for %s", req.RemoteAddr, req.RequestURI)
 		if originForm {
-			w.Header().Set(headerWWWAuthenticate, fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
+			w.Header().Set(headerWWWAuthenticate, fmt.Sprintf("Basic realm=%q", ph.config().AuthRealm))
 			http.Error(w, "Authentication Required", http.StatusUnauthorized)
 		} else {
-			w.Header().Set(headerProxyAuthenticate, fmt.Sprintf("Basic realm=%q", ph.config.AuthRealm))
+			w.Header().Set(headerProxyAuthenticate, fmt.Sprintf("Basic realm=%q", ph.config().AuthRealm))
 			http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
 		}
 		return
@@ -807,12 +818,12 @@ func (ph *ProxyHandler) serveHTTP(w http.ResponseWriter, req *http.Request) {
 // the browser round in a loop; checking it here rather than at startup
 // covers lists reloaded later.
 func (ph *ProxyHandler) denyForbidden(w http.ResponseWriter, req *http.Request, target string, forbidden *ForbiddenList) {
-	if to := ph.config.ForbiddenURL; to != "" && req.Method != http.MethodConnect && !forbiddenURLBlocked(to, forbidden) {
-		logf(ph.config.LogLevel, LogForbidden, "Denied: %s is blacklisted; redirected to %s", target, to)
-		http.Redirect(w, req, to, ph.config.ForbiddenRedirectCode)
+	if to := ph.config().ForbiddenURL; to != "" && req.Method != http.MethodConnect && !forbiddenURLBlocked(to, forbidden) {
+		logf(ph.config().LogLevel, LogForbidden, "Denied: %s is blacklisted; redirected to %s", target, to)
+		http.Redirect(w, req, to, ph.config().ForbiddenRedirectCode)
 		return
 	}
-	logf(ph.config.LogLevel, LogForbidden, "Denied: %s is blacklisted", target)
+	logf(ph.config().LogLevel, LogForbidden, "Denied: %s is blacklisted", target)
 	http.Error(w, "Forbidden: URL is blacklisted", http.StatusForbidden)
 }
 
@@ -848,7 +859,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 	if path == "/polipo" || path == "/polipo/" {
 		index := ""
-		if !ph.config.DisableIndexing {
+		if !ph.config().DisableIndexing {
 			index = "\n<li><a href=\"/polipo/index?\">Disk cache index</a></li>"
 		}
 		w.Header().Set(headerContentType, "text/html; charset=utf-8")
@@ -883,11 +894,11 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 		}
 		stats, err := ph.cacheManager.Expire()
 		if err != nil {
-			logf(ph.config.LogLevel, LogError, "Cache flush failed: %v", err)
+			logf(ph.config().LogLevel, LogError, "Cache flush failed: %v", err)
 			http.Error(w, fmt.Sprintf("Cache flush failed: %v", err), http.StatusInternalServerError)
 			return
 		}
-		logf(ph.config.LogLevel, LogInfo, "Cache flush: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale, %d to stay under diskCacheMaxSize), freed %d bytes",
+		logf(ph.config().LogLevel, LogInfo, "Cache flush: scanned %d, removed %d (%d for exceeding diskCacheTruncateSize while stale, %d to stay under diskCacheMaxSize), freed %d bytes",
 			stats.Scanned, stats.Removed, stats.RemovedForSize, stats.RemovedForLimit, stats.Freed)
 		w.Header().Set(headerContentType, "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<html><head><title>go-polipo Cache Flush</title></head>
@@ -910,11 +921,11 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if err := ph.Reload(); err != nil {
-			logf(ph.config.LogLevel, LogError, "Reload failed: %v", err)
+			logf(ph.config().LogLevel, LogError, "Reload failed: %v", err)
 			http.Error(w, fmt.Sprintf("Reload failed: %v", err), http.StatusInternalServerError)
 			return
 		}
-		logf(ph.config.LogLevel, LogInfo, "Reloaded forbidden/uncachable lists")
+		logf(ph.config().LogLevel, LogInfo, "Reloaded forbidden/uncachable lists")
 		http.Redirect(w, req, "/polipo/", http.StatusSeeOther)
 		return
 	}
@@ -934,7 +945,7 @@ func (ph *ProxyHandler) handleLocal(w http.ResponseWriter, req *http.Request) {
 <table border="1" cellpadding="5" cellspacing="0">
 <tr><th>Variable</th><th>Value</th></tr>
 `)
-		for _, e := range ph.config.Entries() {
+		for _, e := range ph.config().Entries() {
 			fmt.Fprintf(w, "<tr><td>%s</td><td>%s</td></tr>\n",
 				html.EscapeString(string(e.Name)), html.EscapeString(e.Value))
 		}
@@ -989,18 +1000,18 @@ func (ph *ProxyHandler) serveOriginForm(w http.ResponseWriter, req *http.Request
 	// /polipo/flush. Polipo checked neither.
 	if !ph.isLocalHostAllowed(req.Host) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "Denied: %s asked for %s with Host %q", req.RemoteAddr, req.URL.Path, req.Host)
+		logf(ph.config().LogLevel, LogForbidden, "Denied: %s asked for %s with Host %q", req.RemoteAddr, req.URL.Path, req.Host)
 		http.Error(w, "Forbidden: Host does not name this proxy", http.StatusForbidden)
 		return
 	}
 	if err := ph.crossOrigin.Check(req); err != nil {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "Denied: %s %s from %s: %v", req.Method, req.URL.Path, req.RemoteAddr, err)
+		logf(ph.config().LogLevel, LogForbidden, "Denied: %s %s from %s: %v", req.Method, req.URL.Path, req.RemoteAddr, err)
 		http.Error(w, "Forbidden: cross-site request", http.StatusForbidden)
 		return
 	}
 
-	if !ph.config.DisableLocalInterface && strings.HasPrefix(req.URL.Path, "/polipo") {
+	if !ph.config().DisableLocalInterface && strings.HasPrefix(req.URL.Path, "/polipo") {
 		ph.handleLocal(w, req)
 		return
 	}
@@ -1050,7 +1061,7 @@ func (ph *ProxyHandler) isLocalHostAllowed(host string) bool {
 	host = strings.ToLower(host)
 	return host == "localhost" ||
 		ph.hostname != "" && host == ph.hostname ||
-		host == strings.ToLower(ph.config.ProxyAddress)
+		host == strings.ToLower(ph.config().ProxyAddress)
 }
 
 // isAuthorized reports whether req carries valid proxy credentials. It
@@ -1061,7 +1072,7 @@ func (ph *ProxyHandler) isLocalHostAllowed(host string) bool {
 // Proxy-Authorization - Polipo makes the same split, since only one of the
 // two headers is meaningful depending on how the client is talking to it.
 func (ph *ProxyHandler) isAuthorized(req *http.Request) bool {
-	if ph.config.AuthCredentials == "" {
+	if ph.config().AuthCredentials == "" {
 		return true
 	}
 
@@ -1079,7 +1090,7 @@ func (ph *ProxyHandler) isAuthorized(req *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	return subtle.ConstantTimeCompare(decoded, []byte(ph.config.AuthCredentials)) == 1
+	return subtle.ConstantTimeCompare(decoded, []byte(ph.config().AuthCredentials)) == 1
 }
 
 // requestPort returns the TCP port a forwarded (non-CONNECT) request targets.
@@ -1111,21 +1122,21 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// CONNECT port verification
 	host, portStr, err := net.SplitHostPort(req.RequestURI)
 	if err != nil {
-		logf(ph.config.LogLevel, LogError, "CONNECT rejected: invalid host %q: %v", req.RequestURI, err)
+		logf(ph.config().LogLevel, LogError, "CONNECT rejected: invalid host %q: %v", req.RequestURI, err)
 		http.Error(w, "Invalid CONNECT host", http.StatusBadRequest)
 		return
 	}
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		logf(ph.config.LogLevel, LogError, "CONNECT rejected: invalid port %q: %v", portStr, err)
+		logf(ph.config().LogLevel, LogError, "CONNECT rejected: invalid port %q: %v", portStr, err)
 		http.Error(w, "Invalid CONNECT port", http.StatusBadRequest)
 		return
 	}
 
-	if !ph.config.TunnelAllowedPorts.Contains(port) {
+	if !ph.config().TunnelAllowedPorts.Contains(port) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: port %d not allowed (target=%s)", port, req.RequestURI)
+		logf(ph.config().LogLevel, LogForbidden, "CONNECT rejected: port %d not allowed (target=%s)", port, req.RequestURI)
 		http.Error(w, "CONNECT port not allowed", http.StatusForbidden)
 		return
 	}
@@ -1140,7 +1151,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// do_tunnel before ever calling urlForbidden).
 	if ph.forbiddenTunnels.Load().MatchTunnel(req.RequestURI, host) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: %s is on forbiddenTunnelsFile", req.RequestURI)
+		logf(ph.config().LogLevel, LogForbidden, "CONNECT rejected: %s is on forbiddenTunnelsFile", req.RequestURI)
 		http.Error(w, "Forbidden: tunnel target is blacklisted", http.StatusForbidden)
 		return
 	}
@@ -1149,12 +1160,12 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	// any ResponseWriter wrapper that has an Unwrap method.
 	clientConn, brw, err := http.NewResponseController(w).Hijack()
 	if errors.Is(err, http.ErrNotSupported) {
-		logf(ph.config.LogLevel, LogError, "CONNECT failed: hijacking not supported (target=%s)", req.RequestURI)
+		logf(ph.config().LogLevel, LogError, "CONNECT failed: hijacking not supported (target=%s)", req.RequestURI)
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
 		return
 	}
 	if err != nil {
-		logf(ph.config.LogLevel, LogError, "CONNECT failed: hijack error (target=%s): %v", req.RequestURI, err)
+		logf(ph.config().LogLevel, LogError, "CONNECT failed: hijack error (target=%s): %v", req.RequestURI, err)
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -1175,14 +1186,14 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	}
 	if errors.Is(err, errForbiddenDestination) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "CONNECT rejected: %v (target=%s)", err, req.RequestURI)
+		logf(ph.config().LogLevel, LogForbidden, "CONNECT rejected: %v (target=%s)", err, req.RequestURI)
 		clientConn.Write([]byte("HTTP/1.1 403 Forbidden\r\n\r\n"))
 		rec.setStatus(http.StatusForbidden)
 		return
 	}
 	if err != nil {
 		ph.stats.tunnelFailures.Add(1)
-		logf(ph.config.LogLevel, LogError, "CONNECT failed: dial %s: %v", req.RequestURI, err)
+		logf(ph.config().LogLevel, LogError, "CONNECT failed: dial %s: %v", req.RequestURI, err)
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		rec.setStatus(http.StatusBadGateway)
 		return
@@ -1201,7 +1212,7 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 		earlySent = int64(n)
 		if _, err := destConn.Write(early); err != nil {
 			ph.stats.tunnelFailures.Add(1)
-			logf(ph.config.LogLevel, LogError, "CONNECT failed: write to %s: %v", req.RequestURI, err)
+			logf(ph.config().LogLevel, LogError, "CONNECT failed: write to %s: %v", req.RequestURI, err)
 			clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 			rec.setStatus(http.StatusBadGateway)
 			return
@@ -1218,11 +1229,11 @@ func (ph *ProxyHandler) handleConnect(w http.ResponseWriter, req *http.Request) 
 	}
 	ph.stats.tunnels.Add(1)
 	var received, sent int64
-	if t := ph.config.TunnelIdleTimeout; t > 0 {
+	if t := ph.config().TunnelIdleTimeout; t > 0 {
 		var expired bool
 		received, sent, expired = tunnelWithIdleTimeout(clientConn, destConn, t)
 		if expired {
-			logf(ph.config.LogLevel, LogInfo, "CONNECT %s closed after %v without traffic", req.RequestURI, t)
+			logf(ph.config().LogLevel, LogInfo, "CONNECT %s closed after %v without traffic", req.RequestURI, t)
 		}
 	} else {
 		received, sent = tunnel(clientConn, destConn)
@@ -1340,9 +1351,9 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// Refuse to forward to a port outside allowedPorts. Without this the proxy
 	// can be driven to arbitrary TCP services (SMTP relay, SSRF to internal
 	// ports). CONNECT is filtered separately by tunnelAllowedPorts.
-	if port := requestPort(req); !ph.config.AllowedPorts.Contains(port) {
+	if port := requestPort(req); !ph.config().AllowedPorts.Contains(port) {
 		ph.stats.denied.Add(1)
-		logf(ph.config.LogLevel, LogForbidden, "Denied: port %d not in allowedPorts (target=%s)", port, req.URL)
+		logf(ph.config().LogLevel, LogForbidden, "Denied: port %d not in allowedPorts (target=%s)", port, req.URL)
 		http.Error(w, "Forbidden: target port not allowed", http.StatusForbidden)
 		return
 	}
@@ -1351,7 +1362,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// it: a loop, typically a parentProxy that leads back here. Polipo
 	// answered it the same way.
 	if viaNames(req.Header, ph.viaName) {
-		logf(ph.config.LogLevel, LogError, "Proxy loop detected: %s %s", req.Method, req.URL)
+		logf(ph.config().LogLevel, LogError, "Proxy loop detected: %s %s", req.Method, req.URL)
 		http.Error(w, "Proxy loop detected", http.StatusGatewayTimeout)
 		return
 	}
@@ -1366,7 +1377,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 
 	// proxyOffline: never contact the origin. Whatever is cached (fresh or
 	// stale) is served as-is; a true miss is a 502, not a network attempt.
-	if ph.config.ProxyOffline {
+	if ph.config().ProxyOffline {
 		ph.serveOffline(w, req)
 		return
 	}
@@ -1383,7 +1394,7 @@ func (ph *ProxyHandler) handleForward(w http.ResponseWriter, req *http.Request) 
 	// without even attempting to reach the origin - only a true miss, or an
 	// entry that forbids being served stale (see canServeStale), falls
 	// through to the network.
-	if ph.config.RelaxTransparency >= TristateTrue {
+	if ph.config().RelaxTransparency >= TristateTrue {
 		if staleResp, stale := ph.cacheManager.LookupStale(req); staleResp != nil {
 			defer func() { _ = staleResp.Body.Close() }()
 			if !stale || canServeStale(staleResp) {

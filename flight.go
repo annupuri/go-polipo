@@ -129,7 +129,7 @@ func (ph *ProxyHandler) followersMayWait(resp *http.Response) bool {
 	if resp.StatusCode != http.StatusOK || responseVaries(resp) || responseHasNoCache(resp) {
 		return false
 	}
-	limit := ph.config.MemoryCacheMaxEntrySize
+	limit := ph.config().MemoryCacheMaxEntrySize
 	if resp.ContentLength < 0 || limit >= 0 && resp.ContentLength > limit {
 		return false
 	}

@@ -74,7 +74,7 @@ func isLocalInterfacePath(p string) bool {
 // allowedClients and the Host check still apply. Polipo asked for the
 // credentials here too.
 func (ph *ProxyHandler) isPublicDocument(req *http.Request) bool {
-	return ph.config.LocalDocumentRoot != "" && isOriginForm(req) &&
+	return ph.config().LocalDocumentRoot != "" && isOriginForm(req) &&
 		(req.Method == http.MethodGet || req.Method == http.MethodHead) &&
 		!isLocalInterfacePath(req.URL.Path) &&
 		strings.EqualFold(path.Ext(req.URL.Path), ".pac")
@@ -84,7 +84,7 @@ func (ph *ProxyHandler) isPublicDocument(req *http.Request) bool {
 // interface from localDocumentRoot, and reports false, having written
 // nothing, when there is no localDocumentRoot to look in.
 func (ph *ProxyHandler) serveLocalDocument(w http.ResponseWriter, req *http.Request) bool {
-	root := ph.config.LocalDocumentRoot
+	root := ph.config().LocalDocumentRoot
 	if root == "" || isLocalInterfacePath(req.URL.Path) {
 		return false
 	}
@@ -96,7 +96,7 @@ func (ph *ProxyHandler) serveLocalDocument(w http.ResponseWriter, req *http.Requ
 
 	dir, err := os.OpenRoot(root)
 	if err != nil {
-		logf(ph.config.LogLevel, LogWarn, "Warning: cannot open localDocumentRoot %s: %v", root, err)
+		logf(ph.config().LogLevel, LogWarn, "Warning: cannot open localDocumentRoot %s: %v", root, err)
 		http.NotFound(w, req)
 		return true
 	}
@@ -123,14 +123,14 @@ func (ph *ProxyHandler) serveLocalDocument(w http.ResponseWriter, req *http.Requ
 	}
 	if err != nil || !info.Mode().IsRegular() {
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			logf(ph.config.LogLevel, LogWarn, "Warning: localDocumentRoot: %s: %v", req.URL.Path, err)
+			logf(ph.config().LogLevel, LogWarn, "Warning: localDocumentRoot: %s: %v", req.URL.Path, err)
 		}
 		http.NotFound(w, req)
 		return true
 	}
 	f, err := dir.Open(name)
 	if err != nil {
-		logf(ph.config.LogLevel, LogWarn, "Warning: localDocumentRoot: %s: %v", req.URL.Path, err)
+		logf(ph.config().LogLevel, LogWarn, "Warning: localDocumentRoot: %s: %v", req.URL.Path, err)
 		http.NotFound(w, req)
 		return true
 	}
