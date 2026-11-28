@@ -28,7 +28,7 @@ const trimTarget = 0.9
 // entry larger than the whole cache could only be removed again at once.
 // -1 means no limit.
 func (cm *CacheManager) effectiveMaxDiskEntrySize() int64 {
-	entryMax, total := cm.config.MaxDiskCacheEntrySize, cm.config.DiskCacheMaxSize
+	entryMax, total := cm.config().MaxDiskCacheEntrySize, cm.config().DiskCacheMaxSize
 	switch {
 	case total < 0:
 		return entryMax
@@ -73,7 +73,7 @@ type diskFile struct {
 func (cm *CacheManager) walkDiskFiles() ([]diskFile, int64) {
 	var files []diskFile
 	var total int64
-	_ = filepath.WalkDir(cm.config.DiskCacheRoot, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(cm.config().DiskCacheRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || strings.HasPrefix(d.Name(), cacheTempPrefix) {
 			return nil
 		}
@@ -91,7 +91,7 @@ func (cm *CacheManager) walkDiskFiles() ([]diskFile, int64) {
 // maybeTrim starts trimDisk in the background when the disk cache is known
 // to be over diskCacheMaxSize and no trim is running already.
 func (cm *CacheManager) maybeTrim() {
-	limit := cm.config.DiskCacheMaxSize
+	limit := cm.config().DiskCacheMaxSize
 	if limit < 0 || !cm.diskSizeKnown.Load() || cm.diskSize.Load() <= limit {
 		return
 	}
@@ -102,7 +102,7 @@ func (cm *CacheManager) maybeTrim() {
 		defer cm.trimming.Store(false)
 		removed, freed := cm.trimDisk()
 		if removed > 0 {
-			logf(cm.config.LogLevel, LogInfo, "Disk cache over diskCacheMaxSize (%d bytes): removed %d entries, freed %d bytes",
+			logf(cm.config().LogLevel, LogInfo, "Disk cache over diskCacheMaxSize (%d bytes): removed %d entries, freed %d bytes",
 				limit, removed, freed)
 		}
 	}()
@@ -116,7 +116,7 @@ func (cm *CacheManager) maybeTrim() {
 // be removed (Windows does not remove a file being read) is left for the
 // next trim.
 func (cm *CacheManager) trimDisk() (removed int, freed int64) {
-	limit := cm.config.DiskCacheMaxSize
+	limit := cm.config().DiskCacheMaxSize
 	if limit < 0 || cm.isDiskCacheDisabled() {
 		return 0, 0
 	}

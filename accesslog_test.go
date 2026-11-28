@@ -41,7 +41,7 @@ func (b *syncBuffer) String() string {
 // withAccessLog turns on ph's access log, writing to the returned buffer.
 func withAccessLog(ph *ProxyHandler) *syncBuffer {
 	buf := &syncBuffer{}
-	ph.accessLog = newAccessLogger(buf, ph.config.LogLevel)
+	ph.accessLog = newAccessLogger(buf, ph.config().LogLevel)
 	return buf
 }
 

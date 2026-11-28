@@ -42,7 +42,7 @@ type indexEntry struct {
 // indexDiskEntries lists the disk cache under prefix, sorted by URL, and
 // returns at most limit rows and the number there are in all.
 func (cm *CacheManager) indexDiskEntries(prefix string, recursive bool, limit int) ([]indexEntry, int) {
-	root := cm.config.DiskCacheRoot
+	root := cm.config().DiskCacheRoot
 	var rows []indexEntry
 	dirs := map[string]bool{}
 	addDir := func(loc string) {
@@ -179,7 +179,7 @@ var indexPage = template.Must(template.New("index").Funcs(template.FuncMap{
 
 // serveIndex answers /polipo/index and /polipo/recursive-index.
 func (ph *ProxyHandler) serveIndex(w http.ResponseWriter, req *http.Request, recursive bool) {
-	if ph.config.DisableIndexing {
+	if ph.config().DisableIndexing {
 		http.Error(w, "Forbidden: disableIndexing is true", http.StatusForbidden)
 		return
 	}
@@ -203,6 +203,6 @@ func (ph *ProxyHandler) serveIndex(w http.ResponseWriter, req *http.Request, rec
 	w.Header().Set(headerContentType, "text/html; charset=utf-8")
 	w.Header().Set(headerCacheControl, "no-store")
 	if err := indexPage.Execute(w, data); err != nil {
-		logf(ph.config.LogLevel, LogError, "Cache index: %v", err)
+		logf(ph.config().LogLevel, LogError, "Cache index: %v", err)
 	}
 }

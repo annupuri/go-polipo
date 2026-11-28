@@ -122,7 +122,7 @@ func (cm *CacheManager) promote(key string, resp *http.Response, birth time.Time
 	if cm.memCache == nil {
 		return
 	}
-	limit := cm.config.MemoryCacheMaxEntrySize
+	limit := cm.config().MemoryCacheMaxEntrySize
 	if limit >= 0 && resp.ContentLength > limit {
 		return
 	}
