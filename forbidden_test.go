@@ -192,3 +192,45 @@ google.co.jp # inline comment
 		t.Errorf("expected 0 compiled regexps, got %d", len(flInvalid.Regexps))
 	}
 }
+
+// TestForbiddenMatchTrailingDot: "example.com." is the same host as
+// "example.com", so a trailing dot must not get a request past the lists.
+func TestForbiddenMatchTrailingDot(t *testing.T) {
+	fl := NewForbiddenList()
+	fl.Domains = []string{"blocked.example.com"}
+	fl.Regexps = []*regexp.Regexp{regexp.MustCompile(`^http://ads\.example\.org/`)}
+	for _, tc := range []struct {
+		url, host string
+		want      bool
+	}{
+		{"http://blocked.example.com./x", "blocked.example.com.", true},
+		{"http://www.blocked.example.com./x", "www.blocked.example.com.", true},
+		{"http://BLOCKED.example.com../x", "BLOCKED.example.com..", true},
+		{"http://blocked.example.com.:8080/x", "blocked.example.com.:8080", true},
+		{"http://ads.example.org./banner", "ads.example.org.", true},
+		{"http://ads.example.org.:8080/banner", "ads.example.org.:8080", false}, // the regex names no port
+		{"http://example.com./", "example.com.", false},
+		{"http://[::1]:8080/", "[::1]:8080", false},
+	} {
+		if got := fl.Match(tc.url, tc.host); got != tc.want {
+			t.Errorf("Match(%q, %q) = %v, want %v", tc.url, tc.host, got, tc.want)
+		}
+	}
+
+	tunnels := NewForbiddenList()
+	tunnels.Domains = []string{"blocked.example.com"}
+	tunnels.Regexps = []*regexp.Regexp{regexp.MustCompile(`^tunnel\.example\.net:443$`)}
+	for _, tc := range []struct {
+		hostPort, host string
+		want           bool
+	}{
+		{"blocked.example.com.:443", "blocked.example.com.", true},
+		{"tunnel.example.net.:443", "tunnel.example.net.", true},
+		{"tunnel.example.net..:443", "tunnel.example.net..", true},
+		{"other.example.net.:443", "other.example.net.", false},
+	} {
+		if got := tunnels.MatchTunnel(tc.hostPort, tc.host); got != tc.want {
+			t.Errorf("MatchTunnel(%q, %q) = %v, want %v", tc.hostPort, tc.host, got, tc.want)
+		}
+	}
+}

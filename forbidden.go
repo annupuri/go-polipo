@@ -107,22 +107,43 @@ func (f *ForbiddenList) loadFile(filePath string, logLevel int) error {
 // regex list is matched against the full "host:port" string rather than a
 // "http://"-prefixed URL, since a CONNECT target never carries a scheme.
 func (f *ForbiddenList) MatchTunnel(hostPort, host string) bool {
-	host = strings.ToLower(host)
+	host = strings.TrimRight(strings.ToLower(host), ".")
 	for _, domain := range f.Domains {
 		if host == domain {
 			return true
 		}
 	}
+	canonical := trimHostDots(hostPort)
 	for _, re := range f.Regexps {
-		if re.MatchString(hostPort) {
+		if re.MatchString(hostPort) || canonical != hostPort && re.MatchString(canonical) {
 			return true
 		}
 	}
 	return false
 }
 
+// trimHostDots removes the dots that end the host of hostPort ("host",
+// "host:port" or "[v6]:port"). "example.com." names the same host as
+// "example.com" (an absolute DNS name), and resolves the same, so without
+// this a trailing dot would get a request past every list entry for it.
+func trimHostDots(hostPort string) string {
+	host, port := hostPort, ""
+	if i := strings.LastIndexByte(hostPort, ':'); i >= 0 && !strings.Contains(hostPort[i:], "]") {
+		host, port = hostPort[:i], hostPort[i:]
+	}
+	return strings.TrimRight(host, ".") + port
+}
+
 // Match returns true if the URL or host matches the forbidden list.
 func (f *ForbiddenList) Match(urlStr, host string) bool {
+	// A host ending in dots is the same host without them; the regexes
+	// are tried on the URL both as it is and with the host so written.
+	canonicalURL := urlStr
+	if canonical := trimHostDots(host); canonical != host {
+		canonicalURL = strings.Replace(urlStr, "://"+host, "://"+canonical, 1)
+		host = canonical
+	}
+
 	// Strip port from host if present
 	hostName := host
 	if idx := strings.Index(host, ":"); idx != -1 {
@@ -140,7 +161,7 @@ func (f *ForbiddenList) Match(urlStr, host string) bool {
 
 	// Check regex match against the full URL
 	for _, re := range f.Regexps {
-		if re.MatchString(urlStr) {
+		if re.MatchString(urlStr) || canonicalURL != urlStr && re.MatchString(canonicalURL) {
 			return true
 		}
 	}

@@ -203,13 +203,15 @@ func TestProxyForbiddenFiltering(t *testing.T) {
 	uncachable := NewForbiddenList()
 	ph := NewProxyHandler(cfg, cm, forbidden, uncachable, NewForbiddenList())
 
-	req := httptest.NewRequest(http.MethodGet, "http://badsite.com/index.html", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
-	rr := httptest.NewRecorder()
+	for _, target := range []string{"http://badsite.com/index.html", "http://badsite.com./index.html"} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		rr := httptest.NewRecorder()
 
-	ph.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("expected 403, got %d", rr.Code)
+		ph.ServeHTTP(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("%s: expected 403, got %d", target, rr.Code)
+		}
 	}
 }
 
